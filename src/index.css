@@ -1,0 +1,41 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --sg-blue: #2F6BFF;
+  --sg-cyan: #00A6D6;
+  --sg-bg: #F5F5F7;
+  --sg-text: #1D1D1F;
+  --sg-muted: #6E6E73;
+}
+
+html, body, #root { height: 100%; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: #06060B;
+  background-image:
+    radial-gradient(1100px circle at 12% -10%, rgba(47,107,255,0.35), transparent 60%),
+    radial-gradient(1000px circle at 105% 10%, rgba(0,166,214,0.32), transparent 55%),
+    radial-gradient(800px circle at 15% 105%, rgba(0,166,214,0.18), transparent 50%),
+    radial-gradient(900px circle at 95% 100%, rgba(47,107,255,0.22), transparent 55%);
+  background-attachment: fixed;
+  background-size: cover;
+}
+
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+::selection { background: rgba(47,107,255,0.25); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

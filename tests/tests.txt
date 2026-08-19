@@ -1,0 +1,50 @@
+# Tests
+
+## Test 1 - Dashboard loads seeded business data [sanity]
+Viewport: desktop
+Covers: seed bootstrap, dashboard aggregation endpoint (GET /api/dashboard), revenue/profit calculation display
+Description: Verifies the app seeds demo data on first load and the owner dashboard renders real computed metrics.
+
+Steps:
+1. Open the app (Dashboard tab is shown by default for the Business Owner role)
+2. Wait for the dashboard stats to load
+
+Expected: The dashboard shows a "Revenue" stat card with a KES amount greater than 0, and either today's appointments count or the low stock/top staff sections render with real data (not placeholders).
+
+## Test 2 - Book an appointment and prevent a double-booking
+Viewport: desktop
+Covers: appointment creation (POST /api/appointments), staff availability conflict check, calendar persistence after reload (GET /api/appointments)
+Description: Verifies a new appointment can be created and that booking the same staff member at an overlapping time is rejected.
+
+Steps:
+1. Go to the Appointments tab
+2. Create a new appointment for staff "Kevin Otieno" for today at 09:15 for the "Skin Fade" service with a new customer name "Test Client"
+3. Attempt to create a second appointment for "Kevin Otieno" today at the same 09:15 time slot with a different customer name
+4. Refresh the page and open the Appointments tab again
+
+Expected: The first appointment for "Test Client" is created and still visible after reload. The second, overlapping booking attempt shows a visible conflict error message and is not added to the calendar.
+
+## Test 3 - Complete a POS sale and update inventory and customer records
+Viewport: desktop
+Covers: POS cart and checkout (POST /api/orders), inventory stock deduction, customer loyalty/spend update, receipt confirmation
+Description: Verifies a checkout transaction persists an order, reduces product stock, and updates the customer's spend and loyalty points.
+
+Steps:
+1. Go to the Inventory tab and note the current stock number shown for "Matte Pomade"
+2. Go to the Point of Sale tab, select customer "James Kariuki", add the "Regular Haircut" service and assign staff "Kevin Otieno" to it, then add one "Matte Pomade" product to the cart
+3. Complete the checkout with payment method "Cash"
+4. Go back to the Inventory tab
+
+Expected: A payment confirmation receipt is shown after checkout, and "Matte Pomade" stock is now one unit lower than the number noted in step 1.
+
+## Test 4 - Join the digital queue and advance a customer to in-service
+Viewport: mobile
+Covers: queue join workflow (POST /api/queue), real-time queue status transitions (PUT /api/queue/:id), mobile responsive layout
+Description: Verifies a walk-in customer can join the digital queue and staff can call them into service.
+
+Steps:
+1. Go to the Queue tab
+2. Join the queue with customer name "Walk-in Tester" for the "Beard Trim & Shape" service
+3. Find "Walk-in Tester" in the Waiting column and select the option to call them into service
+
+Expected: "Walk-in Tester" moves from the Waiting column into the In Service column without any page error.
