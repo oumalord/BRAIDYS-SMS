@@ -108,6 +108,7 @@ export interface Product {
   id: string;
   name: string;
   category: string;
+  color?: string;
   price: number;
   cost: number;
   stock: number;
@@ -150,7 +151,28 @@ export interface Expense {
   date: string;
 }
 
-export type Role = 'owner' | 'manager' | 'receptionist' | 'barber' | 'customer';
+export interface PayoutBatch {
+  id: string;
+  range: 'today' | 'week' | 'month' | 'all';
+  from: number;
+  to: number;
+  totalKES: number;
+  employeeCount: number;
+  itemCount: number;
+  status: 'recorded';
+  createdAt: number;
+}
+
+export interface PayrollResult {
+  id: string;
+  totalKES: number;
+  employeeCount: number;
+  sentCount: number;
+  failedCount: number;
+  status: 'submitted' | 'failed';
+}
+
+export type Role = 'owner' | 'manager' | 'receptionist' | 'barber' | 'customer' | 'admin';
 
 export type ChatChannel = string;
 
@@ -167,6 +189,7 @@ export interface DashboardData {
   range: string;
   revenueByCurrency: Record<string, number>;
   ordersCount: number;
+  paymentMethodTotals: Record<'Cash' | 'Card' | 'M-Pesa', number>;
   expenseTotal: number;
   productCost: number;
   commissionsByCurrency: Record<string, number>;

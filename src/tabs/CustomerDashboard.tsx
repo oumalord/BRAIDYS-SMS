@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { CalendarCheck, CheckCircle2, Clock3, Crown, History, MessageSquare, Star, Ticket } from 'lucide-react';
-import { AppointmentsApi, CustomerApi, MembershipsApi, ReviewsApi, fmtKES } from '../lib/api';
+import { CalendarCheck, Clock3, Crown, History, MessageSquare, Star, Ticket } from 'lucide-react';
+import { CustomerApi, MembershipsApi, ReviewsApi, fmtKES } from '../lib/api';
 import { MpesaPayModal } from '../components/MpesaPay';
 import { Badge, Button, Card, Field, Input, LoadingState, Modal, Select, Textarea, toast } from '../components/ui';
 import type { Appointment, Customer, MembershipPlan, Review } from '../types';
@@ -60,7 +60,6 @@ function CustomerDashboard({ onBook }: { onBook: () => void }) {
   );
 
   const reviewedAppointmentIds = new Set(data.reviews.map(review => review.appointmentId));
-  const completed = data.appointments.filter(appointment => appointment.status === 'completed');
   const activeQueue = data.queue.find(item => item.status !== 'completed');
   const activeMembership = data.customer.membershipTier && data.customer.membershipTier !== 'none';
 

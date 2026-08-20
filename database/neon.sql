@@ -22,6 +22,7 @@ CREATE INDEX IF NOT EXISTS app_records_record_gin_idx
 ALTER TABLE app_records ADD COLUMN IF NOT EXISTS tenant_id TEXT;
 CREATE INDEX IF NOT EXISTS app_records_tenant_collection_idx ON app_records (tenant_id, collection);
 CREATE INDEX IF NOT EXISTS app_records_branch_idx ON app_records ((record->>'branchId'), collection);
+CREATE INDEX IF NOT EXISTS app_records_payment_method_idx ON app_records ((record->>'paymentMethod')) WHERE collection = 'orders';
 
 -- Existing demo data belongs to the first example salon.
 DROP TRIGGER IF EXISTS app_records_no_delete ON app_records;

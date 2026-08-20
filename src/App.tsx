@@ -45,8 +45,7 @@ const TABS: { key: TabKey; label: string; icon: any; roles: Role[] }[] = [
 
 function normalizeRole(role: unknown): Role {
   const value = String(role || '').trim().toLowerCase();
-  if (value === 'owner' || value === 'manager' || value === 'receptionist' || value === 'barber' || value === 'customer') return value;
-  if (value === 'admin') return 'owner';
+  if (value === 'owner' || value === 'manager' || value === 'receptionist' || value === 'barber' || value === 'customer' || value === 'admin') return value;
   if (value.includes('nail')) return 'barber';
   if (value.includes('hair') || value.includes('stylist') || value.includes('spa') || value.includes('makeup')) return 'barber';
   return 'barber';
@@ -59,7 +58,7 @@ function initialTabFor(account: any | null): TabKey {
 }
 
 function SelectBranch({ branches, value, onChange }: { branches: Branch[]; value: string; onChange: (value: string) => void }) {
-  return <label className="flex items-center gap-2 text-xs text-gray-300"><span className="hidden lg:inline">Working branch</span><select aria-label="Working branch" value={value} onChange={event => onChange(event.target.value)} className="rounded-lg border border-white/20 bg-black/30 px-2 py-1.5 text-xs text-white"><option value="">All branches</option>{branches.map(branch => <option key={branch.id} value={branch.id} className="text-[#1D1D1F]">{branch.name}</option>)}</select></label>;
+  return <label className="flex min-w-0 items-center gap-2 text-xs text-gray-300"><span className="hidden lg:inline">Working branch</span><select aria-label="Working branch" value={value} onChange={event => onChange(event.target.value)} className="max-w-[160px] rounded-lg border border-white/20 bg-black/30 px-2 py-1.5 text-[10px] text-white sm:max-w-none sm:text-xs"><option value="">All branches</option>{branches.map(branch => <option key={branch.id} value={branch.id} className="text-[#1D1D1F]">{branch.name}</option>)}</select></label>;
 }
 
 function App() {
@@ -147,23 +146,23 @@ function App() {
 
       <div className="flex-1 min-w-0">
         <header className="sticky top-0 z-40 border-b border-white/10 bg-black/40 backdrop-blur-2xl">
-          <div className="mx-auto max-w-7xl px-4 sm:px-6 flex items-center justify-between h-16">
-            <div className={`flex items-center gap-2 ${isOwner ? 'md:hidden' : ''}`}>
-              <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-[#2F6BFF] to-[#00A6D6] flex items-center justify-center text-white font-semibold shadow-lg shadow-[#00A6D6]/20">S</div>
-              <span className="font-semibold tracking-tight text-lg text-white">SafiGroom <span className="bg-gradient-to-r from-[#8bb7ff] to-[#61e6ff] bg-clip-text text-transparent">OS</span></span>
+          <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-2 px-3 sm:px-6">
+            <div className={`flex min-w-0 items-center gap-2 ${isOwner ? 'md:hidden' : ''}`}>
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-[#2F6BFF] to-[#00A6D6] text-sm font-semibold text-white shadow-lg shadow-[#00A6D6]/20">S</div>
+              <span className="truncate text-base font-semibold tracking-tight text-white sm:text-lg">SafiGroom <span className="bg-gradient-to-r from-[#8bb7ff] to-[#61e6ff] bg-clip-text text-transparent">OS</span></span>
             </div>
             {isOwner && <div className="hidden md:block font-semibold text-white">{visibleTabs.find(t => t.key === tab)?.label}</div>}
-            <div className={`hidden sm:flex items-center gap-3 ${isOwner ? 'md:hidden' : ''}`}>
-              <span className="text-xs text-gray-300">{account?.salonName || 'All Salons'} · {account?.name}</span><button className="text-xs text-gray-300 underline" onClick={() => { AuthApi.logout(); setAccount(null); }}>Log out</button>
+            <div className={`hidden items-center gap-3 sm:flex ${isOwner ? 'md:hidden' : ''}`}>
+              <span className="truncate text-[10px] text-gray-300 sm:text-xs">{account?.salonName || 'All Salons'} · {account?.name}</span><button className="text-[10px] text-gray-300 underline sm:text-xs" onClick={() => { AuthApi.logout(); setAccount(null); }}>Log out</button>
             </div>
-            {effectiveRole === 'owner' && branches.length > 0 && <SelectBranch branches={branches} value={selectedBranchId} onChange={selectBranch} />}
-            <button className="sm:hidden p-2 rounded-lg hover:bg-white/10 text-white focus-visible:ring-2 focus-visible:ring-[#4C82FF]" aria-label={menuOpen ? 'Close menu' : 'Open menu'} onClick={() => setMenuOpen(m => !m)}>
+            {effectiveRole === 'owner' && branches.length > 0 && <div className="shrink-0"><SelectBranch branches={branches} value={selectedBranchId} onChange={selectBranch} /></div>}
+            <button className="rounded-lg p-2 text-white hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-[#4C82FF] sm:hidden" aria-label={menuOpen ? 'Close menu' : 'Open menu'} onClick={() => setMenuOpen(m => !m)}>
               {menuOpen ? <X size={20} /> : <Menu size={20} />}
             </button>
           </div>
           {menuOpen && (
-            <div className="sm:hidden px-4 pb-3 space-y-3">
-              <div className="text-xs text-gray-300">{account?.name} · {account?.salonName || 'All Salons'} <button className="underline ml-2" onClick={() => { AuthApi.logout(); setAccount(null); }}>Log out</button></div>
+            <div className="space-y-3 border-t border-white/10 px-3 pb-3 pt-3 sm:hidden">
+              <div className="text-xs text-gray-300">{account?.name} · {account?.salonName || 'All Salons'} <button className="ml-2 underline" onClick={() => { AuthApi.logout(); setAccount(null); }}>Log out</button></div>
               {isOwner && (
                 <nav aria-label="Main sections" className="grid grid-cols-2 gap-1">
                   {visibleTabs.map(t => {
@@ -185,8 +184,8 @@ function App() {
               )}
             </div>
           )}
-          <nav aria-label="Main sections" className={`mx-auto max-w-7xl px-4 sm:px-6 overflow-x-auto no-scrollbar ${isOwner ? 'md:hidden' : ''}`}>
-            <div className="flex gap-1 pb-2">
+          <nav aria-label="Main sections" className={`mx-auto max-w-7xl overflow-x-auto px-3 pb-2 no-scrollbar sm:px-6 ${isOwner ? 'md:hidden' : ''}`}>
+            <div className="flex min-w-max gap-1">
               {visibleTabs.map(t => {
                 const Icon = t.icon;
                 const active = tab === t.key;
@@ -195,7 +194,7 @@ function App() {
                     key={t.key}
                     onClick={() => setTab(t.key)}
                     aria-current={active ? 'page' : undefined}
-                    className={`flex items-center gap-1.5 whitespace-nowrap rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#4C82FF] ${active ? 'bg-gradient-to-r from-[#2F6BFF] to-[#00A6D6] text-white shadow-md shadow-[#00A6D6]/20' : 'text-gray-300 hover:bg-white/10 hover:text-white'}`}
+                    className={`flex items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#4C82FF] sm:px-3.5 sm:text-sm ${active ? 'bg-gradient-to-r from-[#2F6BFF] to-[#00A6D6] text-white shadow-md shadow-[#00A6D6]/20' : 'text-gray-300 hover:bg-white/10 hover:text-white'}`}
                   >
                     <Icon size={15} aria-hidden="true" />
                     {t.label}
@@ -206,15 +205,15 @@ function App() {
           </nav>
         </header>
 
-        <main id="main-content" className="mx-auto max-w-7xl px-3 sm:px-6 py-4 sm:py-8">
-          <div className="bg-[#F5F5F7] text-[#1D1D1F] rounded-[28px] sm:rounded-[32px] shadow-2xl p-4 sm:p-8 min-h-[75vh]">
+        <main id="main-content" className="mx-auto max-w-7xl px-2 pb-24 pt-3 sm:px-6 sm:pb-8 sm:pt-8">
+          <div key={selectedBranchId} className="min-h-[75vh] rounded-[20px] bg-[#F5F5F7] p-3 text-[#1D1D1F] shadow-2xl sm:rounded-[32px] sm:p-8">
             {!ready ? (
               <div className="flex items-center justify-center py-24 text-[#6E6E73]" role="status">Loading SafiGroom OS…</div>
             ) : (
               <>
                 {tab === 'dashboard' && effectiveRole === 'owner' && <Dashboard />}
                 {tab === 'dashboard' && effectiveRole === 'customer' && <CustomerDashboard onBook={() => setTab('booking')} />}
-                {tab === 'appointments' && <Appointments />}
+                {tab === 'appointments' && <Appointments role={effectiveRole} />}
                 {tab === 'queue' && <Queue />}
                 {tab === 'staff' && <StaffTab role={effectiveRole} />}
                 {tab === 'services' && <Services />}
@@ -234,6 +233,29 @@ function App() {
           </div>
         </main>
       </div>
+      {isOwner && (
+        <div className="fixed inset-x-0 bottom-0 z-50 border-t border-white/10 bg-black/75 px-2 py-2 backdrop-blur-xl sm:hidden">
+          <nav aria-label="Bottom tab bar" className="overflow-x-auto no-scrollbar">
+            <div className="flex min-w-max items-center justify-between gap-1">
+              {visibleTabs.map(t => {
+                const Icon = t.icon;
+                const active = tab === t.key;
+                return (
+                  <button
+                    key={t.key}
+                    onClick={() => setTab(t.key)}
+                    aria-current={active ? 'page' : undefined}
+                    className={`flex min-w-[70px] flex-col items-center gap-1 rounded-xl px-2 py-2 text-[10px] font-medium transition-colors ${active ? 'bg-gradient-to-r from-[#2F6BFF] to-[#00A6D6] text-white shadow-md shadow-[#00A6D6]/20' : 'text-gray-300'}`}
+                  >
+                    <Icon size={16} aria-hidden="true" />
+                    <span className="leading-none">{t.label.split(' ')[0]}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </nav>
+        </div>
+      )}
       <ToastHost />
     </div>
   );

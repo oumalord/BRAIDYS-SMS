@@ -1,4 +1,4 @@
-import type { Staff, ServiceItem, Customer, Appointment, QueueEntry, Product, Order, Expense, DashboardData, RebookingItem, ChatChannel, ChatMessage, Currency, MembershipPlan, Promotion, Review, AuditLog, Branch } from '../types';
+import type { Staff, ServiceItem, Customer, Appointment, QueueEntry, Product, Order, Expense, DashboardData, RebookingItem, ChatChannel, ChatMessage, Currency, MembershipPlan, Promotion, Review, AuditLog, Branch, PayoutBatch } from '../types';
 
 const api = {
   get: async (path: string) => ({ data: await request(path) }),
@@ -133,6 +133,16 @@ export const OrdersApi = {
 export const ExpensesApi = {
   list: () => api.get('/api/expenses').then(r => r.data.items as Expense[]),
   create: (e: Partial<Expense>) => api.post('/api/expenses', e).then(r => { invalidate('dashboard'); return r; }),
+};
+
+export const PayoutsApi = {
+  list: () => api.get('/api/payouts').then(r => r.data.items as PayoutBatch[]),
+  record: (range: 'today' | 'week' | 'month' | 'all') => api.post('/api/payouts', { range }),
+};
+
+export const PayrollApi = {
+  staff: () => api.get('/api/payroll/staff').then(r => r.data.items as Staff[]),
+  send: (recipients: { staffId: string; amountKES: number; phone: string }[]) => api.post('/api/payroll/send', { recipients }),
 };
 
 export const DashboardApi = {

@@ -43,6 +43,9 @@ function OwnerReport({ range }: { range: Range }) {
       ['Range', range],
       [],
       ['Revenue (KES)', revenueKES],
+      ['Cash payments (KES)', data.paymentMethodTotals.Cash],
+      ['Card payments (KES)', data.paymentMethodTotals.Card],
+      ['M-Pesa payments (KES)', data.paymentMethodTotals['M-Pesa']],
       ['Product Cost (KES)', data.productCost],
       ['Commissions (KES)', commissionsKES],
       ['Expenses (KES)', data.expenseTotal],
@@ -64,6 +67,8 @@ function OwnerReport({ range }: { range: Range }) {
       </div>
 
       <Card className="p-6">
+        <h2 className="font-semibold mb-4">Payment Methods</h2>
+        <div className="grid sm:grid-cols-3 gap-3 mb-6">{(['Cash', 'Card', 'M-Pesa'] as const).map(method => <div key={method} className="rounded-2xl bg-black/[0.03] p-4"><p className="text-xs text-[#6E6E73]">{method}</p><p className="text-xl font-semibold mt-1">{fmtMoney(data.paymentMethodTotals[method], 'KES')}</p></div>)}</div>
         <div className="flex items-center justify-between mb-4">
           <h2 className="font-semibold">Staff Commission Statement</h2>
           <Button variant="secondary" size="sm" onClick={handleDownload}><Download size={14} aria-hidden="true" />Download CSV</Button>
@@ -123,6 +128,9 @@ function ReceptionistReport({ range }: { range: Range }) {
       ['Queue Entries Served', queueServed],
       ['POS Transactions Processed', data.ordersCount],
       ['Revenue Collected (KES)', revenueKES],
+      ['Cash payments (KES)', data.paymentMethodTotals.Cash],
+      ['Card payments (KES)', data.paymentMethodTotals.Card],
+      ['M-Pesa payments (KES)', data.paymentMethodTotals['M-Pesa']],
     ];
     downloadCSV(`safigroom-front-desk-report-${range}.csv`, rows);
   };
@@ -136,6 +144,8 @@ function ReceptionistReport({ range }: { range: Range }) {
         <StatCard label="POS Transactions" value={String(data.ordersCount)} sub={fmtMoney(revenueKES, 'KES')} icon={ShoppingCart} />
       </div>
       <Card className="p-6">
+        <h2 className="font-semibold mb-4">Payment Methods</h2>
+        <div className="grid sm:grid-cols-3 gap-3 mb-6">{(['Cash', 'Card', 'M-Pesa'] as const).map(method => <div key={method} className="rounded-2xl bg-black/[0.03] p-4"><p className="text-xs text-[#6E6E73]">{method}</p><p className="text-xl font-semibold mt-1">{fmtMoney(data.paymentMethodTotals[method], 'KES')}</p></div>)}</div>
         <div className="flex items-center justify-between mb-2">
           <h2 className="font-semibold">Front Desk Performance</h2>
           <Button variant="secondary" size="sm" onClick={handleDownload}><Download size={14} aria-hidden="true" />Download CSV</Button>

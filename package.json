@@ -8,6 +8,8 @@
         "server": "tsx backend/server.ts",
         "db:bootstrap": "tsx database/apply-neon.ts",
         "db:migrate-branches": "tsx database/migrate-branches.ts",
+        "db:migrate-payment-methods": "tsx database/migrate-payment-methods.ts",
+        "db:clone-branch": "tsx database/clone-branch-data.ts",
         "db:purge-demo": "tsx database/purge-demo.ts",
         "build": "vite build",
         "preview": "vite preview"

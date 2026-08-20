@@ -46,15 +46,15 @@ function Dashboard() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4 sm:gap-4">
         <StatCard label="Revenue" value={fmtMoney(revenueKES, 'KES')} sub={revenueUSD > 0 ? `+ ${fmtMoney(revenueUSD, 'USD')} · ${data.ordersCount} transactions` : `${data.ordersCount} transactions`} icon={DollarSign} tone="success" />
         <StatCard label="Estimated Profit" value={fmtMoney(profitKES, 'KES')} sub="After cost, commission, salaries & expenses" icon={TrendingUp} tone={profitKES >= 0 ? 'success' : 'danger'} />
         <StatCard label="Appointments Today" value={String(data.todaysAppointmentsCount)} sub={`${data.waitingQueueCount} waiting in queue`} icon={Calendar} />
         <StatCard label="Active Staff" value={`${data.activeStaffCount}/${data.totalStaffCount}`} sub="currently on shift" icon={Users} />
       </div>
 
-      <div className="grid lg:grid-cols-3 gap-4">
-        <Card className="lg:col-span-2 p-6">
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+        <Card className="xl:col-span-2 p-4 sm:p-6">
           <h2 className="font-semibold mb-4">Last 7 Days Revenue (KES)</h2>
           <div className="flex items-end gap-2 h-40" aria-hidden="true">
             {data.trend.map(t => (
@@ -87,8 +87,8 @@ function Dashboard() {
         </Card>
       </div>
 
-      <div className="grid lg:grid-cols-3 gap-4">
-        <Card className="p-6">
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+        <Card className="p-4 sm:p-4 sm:p-6">
           <h2 className="font-semibold mb-4">Top Staff by Revenue</h2>
           {data.topStaff.length === 0 ? <p className="text-sm text-[#6E6E73]">No sales recorded yet.</p> : (
             <ul className="space-y-3">
@@ -101,7 +101,7 @@ function Dashboard() {
             </ul>
           )}
         </Card>
-        <Card className="p-6">
+        <Card className="p-4 sm:p-6">
           <h2 className="font-semibold mb-4">Top Services</h2>
           {data.topServices.length === 0 ? <p className="text-sm text-[#6E6E73]">No sales recorded yet.</p> : (
             <ul className="space-y-3">
@@ -114,7 +114,7 @@ function Dashboard() {
             </ul>
           )}
         </Card>
-        <Card className="p-6">
+        <Card className="p-4 sm:p-6">
           <h2 className="font-semibold mb-4 flex items-center gap-2"><Sparkles size={16} className="text-[#0071e3]" aria-hidden="true" />Smart Rebooking</h2>
           {rebooking.length === 0 ? <p className="text-sm text-[#6E6E73]">No customers are predicted to be due for a visit this week.</p> : (
             <ul className="space-y-3">

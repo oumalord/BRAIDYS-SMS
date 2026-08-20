@@ -5,10 +5,11 @@ import { ProductsApi, fmtKES } from '../lib/api';
 import type { Product } from '../types';
 
 function Inventory() {
+  const categories = ['Hair', 'Oils', 'Shampoo', 'Conditioner', 'Hair Treatment', 'Hair Color', 'Braids', 'Wigs', 'Extensions', 'Styling Products', 'Skin Care', 'Nail Care', 'Makeup', 'Barber Supplies', 'Tools & Equipment', 'Cleaning Supplies', 'Retail Products', 'Other'];
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({ name: '', category: '', price: 0, cost: 0, stock: 0, lowStockThreshold: 5, unit: 'pcs' });
+  const [form, setForm] = useState({ name: '', category: 'Hair', color: '', price: 0, cost: 0, stock: 0, lowStockThreshold: 5, unit: 'pcs' });
 
   const load = () => { ProductsApi.list().then(setProducts).catch(() => toast('Could not load inventory.', 'error')).finally(() => setLoading(false)); };
   useEffect(load, []);
@@ -18,7 +19,7 @@ function Inventory() {
     await ProductsApi.create(form);
     toast('Product added.', 'success');
     setOpen(false);
-    setForm({ name: '', category: '', price: 0, cost: 0, stock: 0, lowStockThreshold: 5, unit: 'pcs' });
+    setForm({ name: '', category: 'Hair', color: '', price: 0, cost: 0, stock: 0, lowStockThreshold: 5, unit: 'pcs' });
     load();
   };
 
@@ -45,7 +46,7 @@ function Inventory() {
             return (
               <Card key={p.id} className="p-5">
                 <div className="flex items-start justify-between mb-2">
-                  <div><p className="font-medium">{p.name}</p><p className="text-xs text-[#6E6E73]">{p.category}</p></div>
+                  <div><p className="font-medium">{p.name}</p><p className="text-xs text-[#6E6E73]">{p.category}{p.color ? ` · ${p.color}` : ''}</p></div>
                   {low && <Badge tone="warning"><AlertTriangle size={11} aria-hidden="true" />Low</Badge>}
                 </div>
                 <p className="text-sm text-[#6E6E73] mb-1">{p.stock} {p.unit} in stock · sells for {fmtKES(p.price)}</p>
@@ -70,7 +71,8 @@ function Inventory() {
         </>}>
           <div className="space-y-4">
             <Field label="Product name" htmlFor="p-name"><Input id="p-name" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></Field>
-            <Field label="Category" htmlFor="p-cat"><Input id="p-cat" value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))} placeholder="e.g. Hair Care" /></Field>
+            <Field label="Category" htmlFor="p-cat"><Select id="p-cat" value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))}>{categories.map(category => <option key={category} value={category}>{category}</option>)}</Select></Field>
+            <Field label="Color" htmlFor="p-color"><Input id="p-color" value={form.color} onChange={e => setForm(f => ({ ...f, color: e.target.value }))} placeholder="e.g. Black, Brown, Blonde, Natural" /></Field>
             <div className="grid grid-cols-2 gap-3">
               <Field label="Sell price (KES)" htmlFor="p-price"><Input id="p-price" type="number" value={form.price} onChange={e => setForm(f => ({ ...f, price: Number(e.target.value) }))} /></Field>
               <Field label="Cost price (KES)" htmlFor="p-cost"><Input id="p-cost" type="number" value={form.cost} onChange={e => setForm(f => ({ ...f, cost: Number(e.target.value) }))} /></Field>

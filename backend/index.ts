@@ -536,12 +536,15 @@ export const handler = router({
     const { items: branches } = await db.list('branches', { limit: 5000 });
     const branch = (branches as any[]).find(item => item.id === requestedBranchId && item.salonId === context?.tenantId && item.status === 'active');
     if (!branch) return error('Choose a valid branch for this appointment', 400);
-    const items = Array.isArray(b.items) && b.items.length ? b.items : (b.serviceId ? [{ serviceId: b.serviceId, serviceName: b.serviceName, price: b.price || 0, currency: b.currency || 'KES', durationMin: b.durationMin || 30, staffId: b.staffId, staffName: b.staffName }] : []);
-    if (!b.customerName || !b.date || !b.time || items.length === 0) return error('Missing required appointment fields', 400);
-    for (const it of items) { if (!it.serviceId) return error('Each service needs a service selected', 400); }
+    const requestedCategories = Array.isArray(b.serviceCategories) ? b.serviceCategories.slice(0, 2).filter(Boolean) : [];
+    const items = Array.isArray(b.items) && b.items.length ? b.items : b.serviceId ? [{ serviceId: b.serviceId, serviceName: b.serviceName, price: b.price || 0, currency: b.currency || 'KES', durationMin: b.durationMin || 30, staffId: b.staffId, staffName: b.staffName }] : requestedCategories.length ? [{ serviceId: null, serviceName: `Requested: ${requestedCategories.join(' + ')}`, price: 0, currency: 'KES', durationMin: 30, staffId: b.staffId, staffName: b.staffName }] : [];
+    const appointmentDate = b.date || new Date().toISOString().slice(0, 10);
+    const appointmentTime = b.time || '00:00';
+    if (!b.customerName || items.length === 0) return error('Missing required appointment fields', 400);
+    for (const it of items) { if (!it.serviceId && !requestedCategories.length) return error('Each service needs a service selected', 400); }
 
     const { items: existing } = await db.list('appointments', { limit: 1000 });
-    let cursor = toMinutes(b.time);
+    let cursor = toMinutes(appointmentTime);
     const newSlots: { staffId: string; start: number; end: number; name: string }[] = [];
     for (const it of items) {
       const start = cursor; const end = start + (it.durationMin || 30);
@@ -550,7 +553,7 @@ export const handler = router({
     }
 
     for (const existingAppt of existing as any[]) {
-      if (existingAppt.date !== b.date) continue;
+      if (existingAppt.date !== appointmentDate) continue;
       if (['cancelled', 'no-show', 'completed'].includes(existingAppt.status)) continue;
       const otherSlots = apptSlots(existingAppt);
       for (const ns of newSlots) {
@@ -568,23 +571,30 @@ export const handler = router({
     const currency = items[0]?.currency || 'KES';
     const serviceName = items.map((it: any) => it.serviceName).join(', ');
     const staffNames = Array.from(new Set(items.map((it: any) => it.staffName).filter(Boolean)));
+    let customerId = b.customerId || null;
     let customerEmail = b.customerEmail || '';
-    if (b.customerId) {
-      const [customer] = await db.get('customers', [b.customerId]);
+    if (customerId) {
+      const [customer] = await db.get('customers', [customerId]);
       customerEmail = customer?.email || customerEmail;
+    } else if (customerEmail || b.customerPhone) {
+      const { items: customers } = await db.list('customers', { limit: 2000 });
+      const normalizedPhone = String(b.customerPhone || '').replace(/\s+/g, '');
+      const existingCustomer = (customers as any[]).find(customer => (customerEmail && String(customer.email || '').toLowerCase() === String(customerEmail).toLowerCase()) || (normalizedPhone && String(customer.phone || '').replace(/\s+/g, '') === normalizedPhone));
+      if (existingCustomer) customerId = existingCustomer.id;
+      else [customerId] = await db.add('customers', [{ name: b.customerName, phone: b.customerPhone || '', email: customerEmail, notes: '', loyaltyPoints: 0, totalSpent: 0, totalSpentUSD: 0, visits: 0, lastVisit: null, createdAt: Date.now(), membershipTier: 'none', membershipExpiry: null }]);
     }
     const [id] = await db.add('appointments', [{
-      customerId: b.customerId || null, customerName: b.customerName,
+      customerId, customerName: b.customerName,
       serviceId: items[0].serviceId, serviceName,
       customerEmail, staffId: items[0].staffId || null, staffName: staffNames.join(', ') || null,
       branchId: branch.id, branchName: branch.name,
-      date: b.date, time: b.time, durationMin: totalDurationMin, price: totalPrice, currency,
+      date: appointmentDate, time: appointmentTime, durationMin: totalDurationMin, price: totalPrice, currency,
       items, status: 'pending', createdAt: Date.now(),
     }]);
     if (!id) return error('Failed to create appointment', 500);
 
     const { items: activeQueue } = await db.list('queue', { limit: 2000 });
-    const ticketNumber = createTicketNumber(b.date);
+    const ticketNumber = createTicketNumber(appointmentDate);
     const [queueId] = await db.add('queue', [{
       appointmentId: id, customerId: b.customerId || null, customerEmail,
       customerName: b.customerName, serviceName, staffId: items[0].staffId || null,
@@ -592,20 +602,41 @@ export const handler = router({
       branchId: branch.id, branchName: branch.name,
       position: activeQueue.filter((q: any) => q.status !== 'completed').length + 1, ticketNumber,
     }]);
-    await notifyCustomer(customerEmail, `Booking confirmed: ticket ${ticketNumber}`, `Your SafiGroom appointment is booked for ${b.date} at ${b.time}. Ticket: ${ticketNumber}.`, id);
-    await audit('created', 'appointment', { id, customerId: b.customerId || null, customerName: b.customerName, serviceName, staffId: items[0].staffId || null, staffName: staffNames.join(', ') || null, date: b.date, time: b.time, ticketNumber }, b.actor || 'customer');
-    return json({ id, queueId, ticketNumber });
+    await notifyCustomer(customerEmail, `Booking request received: ticket ${ticketNumber}`, `Your SafiGroom booking request was received. Reception will confirm the exact service and time. Ticket: ${ticketNumber}.`, id);
+    await audit('created', 'appointment', { id, customerId: b.customerId || null, customerName: b.customerName, serviceName, staffId: items[0].staffId || null, staffName: staffNames.join(', ') || null, date: appointmentDate, time: appointmentTime, ticketNumber }, b.actor || 'customer');
+    return json({ id, queueId, ticketNumber, date: b.date || null, time: b.time || null });
   }],
   'PUT /api/appointments/:id': [async ({ params, body }) => {
     const [existing] = await db.get('appointments', [params.id]);
     if (!existing) return error('Appointment not found', 404);
     const patch: any = body;
-    if (patch.staffId && patch.staffId !== existing.staffId) {
+    const editsDetails = patch.date || patch.time || patch.serviceId || patch.durationMin || 'staffId' in patch;
+    if (editsDetails && !['owner', 'receptionist'].includes(currentContext()?.role || '')) return error('Only the owner or receptionist can edit appointment details', 403);
+    if (['completed', 'cancelled', 'no-show'].includes(existing.status) && (patch.date || patch.time || patch.serviceId || 'staffId' in patch)) return error('Completed or closed appointments cannot be edited', 409);
+    const nextDate = patch.date || existing.date;
+    const nextTime = patch.time || existing.time;
+    const nextStaffId = 'staffId' in patch ? patch.staffId : existing.staffId;
+    const nextDuration = Number(patch.durationMin || existing.durationMin || 30);
+    if (nextStaffId && nextStaffId !== existing.staffId) {
       const [assignedStaff] = await db.get('staff', [patch.staffId]);
       if (!assignedStaff) return error('Staff member not found', 404);
+      if (assignedStaff.branchId && existing.branchId && assignedStaff.branchId !== existing.branchId) return error('The employee must belong to the appointment branch', 409);
       if (assignedStaff.employmentStatus === 'laid-off' || !['available', 'in-service'].includes(assignedStaff.status)) return error('That staff member is not available', 409);
       patch.staffName = assignedStaff.name;
       patch.status = existing.status === 'pending' ? 'confirmed' : existing.status;
+    }
+    if (patch.serviceId) {
+      const [service] = await db.get('services', [patch.serviceId]);
+      if (!service) return error('Service not found', 404);
+    }
+    if (nextStaffId) {
+      const { items: appointments } = await db.list('appointments', { limit: 2000 });
+      const start = toMinutes(nextTime);
+      const end = start + nextDuration;
+      for (const appointment of appointments as any[]) {
+        if (appointment.id === existing.id || appointment.date !== nextDate || ['completed', 'cancelled', 'no-show'].includes(appointment.status)) continue;
+        for (const slot of apptSlots(appointment)) if (slot.staffId === nextStaffId && start < slot.end && end > slot.start) return error('That staff member already has an appointment at the selected time', 409);
+      }
     }
     const [ok] = await db.update('appointments', [{ id: params.id, record: { ...existing, ...patch } }]);
     if (patch.staffId) {
@@ -651,7 +682,7 @@ export const handler = router({
   'POST /api/products': [async ({ body }) => {
     const b: any = body;
     if (!b.name) return error('Product name is required', 400);
-    const [id] = await db.add('products', [{ name: b.name, category: b.category || 'General', price: b.price || 0, cost: b.cost || 0, stock: b.stock || 0, lowStockThreshold: b.lowStockThreshold ?? 5, unit: b.unit || 'pcs' }]);
+    const [id] = await db.add('products', [{ name: b.name, category: b.category || 'Other', color: b.color || '', price: b.price || 0, cost: b.cost || 0, stock: b.stock || 0, lowStockThreshold: b.lowStockThreshold ?? 5, unit: b.unit || 'pcs' }]);
     if (!id) return error('Failed to add product', 500);
     await audit('created', 'product', { id, name: b.name, stock: b.stock || 0, unit: b.unit || 'pcs' }, b.actor || 'owner');
     return json({ id });
@@ -697,10 +728,18 @@ export const handler = router({
       }
     }
     const discountPct = effectiveDiscountPct;
-    const paymentMethod = b.paymentMethod || 'Cash';
+    const paymentMethod = b.paymentMethod === 'Card' || b.paymentMethod === 'M-Pesa' ? b.paymentMethod : 'Cash';
+    const orderItems = items.map((it: any) => ({
+      ...it,
+      type: it.type || 'service',
+      qty: Number(it.qty || 1),
+      price: Number(it.price || 0),
+      currency: it.currency || 'KES',
+      lineTotalAfterDiscount: Math.round((Number(it.price || 0) * Number(it.qty || 0)) * (1 - discountPct / 100)),
+    }));
 
     const subtotalByCurrency: Record<string, number> = {};
-    for (const it of items) {
+    for (const it of orderItems) {
       const cur = it.currency || 'KES';
       subtotalByCurrency[cur] = (subtotalByCurrency[cur] || 0) + it.price * it.qty;
     }
@@ -773,6 +812,90 @@ export const handler = router({
     await audit('created', 'expense', { id, category: b.category, amount: b.amount, note: b.note || '', date: b.date || new Date().toISOString().slice(0, 10) }, b.actor || 'receptionist');
     return json({ id });
   }],
+  'GET /api/payouts': [async () => {
+    if (currentContext()?.role !== 'owner') return error('Only the owner can view payouts', 403);
+    const { items } = await db.list('payout_batches', { limit: 100 });
+    return json({ items: (items as any[]).sort((a, b) => b.createdAt - a.createdAt) });
+  }],
+  'GET /api/payroll/staff': [async () => {
+    const context = currentContext();
+    if (context?.role !== 'owner') return error('Only the owner can view payroll staff', 403);
+    const { items } = await db.listAllTenant('staff', context.tenantId, { limit: 2000 });
+    return json({ items });
+  }],
+  'POST /api/payouts': [async ({ body }) => {
+    const context = currentContext();
+    if (context?.role !== 'owner') return error('Only the owner can record payouts', 403);
+    const range = body?.range === 'today' || body?.range === 'week' || body?.range === 'month' || body?.range === 'all' ? body.range : 'week';
+    const now = Date.now();
+    let from = 0;
+    if (range === 'today') { const day = new Date(); day.setHours(0, 0, 0, 0); from = day.getTime(); }
+    if (range === 'week') from = now - 7 * DAY;
+    if (range === 'month') from = now - 30 * DAY;
+
+    const [{ items: orders }, { items: staff }, { items: paidItems }] = await Promise.all([
+      db.listAllTenant('orders', context.tenantId, { limit: 5000 }),
+      db.listAllTenant('staff', context.tenantId, { limit: 2000 }),
+      db.listAllTenant('payout_items', context.tenantId, { limit: 10000 }),
+    ]);
+    const staffById = new Map((staff as any[]).map(member => [member.id, member]));
+    const alreadyPaid = new Set((paidItems as any[]).map(item => item.itemKey));
+    const lines: any[] = [];
+    for (const order of orders as any[]) {
+      if (!order.createdAt || order.createdAt < from || order.createdAt >= now) continue;
+      (order.items || []).forEach((item: any, index: number) => {
+        if (item.type !== 'service' || !item.staffId || alreadyPaid.has(`${order.id}:${index}`)) return;
+        const member = staffById.get(item.staffId);
+        if (!member) return;
+        const revenue = Number(item.lineTotalAfterDiscount ?? item.price * item.qty) || 0;
+        lines.push({ itemKey: `${order.id}:${index}`, orderId: order.id, staffId: item.staffId, staffName: item.staffName || member.name, revenue, commission: revenue * 0.4, currency: item.currency || 'KES', branchId: order.branchId || context.branchId || null, createdAt: now });
+      });
+    }
+    if (!lines.length) return error('There are no unpaid commissions in this period.', 409);
+    const totalKES = lines.filter(line => line.currency === 'KES').reduce((sum, line) => sum + line.commission, 0);
+    const [batchId] = await db.add('payout_batches', [{ range, from, to: now, totalKES, employeeCount: new Set(lines.map(line => line.staffId)).size, itemCount: lines.length, status: 'recorded', createdAt: now }]);
+    await db.add('payout_items', lines.map(line => ({ ...line, batchId })));
+    await audit('recorded', 'payout_batch', { id: batchId, range, totalKES, employeeCount: new Set(lines.map(line => line.staffId)).size, itemCount: lines.length }, 'owner');
+    return json({ id: batchId, range, totalKES, employeeCount: new Set(lines.map(line => line.staffId)).size, itemCount: lines.length, status: 'recorded', message: 'Payout recorded internally. No money was sent.' });
+  }],
+  'POST /api/payroll/send': [async ({ body }) => {
+    const context = currentContext();
+    if (context?.role !== 'owner') return error('Only the owner can send payroll', 403);
+    const recipients = Array.isArray(body?.recipients) ? body.recipients : [];
+    if (!recipients.length) return error('Add at least one employee to payroll', 400);
+    const initiator = process.env.MPESA_B2C_INITIATOR_NAME;
+    const securityCredential = process.env.MPESA_B2C_SECURITY_CREDENTIAL;
+    const shortcode = process.env.MPESA_B2C_SHORTCODE;
+    const timeoutUrl = process.env.MPESA_B2C_QUEUE_TIMEOUT_URL;
+    const resultUrl = process.env.MPESA_B2C_RESULT_URL;
+    if (!initiator || !securityCredential || !shortcode || !timeoutUrl || !resultUrl) return error('M-Pesa B2C payroll is not configured. Add the B2C credentials and callback URLs to the backend environment.', 503);
+    const cleanRecipients = recipients.map((recipient: any) => ({ staffId: String(recipient.staffId || ''), amountKES: Math.round(Number(recipient.amountKES) || 0), phone: String(recipient.phone || '').replace(/\s+/g, '').replace(/^\+/, '').replace(/^0/, '254') })).filter((recipient: any) => recipient.staffId && recipient.amountKES > 0 && /^254[71]\d{8}$/.test(recipient.phone));
+    if (cleanRecipients.length !== recipients.length) return error('Every payroll recipient needs a valid Kenyan phone number and amount.', 400);
+    const now = Date.now();
+    const [batchId] = await db.add('payroll_batches', [{ status: 'submitting', totalKES: cleanRecipients.reduce((sum: number, recipient: any) => sum + recipient.amountKES, 0), employeeCount: cleanRecipients.length, createdAt: now }]);
+    const baseUrl = process.env.MPESA_ENVIRONMENT === 'production' ? 'https://api.safaricom.co.ke' : 'https://sandbox.safaricom.co.ke';
+    try {
+      const tokenResponse = await fetch(`${baseUrl}/oauth/v1/generate?grant_type=client_credentials`, { headers: { Authorization: `Basic ${Buffer.from(`${process.env.MPESA_CONSUMER_KEY}:${process.env.MPESA_CONSUMER_SECRET}`).toString('base64')}` } });
+      const tokenBody: any = await tokenResponse.json();
+      if (!tokenResponse.ok || !tokenBody.access_token) throw new Error(tokenBody.errorMessage || 'Could not authenticate with Safaricom');
+      const results: any[] = [];
+      for (const recipient of cleanRecipients) {
+        const response = await fetch(`${baseUrl}/mpesa/b2c/v1/paymentrequest`, { method: 'POST', headers: { Authorization: `Bearer ${tokenBody.access_token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ InitiatorName: initiator, SecurityCredential: securityCredential, CommandID: process.env.MPESA_B2C_COMMAND_ID || 'BusinessPayment', Amount: recipient.amountKES, PartyA: shortcode, PartyB: recipient.phone, Remarks: `SafiGroom payroll ${batchId}`, QueueTimeOutURL: timeoutUrl, ResultURL: resultUrl, Occasion: 'Payroll' }) });
+        const bodyResult: any = await response.json();
+        const [itemId] = await db.add('payroll_items', [{ batchId, ...recipient, status: response.ok ? 'submitted' : 'failed', conversationId: bodyResult.ConversationID || null, response: bodyResult, createdAt: now }]);
+        results.push({ id: itemId, staffId: recipient.staffId, status: response.ok ? 'submitted' : 'failed', response: bodyResult });
+      }
+      const failedCount = results.filter(result => result.status === 'failed').length;
+      await db.update('payroll_batches', [{ id: batchId, record: { id: batchId, status: failedCount ? 'partial' : 'submitted', totalKES: cleanRecipients.reduce((sum: number, recipient: any) => sum + recipient.amountKES, 0), employeeCount: cleanRecipients.length, sentCount: results.length - failedCount, failedCount, createdAt: now } }]);
+      await audit('submitted', 'payroll_batch', { id: batchId, employeeCount: cleanRecipients.length, failedCount }, 'owner');
+      return json({ id: batchId, totalKES: cleanRecipients.reduce((sum: number, recipient: any) => sum + recipient.amountKES, 0), employeeCount: cleanRecipients.length, sentCount: results.length - failedCount, failedCount, status: failedCount ? 'failed' : 'submitted' });
+    } catch (cause) {
+      await db.update('payroll_batches', [{ id: batchId, record: { id: batchId, status: 'failed', totalKES: cleanRecipients.reduce((sum: number, recipient: any) => sum + recipient.amountKES, 0), employeeCount: cleanRecipients.length, failedCount: cleanRecipients.length, createdAt: now, error: cause instanceof Error ? cause.message : 'Payroll failed' } }]);
+      return error(cause instanceof Error ? cause.message : 'Payroll transfer failed', 502);
+    }
+  }],
+  'POST /api/payroll/result': [async ({ body }) => { await db.add('payroll_callbacks', [{ type: 'result', body, createdAt: Date.now() }]); return json({ ResultCode: 0, ResultDesc: 'Accepted' }); }],
+  'POST /api/payroll/timeout': [async ({ body }) => { await db.add('payroll_callbacks', [{ type: 'timeout', body, createdAt: Date.now() }]); return json({ ResultCode: 0, ResultDesc: 'Accepted' }); }],
 
   'GET /api/dashboard': [async ({ query }) => {
     const range = query.range || 'today';
@@ -783,22 +906,34 @@ export const handler = router({
     else if (range === 'month') cutoff = now - 30 * DAY;
     else cutoff = 0;
 
-    const { items: orders } = await db.list('orders', { limit: 1000 });
-    const { items: expensesAll } = await db.list('expenses', { limit: 500 });
-    const { items: staffAll } = await db.list('staff', { limit: 200 });
-    const { items: productsAll } = await db.list('products', { limit: 500 });
-    const { items: appts } = await db.list('appointments', { limit: 1000 });
-    const { items: queueAll } = await db.list('queue', { limit: 200 });
-    const { items: customersAll } = await db.list('customers', { limit: 1000 });
+    const [ordersResult, expensesResult, staffResult, productsResult, appointmentsResult, queueResult, customersResult] = await Promise.all([
+      db.list('orders', { limit: 1000 }),
+      db.list('expenses', { limit: 500 }),
+      db.list('staff', { limit: 200 }),
+      db.list('products', { limit: 500 }),
+      db.list('appointments', { limit: 1000 }),
+      db.list('queue', { limit: 200 }),
+      db.list('customers', { limit: 1000 }),
+    ]);
+    const orders = ordersResult.items;
+    const expensesAll = expensesResult.items;
+    const staffAll = staffResult.items;
+    const productsAll = productsResult.items;
+    const appts = appointmentsResult.items;
+    const queueAll = queueResult.items;
+    const customersAll = customersResult.items;
 
     const staffById = new Map(staffAll.map((s: any) => [s.id, s]));
     const productById = new Map(productsAll.map((p: any) => [p.id, p]));
 
     const rangeOrders = (orders as any[]).filter(o => o.createdAt >= cutoff);
+    const paymentMethodTotals: Record<'Cash' | 'Card' | 'M-Pesa', number> = { Cash: 0, Card: 0, 'M-Pesa': 0 };
     const revenueByCurrency: Record<string, number> = {};
     for (const o of rangeOrders) {
       const totals = o.totalByCurrency || (typeof o.total === 'number' ? { KES: o.total } : {});
       for (const cur of Object.keys(totals)) revenueByCurrency[cur] = (revenueByCurrency[cur] || 0) + totals[cur];
+      const method = o.paymentMethod === 'Card' || o.paymentMethod === 'M-Pesa' ? o.paymentMethod : 'Cash';
+      paymentMethodTotals[method] += Number(totals.KES || 0);
     }
 
     let productCost = 0;
@@ -854,7 +989,7 @@ export const handler = router({
     }
 
     return json({
-      range, revenueByCurrency, ordersCount: rangeOrders.length,
+      range, revenueByCurrency, ordersCount: rangeOrders.length, paymentMethodTotals,
       expenseTotal, productCost, commissionsByCurrency, estimatedProfitByCurrency,
       todaysAppointmentsCount: todaysAppointments.length,
       upcomingAppointments: todaysAppointments.filter((a: any) => ['pending', 'confirmed', 'checked-in'].includes(a.status)).slice(0, 8),
@@ -869,8 +1004,12 @@ export const handler = router({
   }],
 
   'GET /api/analytics/rebooking': [async () => {
-    const { items: orders } = await db.list('orders', { limit: 1000 });
-    const { items: customers } = await db.list('customers', { limit: 1000 });
+    const [ordersResult, customersResult] = await Promise.all([
+      db.list('orders', { limit: 1000 }),
+      db.list('customers', { limit: 1000 }),
+    ]);
+    const orders = ordersResult.items;
+    const customers = customersResult.items;
     const byCustomer = new Map<string, number[]>();
     for (const o of orders as any[]) {
       if (!o.customerId) continue;

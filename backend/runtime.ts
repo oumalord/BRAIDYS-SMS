@@ -35,6 +35,7 @@ async function init(): Promise<void> {
     `.then(() => sql`ALTER TABLE app_records ADD COLUMN IF NOT EXISTS tenant_id TEXT`)
       .then(() => sql`CREATE INDEX IF NOT EXISTS app_records_tenant_collection_idx ON app_records (tenant_id, collection)`)
       .then(() => sql`CREATE INDEX IF NOT EXISTS app_records_branch_idx ON app_records ((record->>'branchId'), collection)`)
+      .then(() => sql`CREATE INDEX IF NOT EXISTS app_records_payment_method_idx ON app_records ((record->>'paymentMethod')) WHERE collection = 'orders'`)
       .then(() => undefined);
   }
   await initialized;
@@ -62,8 +63,14 @@ export const db = {
     const branchId = context?.role === 'barber' || context?.role === 'receptionist' || context?.role === 'manager' ? context?.branchId || null : null;
     const rows = globalCollections.has(collection) || context?.role === 'admin'
       ? await sql`SELECT id, record FROM app_records WHERE collection = ${collection} ORDER BY created_at ASC LIMIT ${limit}` as StoredRecord[]
-      : branchId ? await sql`SELECT id, record FROM app_records WHERE collection = ${collection} AND tenant_id = ${tenantId} AND (record->>'branchId' = ${branchId} OR record->>'branchId' IS NULL) ORDER BY created_at ASC LIMIT ${limit}` as StoredRecord[]
+      : branchId ? await sql`SELECT id, record FROM app_records WHERE collection = ${collection} AND tenant_id = ${tenantId} AND record->>'branchId' = ${branchId} ORDER BY created_at ASC LIMIT ${limit}` as StoredRecord[]
         : await sql`SELECT id, record FROM app_records WHERE collection = ${collection} AND tenant_id = ${tenantId} ORDER BY created_at ASC LIMIT ${limit}` as StoredRecord[];
+    return { items: rows.map(row => ({ ...(row.record || {}), id: row.id })) };
+  },
+  async listAllTenant(collection: string, tenantId: string, options?: { limit?: number }) {
+    await init();
+    const limit = Math.min(Math.max(Number(options?.limit || 100), 1), 5000);
+    const rows = await sql`SELECT id, record FROM app_records WHERE collection = ${collection} AND tenant_id = ${tenantId} ORDER BY created_at ASC LIMIT ${limit}` as StoredRecord[];
     return { items: rows.map(row => ({ ...(row.record || {}), id: row.id })) };
   },
   async get(collection: string, ids: string[]) {
