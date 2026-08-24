@@ -102,6 +102,7 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
 
   const checkout = () => {
     if (cart.length === 0) { toast('Cart is empty.', 'error'); return; }
+    if (currentStaffId && !customerId) { toast('Please select a client you are serving.', 'error'); return; }
     const missingStaff = cart.find(l => l.type === 'service' && !l.staffId);
     if (missingStaff) { toast('Assign a staff member to every service before checkout.', 'error'); return; }
     const kesDue = totalByCurrency.KES || 0;
@@ -191,9 +192,10 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
           )}
 
           <div className="space-y-3">
-            <Field label="Customer" htmlFor="pos-customer">
-              <Select id="pos-customer" value={customerId} onChange={e => setCustomerId(e.target.value)}>
-                <option value="">Walk-in Customer</option>
+            <Field label={`Customer${currentStaffId ? ' (required)' : ''}`} htmlFor="pos-customer">
+              <Select id="pos-customer" value={customerId} onChange={e => setCustomerId(e.target.value)} className={currentStaffId && !customerId ? 'border-red-500' : ''}>
+                {!currentStaffId && <option value="">Walk-in Customer</option>}
+                {currentStaffId && !customerId && <option value="">Select a client...</option>}
                 {customerOptions.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </Select>
             </Field>
@@ -223,7 +225,7 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
               <div key={cur} className="flex justify-between font-semibold text-base"><span>Total ({cur})</span><span>{fmtMoney(totalByCurrency[cur], cur)}</span></div>
             ))}
           </div>
-          <Button className="w-full mt-4" onClick={checkout} disabled={checkingOut || cart.length === 0}>{checkingOut ? 'Processing…' : paymentMethod === 'M-Pesa' && (totalByCurrency.KES || 0) > 0 ? 'Pay with M-Pesa' : 'Charge'}</Button>
+          <Button className="w-full mt-4" onClick={checkout} disabled={checkingOut || cart.length === 0 || (currentStaffId && !customerId)}>{checkingOut ? 'Processing…' : paymentMethod === 'M-Pesa' && (totalByCurrency.KES || 0) > 0 ? 'Pay with M-Pesa' : 'Charge'}</Button>
         </Card>
       </div>
 
