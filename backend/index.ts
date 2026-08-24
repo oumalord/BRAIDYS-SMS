@@ -1,4 +1,4 @@
-import { router, json, error, db, ai, storage, currentContext } from './runtime';
+import { router, json, error, db, ai, storage, currentContext } from './runtime.ts';
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 
 const DAY = 24 * 3600 * 1000;

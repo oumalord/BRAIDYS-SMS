@@ -13,6 +13,7 @@
         "db:purge-demo": "tsx database/purge-demo.ts",
         "db:add-braidys-staff": "tsx database/add-braidys-staff.ts",
         "build": "vite build",
+        "vercel-build": "esbuild backend/server.ts --bundle --platform=node --format=cjs --outfile=api/server.cjs && vite build",
         "preview": "vite preview"
     },
     "dependencies": {
