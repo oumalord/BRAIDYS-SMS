@@ -297,10 +297,6 @@ async function seedDemoData() {
       totalByCurrency[cur] = subtotalByCurrency[cur] - d;
     }
 
-    const orderItems = items.map((it: any) => ({
-      ...it,
-      lineTotalAfterDiscount: Math.round((it.price || 0) * (it.qty || 0) * (1 - discountPct / 100)),
-    }));
     const d = new Date(now - daysAgo * DAY);
     d.setHours(hour, Math.floor(Math.random() * 50), 0, 0);
     orderSeeds.push({ customerId, customerName, items: itemsWithCurrency, discountPct, subtotalByCurrency, discountByCurrency, totalByCurrency, paymentMethod, createdAt: d.getTime() });
@@ -409,10 +405,10 @@ export const handler = router({
   }],
   'POST /api/branches': [async ({ body }) => {
     const context = currentContext();
-    if (!['owner', 'admin'].includes(context?.role || '')) return error('Only the owner or administrator can add branches', 403);
+    if (!context || !['owner', 'admin'].includes(context.role)) return error('Only the owner or administrator can add branches', 403);
     const name = String(body?.name || '').trim();
     if (!name) return error('Branch name is required', 400);
-    const salonId = context.role === 'admin' ? String(body?.salonId || '') : context.tenantId;
+    const salonId = context!.role === 'admin' ? String(body?.salonId || '') : context!.tenantId;
     const [salon] = await db.get('salons', [salonId]);
     if (!salon) return error('Choose a valid salon', 400);
     const branchId = `${salonId}-${randomBytes(6).toString('hex')}`;
@@ -588,8 +584,8 @@ export const handler = router({
     const search = String(query.query || query.email || query.phone || '').trim();
     const normalizedSearch = search.toLowerCase().replace(/\s+/g, '');
     if (!search) return error('A name, email or phone number is required', 400);
-    const { items: customers } = await db.listAllTenant('customers', context?.tenantId || '', { limit: 2000 });
     const context = currentContext();
+    const { items: customers } = context?.role === 'admin' ? await db.list('customers', { limit: 2000 }) : await db.listAllTenant('customers', context?.tenantId || '', { limit: 2000 });
     let customer = (customers as any[]).find(item => [item.name, item.email, item.phone, item.id].some(value => String(value || '').toLowerCase().replace(/\s+/g, '').includes(normalizedSearch)));
     if (!customer && context?.role === 'customer') {
       const [account] = await db.get('accounts', [context.accountId]);
@@ -775,7 +771,7 @@ export const handler = router({
     await audit(`status:${patch.status || 'updated'}`, 'queue', updated, patch.actor || existing.staffName || 'staff');
     return json({ ok: true });
   }],
-  'DELETE /api/queue/:id': [async ({ params }) => {
+  'DELETE /api/queue/:id': [async () => {
     return error('Records cannot be deleted. Update the queue status to preserve the audit trail.', 405);
   }],
 
@@ -958,7 +954,7 @@ export const handler = router({
   }],
   'GET /api/payroll/staff': [async () => {
     const context = currentContext();
-    if (!['owner', 'admin'].includes(context?.role || '')) return error('Only the owner or administrator can view payroll staff', 403);
+    if (!context || !['owner', 'admin'].includes(context.role)) return error('Only the owner or administrator can view payroll staff', 403);
     const { items } = context.role === 'admin' ? await db.list('staff', { limit: 2000 }) : await db.listAllTenant('staff', context.tenantId, { limit: 2000 });
     const from = Date.now() - 14 * DAY;
     const { items: orders } = context.role === 'admin' ? await db.list('orders', { limit: 5000 }) : await db.listAllTenant('orders', context.tenantId, { limit: 5000 });
@@ -984,7 +980,7 @@ export const handler = router({
   }],
   'POST /api/payouts': [async ({ body }) => {
     const context = currentContext();
-    if (!['owner', 'admin'].includes(context?.role || '')) return error('Only the owner or administrator can record payouts', 403);
+    if (!context || !['owner', 'admin'].includes(context.role)) return error('Only the owner or administrator can record payouts', 403);
     const range = body?.range === 'today' || body?.range === 'week' || body?.range === 'fortnight' || body?.range === 'month' || body?.range === 'all' ? body.range : 'fortnight';
     const now = Date.now();
     let from = 0;
@@ -1025,7 +1021,7 @@ export const handler = router({
   }],
   'POST /api/payroll/send': [async ({ body }) => {
     const context = currentContext();
-    if (!['owner', 'admin'].includes(context?.role || '')) return error('Only the owner or administrator can send payroll', 403);
+    if (!context || !['owner', 'admin'].includes(context.role)) return error('Only the owner or administrator can send payroll', 403);
     const recipients = Array.isArray(body?.recipients) ? body.recipients : [];
     if (!recipients.length) return error('Add at least one employee to payroll', 400);
     const initiator = process.env.MPESA_B2C_INITIATOR_NAME;
@@ -1098,7 +1094,7 @@ export const handler = router({
       const totals = o.totalByCurrency || (typeof o.total === 'number' ? { KES: o.total } : {});
       for (const cur of Object.keys(totals)) revenueByCurrency[cur] = (revenueByCurrency[cur] || 0) + totals[cur];
       const method = o.paymentMethod === 'Card' || o.paymentMethod === 'M-Pesa' ? o.paymentMethod : 'Cash';
-      paymentMethodTotals[method] += Number(totals.KES || 0);
+      paymentMethodTotals[method as 'Cash' | 'Card' | 'M-Pesa'] += Number(totals.KES || 0);
     }
 
     let productCost = 0;
@@ -1308,7 +1304,7 @@ export const handler = router({
     const filtered = (items as any[]).filter(m => m.channel === channel).sort((a, b) => a.createdAt - b.createdAt);
     return json({ items: filtered });
   }],
-  'POST /api/messages': [async ({ body }) => {
+  'POST /api/messages': [async () => {
     return error('Communication is email-only. Use email notifications or promotion campaigns.', 410);
   }],
 
@@ -1437,7 +1433,7 @@ export const handler = router({
     return json({ ok: true });
   }],
   'GET /api/mpesa/status/:id': [async ({ params }) => {
-    const [txn] = await db.get('mpesa_transactions', [params.id]);
+    const [txn] = await db.get('mpesa_transactions', [params.id]) as any[];
     if (!txn) return error('Transaction not found', 404);
     if (txn.status === 'pending' && !process.env.MPESA_CONSUMER_KEY && Date.now() - (txn.createdAt as number) > 3500) {
       const receipt = 'S' + Math.random().toString(36).slice(2, 10).toUpperCase();
@@ -1451,8 +1447,8 @@ export const handler = router({
     const path = 'assets/salon-bg-v2.png';
     const [existing] = await storage.read([path]);
     if (!existing || !existing.content) {
-      const result = await ai.imageGen({ prompt: 'A luxurious, cinematic abstract background for a premium salon and barbershop app. Deep black base with vivid electric blue and vibrant magenta neon light streaks, soft glowing color orbs, glossy reflective dark surface, subtle bokeh, high-end beauty brand aesthetic, elegant and moody, no text, no logos, no people, no faces, wide 16:9 composition, ultra detailed.' });
-      const [ok] = await storage.write([{ path, content: result.image.data, contentType: result.image.mimeType || 'image/png' }]);
+      const result = await ai.imageGen();
+      const [ok] = await storage.write([{ path, content: result.image.data }]);
       if (!ok) return error('Failed to generate background image', 500);
     }
     const [{ url }] = await storage.url([path]);

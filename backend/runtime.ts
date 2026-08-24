@@ -55,7 +55,7 @@ export const db = {
     }
     return ids;
   },
-  async list(collection: string, options?: { limit?: number }) {
+  async list(collection: string, options?: { limit?: number }): Promise<{ items: any[] }> {
     await init();
     const limit = Math.min(Math.max(Number(options?.limit || 100), 1), 5000);
     const context = currentContext();
@@ -71,13 +71,13 @@ export const db = {
         : await sql`SELECT id, record FROM app_records WHERE collection = ${collection} AND tenant_id = ${tenantId} ORDER BY created_at ASC LIMIT ${limit}` as StoredRecord[];
     return { items: rows.map(row => ({ ...(row.record || {}), id: row.id })) };
   },
-  async listAllTenant(collection: string, tenantId: string, options?: { limit?: number }) {
+  async listAllTenant(collection: string, tenantId: string, options?: { limit?: number }): Promise<{ items: any[] }> {
     await init();
     const limit = Math.min(Math.max(Number(options?.limit || 100), 1), 5000);
     const rows = await sql`SELECT id, record FROM app_records WHERE collection = ${collection} AND tenant_id = ${tenantId} ORDER BY created_at ASC LIMIT ${limit}` as StoredRecord[];
     return { items: rows.map(row => ({ ...(row.record || {}), id: row.id })) };
   },
-  async get(collection: string, ids: string[]) {
+  async get(collection: string, ids: string[]): Promise<any[]> {
     await init();
     if (!ids.length) return [];
     const context = currentContext();
