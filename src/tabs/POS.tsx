@@ -1,14 +1,18 @@
 import { useEffect, useState } from 'react';
 import { ShoppingCart } from 'lucide-react';
 import { Card, Button, Modal, Field, Input, Select, toast } from '../components/ui';
-import { CustomersApi, ServicesApi, ProductsApi, StaffApi, OrdersApi, fmtMoney } from '../lib/api';
+import { CustomersApi, ServicesApi, ProductsApi, StaffApi, OrdersApi, AppointmentsApi, fmtMoney } from '../lib/api';
 import { MpesaPayModal } from '../components/MpesaPay';
-import type { Customer, ServiceItem, Product, Staff, Currency } from '../types';
+import type { Appointment, Customer, ServiceItem, Product, Staff, Currency } from '../types';
 
-interface CartLine { key: string; type: 'service' | 'product'; refId: string; name: string; price: number; currency: Currency; qty: number; staffId?: string; staffName?: string; }
+interface CartLine { key: string; type: 'service' | 'product'; refId: string; name: string; price: number; currency: Currency; qty: number; staffId?: string; staffName?: string; helperStaffId?: string; helperStaffName?: string; }
 
-function POS({ onSaleComplete }: { onSaleComplete: () => void }) {
+function todayStr() { return new Date().toISOString().slice(0, 10); }
+function assistantPayment(amount: number) { return amount <= 1800 ? 200 : amount <= 2400 ? 300 : 400; }
+
+function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: () => void; appointment?: Appointment; currentStaffId?: string }) {
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [servingClients, setServingClients] = useState<Customer[]>([]);
   const [services, setServices] = useState<ServiceItem[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [staff, setStaff] = useState<Staff[]>([]);
@@ -27,7 +31,24 @@ function POS({ onSaleComplete }: { onSaleComplete: () => void }) {
     Promise.all([CustomersApi.list(), ServicesApi.list(), ProductsApi.list(), StaffApi.list()]).then(([c, s, p, st]) => { setCustomers(c); setServices(s); setProducts(p); setStaff(st); });
   }, []);
 
-  const addService = (s: ServiceItem) => setCart(c => [...c, { key: `${s.id}-${Date.now()}`, type: 'service', refId: s.id, name: s.name, price: s.price, currency: s.currency, qty: 1 }]);
+  useEffect(() => {
+    if (!currentStaffId) return;
+    AppointmentsApi.list(todayStr()).then(appointments => {
+      const clientIds = new Set(appointments
+        .filter(item => item.staffId === currentStaffId && ['checked-in', 'in-service'].includes(item.status) && item.customerId)
+        .map(item => item.customerId as string));
+      setServingClients(customers.filter(customer => clientIds.has(customer.id)));
+    }).catch(() => toast('Could not load your checked-in clients.', 'error'));
+  }, [currentStaffId, customers]);
+
+  useEffect(() => {
+    if (!appointment || !services.length || cart.length) return;
+    const service = services.find(item => item.id === appointment.serviceId);
+    if (service) addService(service);
+    if (appointment.customerId) setCustomerId(appointment.customerId);
+  }, [appointment, services]);
+
+  const addService = (s: ServiceItem) => setCart(c => [...c, { key: `${s.id}-${Date.now()}`, type: 'service', refId: s.id, name: s.name, price: s.price, currency: s.currency, qty: 1, staffId: currentStaffId }]);
   const addProduct = (p: Product) => {
     setCart(c => {
       const existing = c.find(l => l.type === 'product' && l.refId === p.id);
@@ -40,6 +61,10 @@ function POS({ onSaleComplete }: { onSaleComplete: () => void }) {
     const s = staff.find(x => x.id === staffId);
     setCart(c => c.map(l => l.key === key ? { ...l, staffId: s?.id, staffName: s?.name } : l));
   };
+  const setLineHelper = (key: string, helperStaffId: string) => {
+    const helper = staff.find(x => x.id === helperStaffId);
+    setCart(c => c.map(l => l.key === key ? { ...l, helperStaffId: helper?.id, helperStaffName: helper?.name } : l));
+  };
   const setLineQty = (key: string, qty: number) => setCart(c => c.map(l => l.key === key ? { ...l, qty: Math.max(1, qty) } : l));
 
   const currencies = Array.from(new Set(cart.map(l => l.currency)));
@@ -47,8 +72,13 @@ function POS({ onSaleComplete }: { onSaleComplete: () => void }) {
   for (const l of cart) subtotalByCurrency[l.currency] = (subtotalByCurrency[l.currency] || 0) + l.price * l.qty;
   const totalByCurrency: Record<string, number> = {};
   for (const cur of currencies) totalByCurrency[cur] = Math.round((subtotalByCurrency[cur] || 0) * (1 - discountPct / 100));
+  const serviceTotal = cart.filter(line => line.type === 'service').reduce((sum, line) => sum + line.price * line.qty, 0);
+  const productTotal = cart.filter(line => line.type === 'product').reduce((sum, line) => sum + line.price * line.qty, 0);
+  const assistantTotal = cart.filter(line => line.type === 'service' && line.helperStaffId).reduce((sum, line) => sum + assistantPayment(line.price * line.qty), 0);
+  const expectedIncome = Math.max(0, serviceTotal - assistantTotal) * 0.5;
 
-  const selectedCustomer = customers.find(c => c.id === customerId);
+  const customerOptions = currentStaffId ? servingClients : customers;
+  const selectedCustomer = customerOptions.find(c => c.id === customerId);
 
   const doCheckout = async (mpesaReceiptNumber?: string) => {
     setCheckingOut(true);
@@ -56,8 +86,8 @@ function POS({ onSaleComplete }: { onSaleComplete: () => void }) {
       const { data } = await OrdersApi.checkout({
         customerId: selectedCustomer?.id || null,
         customerName: selectedCustomer?.name || 'Walk-in Customer',
-        items: cart.map(l => ({ type: l.type, refId: l.refId, name: l.name, price: l.price, currency: l.currency, qty: l.qty, staffId: l.staffId || null, staffName: l.staffName || null })),
-        discountPct, paymentMethod, promoCode: promoCode.trim() || undefined, redeemPoints: redeemPoints || undefined, mpesaReceiptNumber,
+        items: cart.map(l => ({ type: l.type, refId: l.refId, name: l.name, price: l.price, currency: l.currency, qty: l.qty, staffId: l.staffId || null, staffName: l.staffName || null, helperStaffId: l.helperStaffId || null, helperStaffName: l.helperStaffName || null, assistantPayment: l.type === 'service' && l.helperStaffId ? assistantPayment(l.price * l.qty) : 0 })),
+        discountPct, paymentMethod, promoCode: promoCode.trim() || undefined, redeemPoints: redeemPoints || undefined, mpesaReceiptNumber, appointmentId: appointment?.id,
       });
       setReceipt({ ...data, customerName: selectedCustomer?.name || 'Walk-in Customer', items: cart, paymentMethod });
       setCart([]); setDiscountPct(0); setCustomerId(''); setPromoCode(''); setRedeemPoints(0); setShowPay(false);
@@ -86,7 +116,7 @@ function POS({ onSaleComplete }: { onSaleComplete: () => void }) {
 
   return (
     <div className="space-y-6">
-      <div><h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2"><ShoppingCart size={20} aria-hidden="true" />Point of Sale</h1><p className="text-sm text-[#6E6E73]">Build a cart, assign staff, and take payment in KES or USD.</p></div>
+      <div><h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2"><ShoppingCart size={20} aria-hidden="true" />{appointment ? `Complete ${appointment.customerName}'s appointment` : 'Point of Sale'}</h1><p className="text-sm text-[#6E6E73]">{appointment ? 'Add products used, review the exact total, and record payment to complete the appointment.' : 'Build a cart, assign staff, and take payment in KES or USD.'}</p></div>
 
       <div className="grid lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-4">
@@ -143,10 +173,17 @@ function POS({ onSaleComplete }: { onSaleComplete: () => void }) {
                     </div>
                   )}
                   {l.type === 'service' && (
-                    <Select aria-label={`Assign staff for ${l.name}`} className="mt-1 text-xs py-1.5" value={l.staffId || ''} onChange={e => setLineStaff(l.key, e.target.value)}>
-                      <option value="">Assign staff…</option>
-                      {staff.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                    </Select>
+                    <div className="mt-1 space-y-1.5">
+                      <Select aria-label={`Assign staff for ${l.name}`} className="text-xs py-1.5" value={l.staffId || ''} onChange={e => setLineStaff(l.key, e.target.value)}>
+                        <option value="">Assign staff…</option>
+                        {staff.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                      </Select>
+                      <Select aria-label={`Assign assistant for ${l.name}`} className="text-xs py-1.5" value={l.helperStaffId || ''} onChange={e => setLineHelper(l.key, e.target.value)}>
+                        <option value="">No assistant</option>
+                        {staff.filter(s => s.id !== l.staffId).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                      </Select>
+                      {l.helperStaffId && <p className="text-xs text-[#6E6E73]">Assistant payment: {fmtMoney(assistantPayment(l.price * l.qty), 'KES')}</p>}
+                    </div>
                   )}
                 </div>
               ))}
@@ -157,7 +194,7 @@ function POS({ onSaleComplete }: { onSaleComplete: () => void }) {
             <Field label="Customer" htmlFor="pos-customer">
               <Select id="pos-customer" value={customerId} onChange={e => setCustomerId(e.target.value)}>
                 <option value="">Walk-in Customer</option>
-                {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                {customerOptions.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </Select>
             </Field>
             <Field label="Discount %" htmlFor="pos-discount"><Input id="pos-discount" type="number" min={0} max={100} value={discountPct} onChange={e => setDiscountPct(Number(e.target.value))} /></Field>
@@ -170,9 +207,16 @@ function POS({ onSaleComplete }: { onSaleComplete: () => void }) {
                 <option>M-Pesa</option><option>Cash</option><option>Card</option>
               </Select>
             </Field>
+            {appointment && paymentMethod !== 'M-Pesa' && <p className="rounded-xl bg-[#0071e3]/10 px-3 py-2 text-sm text-[#0058b0]">{paymentMethod === 'Cash' ? 'Ask the client to pay the receptionist in cash.' : 'Ask the client to present their card to the receptionist.'}</p>}
           </div>
 
           <div className="border-t border-black/5 mt-4 pt-4 space-y-1 text-sm">
+            {appointment && <>
+              <div className="flex justify-between"><span>Service fee total</span><span>{fmtMoney(serviceTotal, 'KES')}</span></div>
+              <div className="flex justify-between"><span>Products total</span><span>{fmtMoney(productTotal, 'KES')}</span></div>
+              <div className="flex justify-between"><span>Assistant payments</span><span>-{fmtMoney(assistantTotal, 'KES')}</span></div>
+              <div className="flex justify-between font-medium"><span>Expected employee income (50%)</span><span>{fmtMoney(expectedIncome, 'KES')}</span></div>
+            </>}
             {currencies.length === 0 ? (
               <div className="flex justify-between font-semibold text-base"><span>Total</span><span>{fmtMoney(0, 'KES')}</span></div>
             ) : currencies.map(cur => (

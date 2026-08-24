@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import express from 'express';
-import { handler } from './index';
+import { ensurePlatformAdmin, handler } from './index';
 import { db, withRequestContext } from './runtime';
 import { createHash } from 'node:crypto';
 
@@ -34,12 +34,17 @@ async function resolveContext(request: any) {
   const [account] = await db.get('accounts', [session.accountId]);
   if (!account || account.status !== 'active') return null;
   let branchId = account.branchId;
-  const requestedBranchId = String(request.headers['x-branch-id'] || '');
-  if ((normalizeRole(account.role) === 'owner' || normalizeRole(account.role) === 'manager') && requestedBranchId) {
-    const [branch] = await db.get('branches', [requestedBranchId]);
-    if (branch && branch.salonId === account.tenantId && branch.status === 'active') branchId = branch.id;
+  const role = normalizeRole(account.role);
+  const hasBranchSelection = Object.prototype.hasOwnProperty.call(request.headers, 'x-branch-id');
+  if ((role === 'owner' || role === 'manager' || role === 'admin') && hasBranchSelection) {
+    const requestedBranchId = String(request.headers['x-branch-id'] || '');
+    if (!requestedBranchId) branchId = undefined;
+    else {
+      const [branch] = await db.get('branches', [requestedBranchId]);
+      if (branch && (role === 'admin' || branch.salonId === account.tenantId) && branch.status === 'active') branchId = branch.id;
+    }
   }
-  return { accountId: account.id, tenantId: account.tenantId, salonName: account.salonName, branchId, role: normalizeRole(account.role), name: account.name };
+  return { accountId: account.id, tenantId: account.tenantId, salonName: account.salonName, branchId, role, name: account.name, staffId: account.staffId };
 }
 
 const publicRoutes = new Set(['/api/_healthcheck', '/api/public/salons', '/api/public/branches', '/api/auth/login', '/api/auth/signup', '/api/auth/demo', '/api/mpesa/callback', '/api/payroll/timeout', '/api/payroll/result']);
@@ -63,4 +68,9 @@ for (const [definition, [routeHandler]] of Object.entries(handler.routes)) {
   });
 }
 
-app.listen(port, () => console.log(`SafiGroom API listening on http://localhost:${port}`));
+ensurePlatformAdmin().then(() => {
+  app.listen(port, () => console.log(`SafiGroom API listening on http://localhost:${port}`));
+}).catch(cause => {
+  console.error('Could not initialize platform admin account', cause);
+  process.exitCode = 1;
+});

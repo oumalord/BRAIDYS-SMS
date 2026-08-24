@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Plus, Calendar, Clock, Pencil } from 'lucide-react';
 import { Card, Button, Badge, Modal, Field, Input, Select, EmptyState, LoadingState, toast } from '../components/ui';
 import { AppointmentsApi, StaffApi, ServicesApi, CustomersApi, fmtKES } from '../lib/api';
+import POS from './POS';
 import type { Appointment, Staff, ServiceItem, Customer, AppointmentStatus, Role } from '../types';
 
 function todayStr() { return new Date().toISOString().slice(0, 10); }
@@ -26,6 +27,7 @@ function Appointments({ role }: { role: Role }) {
   const [form, setForm] = useState({ customerId: '', customerName: '', customerPhone: '', customerEmail: '', serviceId: '', staffId: '', time: '10:00' });
   const [editing, setEditing] = useState<Appointment | null>(null);
   const [editForm, setEditForm] = useState({ serviceId: '', date: '', time: '', staffId: '' });
+  const [checkoutAppointment, setCheckoutAppointment] = useState<Appointment | null>(null);
 
   useEffect(() => {
     Promise.all([StaffApi.list(), ServicesApi.list(), CustomersApi.list()]).then(([s, sv, c]) => { setStaff(s); setServices(sv); setCustomers(c); });
@@ -95,6 +97,7 @@ function Appointments({ role }: { role: Role }) {
   const advance = async (a: Appointment) => {
     const next = STATUS_FLOW[a.status];
     if (!next) return;
+    if (next === 'completed') { setCheckoutAppointment(a); return; }
     await AppointmentsApi.update(a.id, { status: next });
     reload();
   };
@@ -137,6 +140,8 @@ function Appointments({ role }: { role: Role }) {
   };
 
   const sorted = [...appts].sort((a, b) => a.time.localeCompare(b.time));
+  let account: { staffId?: string } | null = null;
+  try { account = JSON.parse(window.localStorage.getItem('safigroom_account') || 'null'); } catch { account = null; }
 
   return (
     <div className="space-y-6">
@@ -163,9 +168,9 @@ function Appointments({ role }: { role: Role }) {
                   <p className="text-sm text-[#6E6E73]">{a.serviceName} · {a.staffName || 'Awaiting employee assignment'} · {fmtKES(a.price)}</p>
               </div>
               <Badge tone={STATUS_TONE[a.status]}>{a.status.replace('-', ' ')}</Badge>
-              <div className="flex flex-wrap gap-2">
-                {role === 'owner' || role === 'receptionist' ? (!['completed', 'cancelled', 'no-show'].includes(a.status) && <Button size="sm" variant="secondary" onClick={() => beginEdit(a)}><Pencil size={14} aria-hidden="true" />Edit</Button>) : null}
-                  {!['completed', 'cancelled', 'no-show'].includes(a.status) && (
+              {(role === 'owner' || role === 'admin' || role === 'receptionist' || (role === 'barber' && a.staffId === account?.staffId)) && <div className="flex flex-wrap gap-2">
+                {(role === 'owner' || role === 'admin') && !['completed', 'cancelled', 'no-show'].includes(a.status) && <Button size="sm" variant="secondary" onClick={() => beginEdit(a)}><Pencil size={14} aria-hidden="true" />Edit</Button>}
+                {(role === 'owner' || role === 'admin') && !['completed', 'cancelled', 'no-show'].includes(a.status) && (
                     <Select aria-label={`Assign employee for ${a.customerName}`} value={a.staffId || ''} onChange={e => {
                       const selected = staff.find(s => s.id === e.target.value);
                       AppointmentsApi.update(a.id, { staffId: selected?.id || null, staffName: selected?.name || null }).then(reload);
@@ -174,10 +179,10 @@ function Appointments({ role }: { role: Role }) {
                       {staff.filter(s => s.status === 'available' || s.id === a.staffId).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                     </Select>
                   )}
-                {STATUS_FLOW[a.status] && <Button size="sm" variant="secondary" onClick={() => advance(a)}>Mark {STATUS_FLOW[a.status]?.replace('-', ' ')}</Button>}
+                {STATUS_FLOW[a.status] && <Button size="sm" variant="secondary" onClick={() => advance(a)}>{STATUS_FLOW[a.status] === 'completed' ? 'Open POS & complete' : `Mark ${STATUS_FLOW[a.status]?.replace('-', ' ')}`}</Button>}
                 {!['completed', 'cancelled', 'no-show'].includes(a.status) && <Button size="sm" variant="ghost" onClick={() => setStatus(a, 'no-show')}>No-show</Button>}
                 {!['completed', 'cancelled'].includes(a.status) && <Button size="sm" variant="danger" onClick={() => setStatus(a, 'cancelled')}>Cancel</Button>}
-              </div>
+              </div>}
             </Card>
           ))}
         </div>
@@ -240,6 +245,8 @@ function Appointments({ role }: { role: Role }) {
           </div>
         </Modal>
       )}
+
+      {checkoutAppointment && <Modal title="Complete appointment" onClose={() => setCheckoutAppointment(null)}><POS appointment={checkoutAppointment} onSaleComplete={() => { setCheckoutAppointment(null); reload(); }} /></Modal>}
 
     </div>
   );

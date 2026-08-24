@@ -6,7 +6,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 type RouteHandler = (context: { body: any; query: Record<string, string>; params: Record<string, string> }) => Promise<any>;
 
 type StoredRecord = { id: string; collection: string; record: Record<string, any> };
-type RequestContext = { accountId: string; tenantId: string; salonName: string; branchId?: string; role: string; name: string };
+type RequestContext = { accountId: string; tenantId: string; salonName: string; branchId?: string; role: string; name: string; staffId?: string };
 
 const connectionString = process.env.DATABASE_URL || process.env.VITE_NEON_DATABASE_URL;
 if (!connectionString) throw new Error('DATABASE_URL is required to start the backend');
@@ -60,9 +60,13 @@ export const db = {
     const limit = Math.min(Math.max(Number(options?.limit || 100), 1), 5000);
     const context = currentContext();
     const tenantId = context?.tenantId || null;
-    const branchId = context?.role === 'barber' || context?.role === 'receptionist' || context?.role === 'manager' ? context?.branchId || null : null;
-    const rows = globalCollections.has(collection) || context?.role === 'admin'
+    const branchId = context?.branchId || null;
+    const rows = globalCollections.has(collection)
       ? await sql`SELECT id, record FROM app_records WHERE collection = ${collection} ORDER BY created_at ASC LIMIT ${limit}` as StoredRecord[]
+      : context?.role === 'admin' && branchId
+        ? await sql`SELECT id, record FROM app_records WHERE collection = ${collection} AND record->>'branchId' = ${branchId} ORDER BY created_at ASC LIMIT ${limit}` as StoredRecord[]
+        : context?.role === 'admin'
+          ? await sql`SELECT id, record FROM app_records WHERE collection = ${collection} ORDER BY created_at ASC LIMIT ${limit}` as StoredRecord[]
       : branchId ? await sql`SELECT id, record FROM app_records WHERE collection = ${collection} AND tenant_id = ${tenantId} AND record->>'branchId' = ${branchId} ORDER BY created_at ASC LIMIT ${limit}` as StoredRecord[]
         : await sql`SELECT id, record FROM app_records WHERE collection = ${collection} AND tenant_id = ${tenantId} ORDER BY created_at ASC LIMIT ${limit}` as StoredRecord[];
     return { items: rows.map(row => ({ ...(row.record || {}), id: row.id })) };
@@ -78,7 +82,7 @@ export const db = {
     if (!ids.length) return [];
     const context = currentContext();
     const tenantId = context?.tenantId || null;
-    const branchId = context?.role === 'barber' || context?.role === 'receptionist' || context?.role === 'manager' ? context?.branchId || null : null;
+    const branchId = context?.branchId || null;
     const rows = globalCollections.has(collection) || context?.role === 'admin'
       ? await sql`SELECT id, record FROM app_records WHERE collection = ${collection} AND id = ANY(${ids})` as StoredRecord[]
       : branchId ? await sql`SELECT id, record FROM app_records WHERE collection = ${collection} AND tenant_id = ${tenantId} AND record->>'branchId' = ${branchId} AND id = ANY(${ids})` as StoredRecord[]
@@ -92,6 +96,7 @@ export const db = {
     const tenantId = context?.tenantId || null;
     for (const update of updates) {
       if (globalCollections.has(collection)) await sql`UPDATE app_records SET record = ${JSON.stringify({ ...update.record, id: update.id })}::jsonb WHERE collection = ${collection} AND id = ${update.id}`;
+      else if (context?.role === 'admin') await sql`UPDATE app_records SET record = ${JSON.stringify({ ...update.record, id: update.id, tenantId: update.record.tenantId || tenantId })}::jsonb WHERE collection = ${collection} AND id = ${update.id}`;
       else await sql`UPDATE app_records SET record = ${JSON.stringify({ ...update.record, id: update.id, tenantId })}::jsonb WHERE collection = ${collection} AND tenant_id = ${tenantId} AND id = ${update.id}`;
     }
     return updates.map(() => true);

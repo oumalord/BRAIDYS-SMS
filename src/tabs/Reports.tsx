@@ -34,7 +34,8 @@ function OwnerReport({ range }: { range: Range }) {
     const perf = data.topStaff.filter(t => t.name === s.name);
     const commission = perf.reduce((sum, p) => sum + (p.currency === 'KES' ? p.commission : 0), 0);
     const serviceRevenue = perf.reduce((sum, p) => sum + (p.currency === 'KES' ? p.revenue : 0), 0);
-    return { name: s.name, role: s.role, serviceRevenue, commission };
+    const helperDeductions = perf.reduce((sum, p) => sum + (p.currency === 'KES' ? p.helperDeductions : 0), 0);
+    return { name: s.name, role: s.role, serviceRevenue, helperDeductions, commission };
   });
 
   const handleDownload = () => {
@@ -51,8 +52,8 @@ function OwnerReport({ range }: { range: Range }) {
       ['Expenses (KES)', data.expenseTotal],
       ['Net Profit after commission and expenses (KES)', profitKES],
       [],
-      ['Staff', 'Role', 'Service Revenue (KES)', 'Commission Rate', 'Commission Earned (KES)'],
-      ...commissionStatement.map(p => [p.name, p.role, Math.round(p.serviceRevenue), '40%', Math.round(p.commission)]),
+      ['Staff', 'Role', 'Service Revenue (KES)', 'Assistant Payments (KES)', 'Commission Rate', 'Expected Income (KES)'],
+      ...commissionStatement.map(p => [p.name, p.role, Math.round(p.serviceRevenue), Math.round(p.helperDeductions), '50%', Math.round(p.commission)]),
     ];
     downloadCSV(`safigroom-owner-report-${range}.csv`, rows);
   };
@@ -61,7 +62,7 @@ function OwnerReport({ range }: { range: Range }) {
     <div className="space-y-6">
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard label="Revenue" value={fmtMoney(revenueKES, 'KES')} icon={TrendingUp} tone="success" />
-        <StatCard label="Commission Rate" value="40%" sub="Completed service work" icon={Users} />
+        <StatCard label="Commission Rate" value="50%" sub="After product and helper deductions" icon={Users} />
         <StatCard label="Commissions" value={fmtMoney(commissionsKES, 'KES')} icon={Users} />
         <StatCard label="Net Profit" value={fmtMoney(profitKES, 'KES')} icon={TrendingUp} tone={profitKES >= 0 ? 'success' : 'danger'} />
       </div>
@@ -75,19 +76,20 @@ function OwnerReport({ range }: { range: Range }) {
         </div>
         <table className="w-full text-sm">
           <caption className="sr-only">Staff commission statement</caption>
-          <thead><tr className="text-left text-xs text-[#6E6E73] border-b border-black/5"><th className="pb-2">Staff</th><th className="pb-2">Role</th><th className="pb-2">Service Revenue</th><th className="pb-2">Commission</th></tr></thead>
+          <thead><tr className="text-left text-xs text-[#6E6E73] border-b border-black/5"><th className="pb-2">Staff</th><th className="pb-2">Role</th><th className="pb-2">Service Revenue</th><th className="pb-2">Assistant Payments</th><th className="pb-2">Expected Income</th></tr></thead>
           <tbody>
             {commissionStatement.map(p => (
               <tr key={p.name} className="border-b border-black/5 last:border-0">
                 <td className="py-2">{p.name}</td>
                 <td className="py-2">{p.role}</td>
                 <td className="py-2">{fmtMoney(p.serviceRevenue, 'KES')}</td>
+                <td className="py-2">-{fmtMoney(p.helperDeductions, 'KES')}</td>
                 <td className="py-2">{fmtMoney(p.commission, 'KES')}</td>
               </tr>
             ))}
           </tbody>
         </table>
-        <p className="text-xs text-[#6E6E73] mt-3">Each employee receives exactly 40% of their completed service revenue. Net profit subtracts commissions, product cost and recorded expenses.</p>
+        <p className="text-xs text-[#6E6E73] mt-3">Employees receive 50% of service revenue after assistant payments. The owner controls commission corrections.</p>
       </Card>
     </div>
   );
@@ -152,6 +154,13 @@ function ReceptionistReport({ range }: { range: Range }) {
         </div>
         <p className="text-sm text-[#6E6E73]">This report reflects appointments, queue handling and POS transactions recorded for the selected range. Share it with the owner as evidence of front-desk performance.</p>
       </Card>
+      <Card className="p-6">
+        <h2 className="font-semibold mb-4">Employee income breakdown</h2>
+        <div className="space-y-2 text-sm">
+          {data.topStaff.map(staffMember => <div key={`${staffMember.name}-${staffMember.currency}`} className="flex items-center justify-between border-b border-black/5 pb-2"><span>{staffMember.name}</span><span>{fmtMoney(staffMember.revenue, staffMember.currency)} - {fmtMoney(staffMember.helperDeductions, staffMember.currency)} assistants = <strong>{fmtMoney(staffMember.commission, staffMember.currency)}</strong></span></div>)}
+          {!data.topStaff.length && <p className="text-[#6E6E73]">No employee service income recorded for this range.</p>}
+        </div>
+      </Card>
     </div>
   );
 }
@@ -162,12 +171,12 @@ function Reports({ role }: { role: Role }) {
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div><h1 className="text-2xl font-semibold tracking-tight">Reports</h1><p className="text-sm text-[#6E6E73]">{role === 'owner' ? 'Full business performance, including commission costs.' : 'Your front-desk performance summary.'}</p></div>
+        <div><h1 className="text-2xl font-semibold tracking-tight">Reports</h1><p className="text-sm text-[#6E6E73]">{role === 'owner' || role === 'admin' ? 'Full business performance, including commission costs.' : 'Your front-desk performance summary.'}</p></div>
         <Select aria-label="Report range" value={range} onChange={e => setRange(e.target.value as Range)} className="w-auto" style={{ width: 'auto' }}>
           <option value="today">Today</option><option value="week">This Week</option><option value="month">This Month</option><option value="all">All Time</option>
         </Select>
       </div>
-      {role === 'owner' ? <OwnerReport range={range} /> : <ReceptionistReport range={range} />}
+      {role === 'owner' || role === 'admin' ? <OwnerReport range={range} /> : <ReceptionistReport range={range} />}
     </div>
   );
 }

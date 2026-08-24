@@ -7,6 +7,7 @@ type Directory = { salons: any[]; branches: any[]; accounts: any[] };
 
 function Admin() {
   const [directory, setDirectory] = useState<Directory | null>(null);
+  const [loadError, setLoadError] = useState('');
   const [showSalon, setShowSalon] = useState(false);
   const [showBranch, setShowBranch] = useState(false);
   const [salon, setSalon] = useState({ name: '', branchName: 'Main Branch', ownerName: '', ownerEmail: '', ownerPhone: '', ownerPassword: '' });
@@ -14,8 +15,16 @@ function Admin() {
   const [reset, setReset] = useState<{ id: string; email: string } | null>(null);
   const [newPassword, setNewPassword] = useState('');
 
-  const load = () => AdminApi.directory().then(setDirectory).catch((cause: any) => toast(cause?.message || 'Could not load admin directory.', 'error'));
+  const load = () => {
+    setLoadError('');
+    AdminApi.directory().then(setDirectory).catch((cause: any) => {
+      const message = cause?.name === 'AbortError' ? 'The directory request timed out.' : cause?.message || 'Could not load admin directory.';
+      setLoadError(message);
+      toast(message, 'error');
+    });
+  };
   useEffect(() => { void load(); }, []);
+  if (loadError) return <div className="flex flex-col items-center justify-center py-16 text-center"><p className="font-medium">Could not load the platform directory.</p><p className="mt-1 text-sm text-[#6E6E73]">{loadError}</p><Button className="mt-4" onClick={load}><RefreshCw size={14} aria-hidden="true" />Try again</Button></div>;
   if (!directory) return <LoadingState label="Loading platform directory..." />;
 
   const createSalon = async () => {

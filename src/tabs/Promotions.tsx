@@ -40,7 +40,7 @@ function Promotions({ role }: { role: Role }) {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div><h1 className="text-2xl font-semibold tracking-tight">Promotions</h1><p className="text-sm text-[#6E6E73]">Create discount codes for reception to apply at checkout. Codes needing approval stay inactive until the owner approves them.</p></div>
-        {role === 'owner' && <Button onClick={() => setOpen(true)}><Plus size={16} aria-hidden="true" />New Promotion</Button>}
+        {(role === 'owner' || role === 'admin') && <Button onClick={() => setOpen(true)}><Plus size={16} aria-hidden="true" />New Promotion</Button>}
       </div>
 
       {promos.length === 0 ? <EmptyState icon={Percent} title="No promotions yet" description="Create a discount code to run your first promotion." /> : (
@@ -56,7 +56,7 @@ function Promotions({ role }: { role: Role }) {
               </div>
               {p.description && <p className="text-sm text-[#6E6E73] mt-2">{p.description}</p>}
               {(p.startDate || p.endDate) && <p className="text-xs text-[#6E6E73] mt-2">{p.startDate || 'Any date'} → {p.endDate || 'No end date'}</p>}
-              {role === 'owner' && (
+              {(role === 'owner' || role === 'admin') && (
                 <div className="flex gap-2 mt-3">
                   {p.requiresApproval && !p.approved && <Button size="sm" onClick={() => approve(p)}>Approve</Button>}
                   <Button size="sm" variant="secondary" onClick={() => toggleActive(p)}>{p.active ? 'Deactivate' : 'Reactivate'}</Button>

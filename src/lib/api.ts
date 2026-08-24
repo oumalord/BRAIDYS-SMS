@@ -10,12 +10,15 @@ const api = {
 async function request(path: string, method = 'GET', body?: unknown): Promise<any> {
   const token = window.localStorage.getItem('safigroom_session');
   const branchId = window.localStorage.getItem('safigroom_selected_branch');
+  let account: { role?: string } | null = null;
+  try { account = JSON.parse(window.localStorage.getItem('safigroom_account') || 'null'); } catch { account = null; }
+  const canSelectBranch = account?.role === 'owner' || account?.role === 'manager' || account?.role === 'admin';
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), 15000);
   try {
     const response = await fetch(path, {
       method,
-      headers: { ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(branchId ? { 'X-Branch-ID': branchId } : {}) },
+      headers: { ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(canSelectBranch ? { 'X-Branch-ID': branchId || '' } : {}) },
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: controller.signal,
     });
@@ -34,25 +37,27 @@ export const fmtKES = (n: number) => fmtMoney(n, 'KES');
 // unchanged data every time. Mutations invalidate the relevant prefix.
 const cache = new Map<string, { data: unknown; ts: number }>();
 function cached<T>(key: string, ttlMs: number, fetcher: () => Promise<T>): Promise<T> {
-  const hit = cache.get(key);
+  const scope = `${window.localStorage.getItem('safigroom_account') || ''}:${window.localStorage.getItem('safigroom_selected_branch') || 'all'}`;
+  const scopedKey = `${scope}:${key}`;
+  const hit = cache.get(scopedKey);
   if (hit && Date.now() - hit.ts < ttlMs) return Promise.resolve(hit.data as T);
-  return fetcher().then(data => { cache.set(key, { data, ts: Date.now() }); return data; });
+  return fetcher().then(data => { cache.set(scopedKey, { data, ts: Date.now() }); return data; });
 }
 function invalidate(prefix: string) {
-  for (const k of cache.keys()) if (k.startsWith(prefix)) cache.delete(k);
+  for (const k of cache.keys()) if (k.endsWith(`:${prefix}`) || k.includes(`:${prefix}:`)) cache.delete(k);
 }
 
 export const seed = () => api.post('/api/seed');
 
 export const AuthApi = {
-  login: async (email: string, password: string) => {
-    const result = await api.post('/api/auth/login', { email, password });
+  login: async (identifier: string, credential: string) => {
+    const result = await api.post('/api/auth/login', { identifier, credential });
     window.localStorage.setItem('safigroom_session', result.data.token);
     window.localStorage.setItem('safigroom_account', JSON.stringify(result.data.account));
     if (result.data.account.branchId) window.localStorage.setItem('safigroom_selected_branch', result.data.account.branchId);
     return result.data.account;
   },
-  signup: async (payload: { name: string; email: string; phone: string; password: string; salonId: string }) => {
+  signup: async (payload: { name: string; email: string; phone: string; pin: string; salonId: string; branchId: string }) => {
     const result = await api.post('/api/auth/signup', payload);
     window.localStorage.setItem('safigroom_session', result.data.token);
     window.localStorage.setItem('safigroom_account', JSON.stringify(result.data.account));
@@ -84,7 +89,8 @@ export const AdminApi = {
 export const StaffApi = {
   list: () => cached('staff:list', 20000, () => api.get('/api/staff').then(r => r.data.items as Staff[])),
   create: (s: Partial<Staff>) => api.post('/api/staff', s).then(r => { invalidate('staff'); return r; }),
-  update: (id: string, patch: Partial<Staff>) => api.put(`/api/staff/${id}`, patch).then(r => { invalidate('staff'); return r; }),
+  update: (id: string, patch: Partial<Staff> & { password?: string }) => api.put(`/api/staff/${id}`, patch).then(r => { invalidate('staff'); return r; }),
+  changeMyPin: (pin: string) => api.post('/api/staff/me/pin', { pin }),
 };
 
 export const ServicesApi = {
@@ -95,7 +101,8 @@ export const ServicesApi = {
 export const CustomersApi = {
   list: () => cached('customers:list', 15000, () => api.get('/api/customers').then(r => r.data.items as Customer[])),
   create: (c: Partial<Customer>) => api.post('/api/customers', c).then(r => { invalidate('customers'); return r; }),
-  update: (id: string, patch: Partial<Customer>) => api.put(`/api/customers/${id}`, patch).then(r => { invalidate('customers'); return r; }),
+  update: (id: string, patch: Partial<Customer> & { pin?: string }) => api.put(`/api/customers/${id}`, patch).then(r => { invalidate('customers'); return r; }),
+  changePin: (customerId: string, pin: string) => api.post(`/api/customers/${customerId}/pin`, { pin }),
 };
 
 export const AppointmentsApi = {
@@ -105,7 +112,7 @@ export const AppointmentsApi = {
 };
 
 export const CustomerApi = {
-  find: (email: string, phone: string) => api.get(`/api/customer/dashboard?email=${encodeURIComponent(email)}&phone=${encodeURIComponent(phone)}`).then(r => r.data),
+  find: (query: string) => api.get(`/api/customer/dashboard?query=${encodeURIComponent(query)}`).then(r => r.data),
   membershipPurchase: (payload: { customerId: string; planId: string; mpesaReceiptNumber?: string }) => api.post('/api/memberships/purchase', payload).then(r => { invalidate('customers'); return r; }),
 };
 
@@ -137,7 +144,7 @@ export const ExpensesApi = {
 
 export const PayoutsApi = {
   list: () => api.get('/api/payouts').then(r => r.data.items as PayoutBatch[]),
-  record: (range: 'today' | 'week' | 'month' | 'all') => api.post('/api/payouts', { range }),
+  record: (range: 'today' | 'week' | 'fortnight' | 'month' | 'all') => api.post('/api/payouts', { range }),
 };
 
 export const PayrollApi = {

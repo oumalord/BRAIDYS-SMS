@@ -11,6 +11,7 @@
         "db:migrate-payment-methods": "tsx database/migrate-payment-methods.ts",
         "db:clone-branch": "tsx database/clone-branch-data.ts",
         "db:purge-demo": "tsx database/purge-demo.ts",
+        "db:add-braidys-staff": "tsx database/add-braidys-staff.ts",
         "build": "vite build",
         "preview": "vite preview"
     },

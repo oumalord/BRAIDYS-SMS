@@ -51,6 +51,7 @@ function Dashboard() {
         <StatCard label="Estimated Profit" value={fmtMoney(profitKES, 'KES')} sub="After cost, commission, salaries & expenses" icon={TrendingUp} tone={profitKES >= 0 ? 'success' : 'danger'} />
         <StatCard label="Appointments Today" value={String(data.todaysAppointmentsCount)} sub={`${data.waitingQueueCount} waiting in queue`} icon={Calendar} />
         <StatCard label="Active Staff" value={`${data.activeStaffCount}/${data.totalStaffCount}`} sub="currently on shift" icon={Users} />
+        <StatCard label="Registered Customers" value={String(data.customersCount)} sub="all customer profiles" icon={Users} />
       </div>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
@@ -88,6 +89,10 @@ function Dashboard() {
       </div>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+        <Card className="xl:col-span-3 p-4 sm:p-6">
+          <h2 className="font-semibold mb-4">Registered Customers</h2>
+          {data.customers.length === 0 ? <p className="text-sm text-[#6E6E73]">No customer profiles registered yet.</p> : <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{data.customers.map(customer => <div key={customer.id} className="flex items-center justify-between border-b border-black/5 pb-2 text-sm"><span>{customer.name}</span><span className="text-xs text-[#6E6E73]">{customer.phone || customer.email || 'No contact'}</span></div>)}</div>}
+        </Card>
         <Card className="p-4 sm:p-4 sm:p-6">
           <h2 className="font-semibold mb-4">Top Staff by Revenue</h2>
           {data.topStaff.length === 0 ? <p className="text-sm text-[#6E6E73]">No sales recorded yet.</p> : (
@@ -128,6 +133,10 @@ function Dashboard() {
           )}
         </Card>
       </div>
+      <Card className="p-4 sm:p-6">
+        <h2 className="font-semibold mb-4">Service income by client</h2>
+        {data.commissionByClient.length === 0 ? <p className="text-sm text-[#6E6E73]">No paid services recorded for this range.</p> : <div className="space-y-2 text-sm">{data.commissionByClient.slice(-12).reverse().map((item, index) => <div key={`${item.clientId || item.clientName}-${item.createdAt}-${index}`} className="grid gap-1 border-b border-black/5 pb-2 sm:grid-cols-[1fr_1fr_auto] sm:items-center"><span>{item.clientName}</span><span className="text-[#6E6E73]">{item.serviceName} · {item.staffName}</span><span className="font-medium">{fmtMoney(item.commission, item.currency)} expected</span></div>)}</div>}
+      </Card>
     </div>
   );
 }

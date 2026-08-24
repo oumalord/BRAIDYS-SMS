@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { UserPlus, Users } from 'lucide-react';
 import { Card, Button, Badge, Modal, Field, Input, Select, EmptyState, LoadingState, toast } from '../components/ui';
-import { QueueApi, StaffApi } from '../lib/api';
+import { AuthApi, QueueApi, StaffApi } from '../lib/api';
 import type { QueueEntry, Staff } from '../types';
 
 interface ColumnProps { title: string; tone: 'neutral' | 'warning' | 'success'; count: number; children: ReactNode; }
@@ -49,6 +49,8 @@ function Queue() {
   const waiting = items.filter(i => i.status === 'waiting').sort((a, b) => a.position - b.position);
   const inService = items.filter(i => i.status === 'in-service');
   const completed = items.filter(i => i.status === 'completed').slice(-5);
+  const account = AuthApi.account();
+  const canManageAll = ['owner', 'manager', 'receptionist'].includes(account?.role);
 
   if (loading) return <LoadingState label="Loading queue…" />;
 
@@ -75,9 +77,7 @@ function Queue() {
                 <p className="font-medium text-sm mt-1">{q.customerName}</p>
                 {q.ticketNumber && <p className="text-xs font-semibold text-[#0071e3] mt-1">Ticket {q.ticketNumber}</p>}
                 <p className="text-xs text-[#6E6E73]">{q.serviceName || 'No service specified'}{q.staffName ? ` · ${q.staffName}` : ''}</p>
-                <div className="flex gap-2 mt-2">
-                  <Button size="sm" onClick={() => callNext(q.id)}>Call Next</Button>
-                </div>
+                {(canManageAll || q.staffId === account?.staffId) && <div className="flex gap-2 mt-2"><Button size="sm" onClick={() => callNext(q.id)}>Call Next</Button></div>}
               </div>
             ))}
           </Column>
@@ -88,7 +88,7 @@ function Queue() {
                 <p className="font-medium text-sm">{q.customerName}</p>
                 {q.ticketNumber && <p className="text-xs font-semibold text-[#0071e3] mt-1">Ticket {q.ticketNumber}</p>}
                 <p className="text-xs text-[#6E6E73]">{q.serviceName || 'No service specified'}{q.staffName ? ` · ${q.staffName}` : ''}</p>
-                <Button size="sm" className="mt-2" onClick={() => complete(q.id)}>Mark Served</Button>
+                {(canManageAll || q.staffId === account?.staffId) && <Button size="sm" className="mt-2" onClick={() => complete(q.id)}>Mark Served</Button>}
               </div>
             ))}
           </Column>

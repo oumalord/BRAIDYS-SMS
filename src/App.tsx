@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Home, Calendar, Users, Scissors, Contact, ShoppingCart, Package, DollarSign, Sparkles, Menu, X, Tag, BarChart3, CreditCard, Percent, ClipboardList, Building2 } from 'lucide-react';
-import { AuthApi, BranchesApi } from './lib/api';
-import { ToastHost, toast } from './components/ui';
+import { Home, Calendar, Users, Scissors, Contact, ShoppingCart, Package, DollarSign, Sparkles, Menu, X, Tag, BarChart3, CreditCard, Percent, ClipboardList, Building2, KeyRound } from 'lucide-react';
+import { AuthApi, BranchesApi, StaffApi } from './lib/api';
+import { Button, Field, Input, Modal, ToastHost, toast } from './components/ui';
 import type { Branch, Role } from './types';
 import Dashboard from './tabs/Dashboard';
 import Appointments from './tabs/Appointments';
@@ -19,28 +19,29 @@ import Promotions from './tabs/Promotions';
 import CustomerBooking from './tabs/CustomerBooking';
 import AuditLogs from './tabs/AuditLogs';
 import CustomerDashboard from './tabs/CustomerDashboard';
+import EmployeeDashboard from './tabs/EmployeeDashboard';
 import AuthScreen from './components/AuthScreen';
 import Admin from './tabs/Admin';
 
 type TabKey = 'dashboard' | 'appointments' | 'queue' | 'messages' | 'staff' | 'customers' | 'pos' | 'inventory' | 'services' | 'memberships' | 'promotions' | 'reports' | 'finance' | 'ai' | 'booking' | 'logs' | 'admin';
 
 const TABS: { key: TabKey; label: string; icon: any; roles: Role[] }[] = [
-  { key: 'dashboard', label: 'Dashboard', icon: Home, roles: ['owner', 'customer'] },
-  { key: 'appointments', label: 'Appointments', icon: Calendar, roles: ['owner', 'manager', 'receptionist', 'barber'] },
-  { key: 'queue', label: 'Queue', icon: Users, roles: ['owner', 'manager', 'receptionist', 'barber'] },
-  { key: 'staff', label: 'Staff & Chairs', icon: Scissors, roles: ['owner', 'manager', 'receptionist'] },
-  { key: 'services', label: 'Services', icon: Tag, roles: ['owner', 'manager', 'receptionist'] },
-  { key: 'memberships', label: 'Memberships', icon: CreditCard, roles: ['owner'] },
-  { key: 'promotions', label: 'Promotions', icon: Percent, roles: ['owner', 'manager', 'receptionist'] },
-  { key: 'customers', label: 'Customers', icon: Contact, roles: ['owner', 'manager', 'receptionist'] },
-  { key: 'pos', label: 'Point of Sale', icon: ShoppingCart, roles: ['owner', 'manager', 'receptionist'] },
-  { key: 'inventory', label: 'Inventory', icon: Package, roles: ['owner'] },
-  { key: 'finance', label: 'Finance', icon: DollarSign, roles: ['owner'] },
-  { key: 'reports', label: 'Reports', icon: BarChart3, roles: ['owner', 'manager', 'receptionist'] },
-  { key: 'ai', label: 'AI Assistant', icon: Sparkles, roles: ['owner'] },
+  { key: 'dashboard', label: 'Dashboard', icon: Home, roles: ['owner', 'barber', 'customer', 'admin'] },
+  { key: 'appointments', label: 'Appointments', icon: Calendar, roles: ['owner', 'manager', 'receptionist', 'barber', 'admin'] },
+  { key: 'queue', label: 'Queue', icon: Users, roles: ['owner', 'manager', 'receptionist', 'barber', 'admin'] },
+  { key: 'staff', label: 'Staff & Chairs', icon: Scissors, roles: ['owner', 'manager', 'receptionist', 'admin'] },
+  { key: 'services', label: 'Services', icon: Tag, roles: ['owner', 'manager', 'receptionist', 'admin'] },
+  { key: 'memberships', label: 'Memberships', icon: CreditCard, roles: ['owner', 'admin'] },
+  { key: 'promotions', label: 'Promotions', icon: Percent, roles: ['owner', 'manager', 'receptionist', 'admin'] },
+  { key: 'customers', label: 'Customers', icon: Contact, roles: ['owner', 'manager', 'receptionist', 'admin'] },
+  { key: 'pos', label: 'Point of Sale', icon: ShoppingCart, roles: ['owner', 'manager', 'receptionist', 'barber', 'admin'] },
+  { key: 'inventory', label: 'Inventory', icon: Package, roles: ['owner', 'admin'] },
+  { key: 'finance', label: 'Finance', icon: DollarSign, roles: ['owner', 'admin'] },
+  { key: 'reports', label: 'Reports', icon: BarChart3, roles: ['owner', 'manager', 'receptionist', 'admin'] },
+  { key: 'ai', label: 'AI Assistant', icon: Sparkles, roles: ['owner', 'admin'] },
   { key: 'booking', label: 'Book Appointment', icon: Calendar, roles: ['customer'] },
   { key: 'logs', label: 'Audit Logs', icon: ClipboardList, roles: ['owner'] },
-  { key: 'admin', label: 'Admin', icon: Building2, roles: ['owner'] },
+  { key: 'admin', label: 'Admin', icon: Building2, roles: ['admin'] },
 ];
 
 function normalizeRole(role: unknown): Role {
@@ -63,15 +64,33 @@ function SelectBranch({ branches, value, onChange }: { branches: Branch[]; value
 
 function App() {
   const [ready] = useState(true);
-  const [tab, setTab] = useState<TabKey>(() => initialTabFor(AuthApi.account()));
+  const [tab, setTab] = useState<TabKey>('dashboard');
   const [menuOpen, setMenuOpen] = useState(false);
-  const [account, setAccount] = useState<any | null>(() => AuthApi.account());
+  const [account, setAccount] = useState<any | null>(null);
+  const [pinForm, setPinForm] = useState({ pin: '', confirm: '' });
+  const [savingPin, setSavingPin] = useState(false);
+  const [posAppointment, setPosAppointment] = useState<any | undefined>(undefined);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [selectedBranchId, setSelectedBranchId] = useState(() => window.localStorage.getItem('safigroom_selected_branch') || '');
   const effectiveRole = normalizeRole(account?.role);
+  const mustChangePin = Boolean(account?.requiresPinChange && ['barber', 'receptionist'].includes(effectiveRole));
+
+  const changeInitialPin = async () => {
+    if (!/^\d{4}$/.test(pinForm.pin) || pinForm.pin !== pinForm.confirm) { toast('Enter matching 4-digit PINs.', 'error'); return; }
+    setSavingPin(true);
+    try {
+      await StaffApi.changeMyPin(pinForm.pin);
+      const updatedAccount = { ...account, requiresPinChange: false };
+      setAccount(updatedAccount);
+      window.localStorage.setItem('safigroom_account', JSON.stringify(updatedAccount));
+      setPinForm({ pin: '', confirm: '' });
+      toast('PIN changed successfully.', 'success');
+    } catch (cause: any) { toast(cause?.message || 'Could not change your PIN.', 'error'); }
+    finally { setSavingPin(false); }
+  };
 
   useEffect(() => {
-    if (effectiveRole !== 'owner' || account?.role === 'admin') return;
+    if (!['owner', 'admin'].includes(effectiveRole)) return;
     let alive = true;
     BranchesApi.list().then(loaded => {
       if (!alive) return;
@@ -98,7 +117,7 @@ function App() {
 
   const visibleTabs = TABS.filter(t => t.roles.includes(effectiveRole) && (t.key !== 'admin' || account?.role === 'admin'));
   if (account?.role === 'admin') visibleTabs.sort((first, second) => (first.key === 'admin' ? -1 : second.key === 'admin' ? 1 : 0));
-  const isOwner = effectiveRole === 'owner';
+  const isOwner = effectiveRole === 'owner' || effectiveRole === 'admin';
 
   if (!account) return <AuthScreen onAuthenticated={authenticatedAccount => {
     setAccount(authenticatedAccount);
@@ -211,21 +230,22 @@ function App() {
               <div className="flex items-center justify-center py-24 text-[#6E6E73]" role="status">Loading SafiGroom OS…</div>
             ) : (
               <>
-                {tab === 'dashboard' && effectiveRole === 'owner' && <Dashboard />}
-                {tab === 'dashboard' && effectiveRole === 'customer' && <CustomerDashboard onBook={() => setTab('booking')} />}
+                {tab === 'dashboard' && (effectiveRole === 'owner' || effectiveRole === 'admin') && <Dashboard />}
+                {tab === 'dashboard' && effectiveRole === 'barber' && <EmployeeDashboard account={account} onAddService={appointment => { setPosAppointment(appointment); setTab('pos'); }} />}
+                {tab === 'dashboard' && effectiveRole === 'customer' && <CustomerDashboard account={account} onBook={() => setTab('booking')} />}
                 {tab === 'appointments' && <Appointments role={effectiveRole} />}
                 {tab === 'queue' && <Queue />}
                 {tab === 'staff' && <StaffTab role={effectiveRole} />}
                 {tab === 'services' && <Services />}
                 {tab === 'memberships' && <Memberships />}
                 {tab === 'promotions' && <Promotions role={effectiveRole} />}
-                {tab === 'customers' && <CustomersTab />}
-                {tab === 'pos' && <POS onSaleComplete={() => toast('Sale completed and recorded.', 'success')} />}
+                {tab === 'customers' && <CustomersTab role={effectiveRole} />}
+                {tab === 'pos' && <POS appointment={posAppointment} currentStaffId={account?.staffId} onSaleComplete={() => { setPosAppointment(undefined); toast('Sale completed and recorded.', 'success'); }} />}
                 {tab === 'inventory' && <Inventory />}
                 {tab === 'finance' && <Finance />}
                 {tab === 'reports' && <Reports role={effectiveRole} />}
                 {tab === 'ai' && <AIAssistant />}
-                {tab === 'booking' && <CustomerBooking />}
+                {tab === 'booking' && <CustomerBooking account={account} />}
                 {tab === 'logs' && <AuditLogs />}
                 {tab === 'admin' && account?.role === 'admin' && <Admin />}
               </>
@@ -256,6 +276,13 @@ function App() {
           </nav>
         </div>
       )}
+      {mustChangePin && <Modal title="Change your PIN" onClose={() => {}} footer={<Button onClick={changeInitialPin} disabled={savingPin}>{savingPin ? 'Saving...' : 'Save new PIN'}</Button>}>
+        <div className="space-y-4">
+          <div className="flex items-center gap-3 rounded-xl bg-[#0071e3]/10 p-3 text-sm text-[#0058b0]"><KeyRound size={18} aria-hidden="true" /><span>Change the default PIN before continuing.</span></div>
+          <Field label="New 4-digit PIN" htmlFor="first-login-pin"><Input id="first-login-pin" type="password" inputMode="numeric" maxLength={4} value={pinForm.pin} onChange={event => setPinForm(current => ({ ...current, pin: event.target.value.replace(/\D/g, '').slice(0, 4) }))} /></Field>
+          <Field label="Confirm new PIN" htmlFor="first-login-pin-confirm"><Input id="first-login-pin-confirm" type="password" inputMode="numeric" maxLength={4} value={pinForm.confirm} onChange={event => setPinForm(current => ({ ...current, confirm: event.target.value.replace(/\D/g, '').slice(0, 4) }))} /></Field>
+        </div>
+      </Modal>}
       <ToastHost />
     </div>
   );

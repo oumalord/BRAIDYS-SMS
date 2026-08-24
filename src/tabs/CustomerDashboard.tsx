@@ -7,8 +7,8 @@ import type { Appointment, Customer, MembershipPlan, Review } from '../types';
 
 interface DashboardState { customer: Customer; appointments: Appointment[]; queue: any[]; reviews: Review[]; membershipPurchases: any[]; }
 
-function CustomerDashboard({ onBook }: { onBook: () => void }) {
-  const [identity, setIdentity] = useState({ email: '', phone: '' });
+function CustomerDashboard({ account, onBook }: { account: { email?: string; phone?: string }; onBook: () => void }) {
+  const [identity, setIdentity] = useState({ query: account.email || account.phone || '' });
   const [data, setData] = useState<DashboardState | null>(null);
   const [plans, setPlans] = useState<MembershipPlan[]>([]);
   const [loading, setLoading] = useState(false);
@@ -18,10 +18,24 @@ function CustomerDashboard({ onBook }: { onBook: () => void }) {
 
   useEffect(() => { MembershipsApi.list().then(setPlans).catch(() => {}); }, []);
 
-  const load = async () => {
-    if (!identity.email.trim() && !identity.phone.trim()) { toast('Enter the email or phone used for booking.', 'error'); return; }
+  useEffect(() => {
+    if (!identity.query) return;
+    let active = true;
     setLoading(true);
-    try { setData(await CustomerApi.find(identity.email, identity.phone)); }
+    CustomerApi.find(identity.query).then(result => {
+      if (active) setData(result);
+    }).catch((cause: any) => {
+      if (active) toast(cause?.message || 'Customer profile not found.', 'error');
+    }).finally(() => {
+      if (active) setLoading(false);
+    });
+    return () => { active = false; };
+  }, [account.email, account.phone]);
+
+  const load = async () => {
+    if (!identity.query.trim()) { toast('Enter a name, email or phone number.', 'error'); return; }
+    setLoading(true);
+    try { setData(await CustomerApi.find(identity.query)); }
     catch (cause: any) { toast(cause?.message || 'Customer profile not found.', 'error'); }
     finally { setLoading(false); }
   };
@@ -52,8 +66,7 @@ function CustomerDashboard({ onBook }: { onBook: () => void }) {
     <div className="max-w-xl mx-auto py-8 space-y-6">
       <div><h1 className="text-2xl font-semibold tracking-tight">Customer Dashboard</h1><p className="text-sm text-[#6E6E73]">View your appointments, queue tickets, membership coins and feedback history.</p></div>
       <Card className="p-6 space-y-4">
-        <Field label="Email used for booking" htmlFor="customer-dashboard-email"><Input id="customer-dashboard-email" type="email" value={identity.email} onChange={event => setIdentity(current => ({ ...current, email: event.target.value }))} placeholder="you@example.com" /></Field>
-        <Field label="Or phone used for booking" htmlFor="customer-dashboard-phone"><Input id="customer-dashboard-phone" value={identity.phone} onChange={event => setIdentity(current => ({ ...current, phone: event.target.value }))} placeholder="0712345678" /></Field>
+        <Field label="Search your profile" htmlFor="customer-dashboard-search"><Input id="customer-dashboard-search" value={identity.query} onChange={event => setIdentity({ query: event.target.value })} placeholder="Search by name, email or phone" /></Field>
         <Button className="w-full" onClick={load}>Open my dashboard</Button>
       </Card>
     </div>

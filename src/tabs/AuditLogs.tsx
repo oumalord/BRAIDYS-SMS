@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ClipboardList, RefreshCw } from 'lucide-react';
-import { AuditApi } from '../lib/api';
+import { AuditApi, downloadCSV } from '../lib/api';
 import { Badge, Button, Card, LoadingState, EmptyState, toast } from '../components/ui';
 import type { AuditLog } from '../types';
 
@@ -12,6 +12,10 @@ function AuditLogs() {
     setLoading(true);
     AuditApi.list().then(setLogs).catch(() => toast('Could not load audit logs.', 'error')).finally(() => setLoading(false));
   };
+  const downloadLogs = () => downloadCSV(`safigroom-audit-log-${new Date().toISOString().slice(0, 10)}.csv`, [
+    ['Time', 'Action', 'Area', 'Actor', 'Details'],
+    ...logs.map(log => [new Date(log.createdAt).toISOString(), log.action, log.collection, log.actor, log.summary]),
+  ]);
   useEffect(load, []);
 
   if (loading) return <LoadingState label="Loading audit trail..." />;
@@ -20,7 +24,7 @@ function AuditLogs() {
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-3">
         <div><h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2"><ClipboardList size={21} aria-hidden="true" />Audit Logs</h1><p className="text-sm text-[#6E6E73]">Every committed booking, assignment, sale, expense, inventory change and employment action is preserved.</p></div>
-        <Button size="sm" variant="secondary" onClick={load}><RefreshCw size={14} aria-hidden="true" />Refresh</Button>
+        <div className="flex gap-2"><Button size="sm" variant="secondary" onClick={load}><RefreshCw size={14} aria-hidden="true" />Refresh</Button><Button size="sm" variant="secondary" onClick={downloadLogs} disabled={!logs.length}>Download CSV</Button></div>
       </div>
       {logs.length === 0 ? <EmptyState icon={ClipboardList} title="No audit events yet" description="Committed business activity will appear here." /> : (
         <Card className="p-5 overflow-hidden">
