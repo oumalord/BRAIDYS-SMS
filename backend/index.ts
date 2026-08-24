@@ -383,7 +383,8 @@ export const handler = router({
     if (!branch) return error('Selected branch was not found in this salon', 400);
     const account = { id: `account-${randomBytes(8).toString('hex')}`, tenantId: salonId, salonName: salon.name, branchId, name, email, phone, role: 'customer', status: 'active', pinHash: passwordHash(pin), createdAt: Date.now() };
     await db.add('accounts', [account]);
-    await db.add('customers', [{ id: account.id, name, phone, email, notes: '', loyaltyPoints: 0, totalSpent: 0, totalSpentUSD: 0, visits: 0, lastVisit: null, createdAt: Date.now(), membershipTier: 'none', membershipExpiry: null }]);
+    const customerId = `customer-${randomBytes(8).toString('hex')}`;
+    await db.add('customers', [{ id: customerId, name, phone, email, notes: '', loyaltyPoints: 0, totalSpent: 0, totalSpentUSD: 0, visits: 0, lastVisit: null, createdAt: Date.now(), membershipTier: 'none', membershipExpiry: null }]);
     const token = sessionToken();
     await db.add('sessions', [sessionRecord(token, account)]);
     return json({ token, account: { id: account.id, name, email, role: account.role, salonId, salonName: account.salonName, branchId } });
