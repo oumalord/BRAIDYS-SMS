@@ -1,1 +1,3 @@
-export { app as default } from '../backend/server';
+import { app } from '../backend/server';
+
+export default app;
