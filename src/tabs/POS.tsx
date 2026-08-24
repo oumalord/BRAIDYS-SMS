@@ -92,8 +92,10 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
       setReceipt({ ...data, customerName: selectedCustomer?.name || 'Walk-in Customer', items: cart, paymentMethod });
       setCart([]); setDiscountPct(0); setCustomerId(''); setPromoCode(''); setRedeemPoints(0); setShowPay(false);
       onSaleComplete();
-    } catch {
-      toast('Checkout failed. Please try again.', 'error');
+    } catch (err: any) {
+      console.error('Checkout error:', err);
+      const msg = err?.message || 'Checkout failed. Please try again.';
+      toast(msg, 'error');
       setShowPay(false);
     } finally {
       setCheckingOut(false);

@@ -66,7 +66,7 @@ export function Modal({ title, onClose, children, footer }: { title: string; onC
   }, [onClose]);
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-      <div role="dialog" aria-modal="true" aria-labelledby="modal-title" onClick={e => e.stopPropagation()} className="w-full sm:max-w-lg max-h-[80vh] flex flex-col rounded-3xl bg-white shadow-2xl overflow-hidden">
+      <div role="dialog" aria-modal="true" aria-labelledby="modal-title" onClick={e => e.stopPropagation()} className="w-full max-h-[90vh] flex flex-col rounded-3xl bg-white shadow-2xl overflow-hidden">
         <div className="flex items-center justify-between px-6 pt-6 pb-4 flex-shrink-0">
           <h2 id="modal-title" className="text-lg font-semibold">{title}</h2>
           <button onClick={onClose} aria-label="Close dialog" className="p-1.5 rounded-full hover:bg-black/5 focus-visible:ring-2 focus-visible:ring-[#2F6BFF]"><X size={18} /></button>
