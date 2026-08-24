@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { CalendarCheck, UserRound, Scissors, AlertTriangle } from 'lucide-react';
+import { CalendarCheck, UserRound, Scissors, AlertTriangle, DollarSign, Clock } from 'lucide-react';
 import { AppointmentsApi, fmtKES } from '../lib/api';
 import { Badge, Button, Card, EmptyState, LoadingState, toast } from '../components/ui';
 import type { Appointment } from '../types';
@@ -8,12 +8,25 @@ function todayStr() { return new Date().toISOString().slice(0, 10); }
 
 function EmployeeDashboard({ account, onAddService }: { account: { name?: string; staffId?: string }; onAddService: (appointment: Appointment) => void }) {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [dailyEarnings, setDailyEarnings] = useState(0);
+  const [waitingClients, setWaitingClients] = useState<Appointment[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let active = true;
-    AppointmentsApi.list().then(items => {
-      if (active) setAppointments(items.filter(item => item.staffId === account.staffId));
+    Promise.all([AppointmentsApi.list()]).then(([items]) => {
+      if (!active) return;
+      const staffAppointments = items.filter(item => item.staffId === account.staffId);
+      setAppointments(staffAppointments);
+      
+      // Calculate daily earnings from today's completed appointments
+      const todayCompleted = staffAppointments.filter(item => item.date === todayStr() && item.status === 'completed');
+      const earnings = todayCompleted.reduce((sum, item) => sum + (item.price || 0), 0);
+      setDailyEarnings(earnings);
+      
+      // Show waiting clients (those checked-in and waiting)
+      const waiting = staffAppointments.filter(item => item.date === todayStr() && ['checked-in', 'pending'].includes(item.status));
+      setWaitingClients(waiting);
     }).catch(() => toast('Could not load your assigned clients.', 'error')).finally(() => {
       if (active) setLoading(false);
     });
@@ -35,10 +48,23 @@ function EmployeeDashboard({ account, onAddService }: { account: { name?: string
         <p className="text-sm text-[#6E6E73]">Welcome, {account.name || 'employee'}. Only clients assigned to you are shown.</p>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Card className="p-5"><CalendarCheck size={18} className="text-[#0071e3]" aria-hidden="true" /><p className="mt-3 text-xs text-[#6E6E73]">Today</p><p className="text-2xl font-semibold">{todayAppointments.length}</p></Card>
+      <div className="grid gap-4 sm:grid-cols-3">
+        <Card className="p-5"><Clock size={18} className="text-[#0071e3]" aria-hidden="true" /><p className="mt-3 text-xs text-[#6E6E73]">Waiting Now</p><p className="text-2xl font-semibold">{waitingClients.length}</p></Card>
+        <Card className="p-5"><DollarSign size={18} className="text-green-600" aria-hidden="true" /><p className="mt-3 text-xs text-[#6E6E73]">Today's Earnings</p><p className="text-2xl font-semibold">{fmtKES(dailyEarnings)}</p></Card>
         <Card className="p-5"><UserRound size={18} className="text-[#0071e3]" aria-hidden="true" /><p className="mt-3 text-xs text-[#6E6E73]">Assigned clients</p><p className="text-2xl font-semibold">{assignedClients.length}</p></Card>
       </div>
+
+      {waitingClients.length > 0 && (
+        <Card className="p-5 border-l-4 border-l-orange-500 bg-orange-50/50">
+          <h2 className="font-semibold mb-3 flex items-center gap-2"><Clock size={16} className="text-orange-600" aria-hidden="true" />Clients Waiting for You</h2>
+          <div className="space-y-2">{waitingClients.map(client => (
+            <div key={client.id} className="flex items-center justify-between rounded-lg bg-white p-3 text-sm">
+              <div><p className="font-medium">{client.customerName}</p><p className="text-xs text-[#6E6E73]">{client.serviceName}</p></div>
+              <Button size="sm" onClick={() => onAddService(client)}>Start</Button>
+            </div>
+          ))}</div>
+        </Card>
+      )}
 
       {activeAppointments.length === 0 ? <EmptyState icon={UserRound} title="No assigned clients" description="Clients assigned to you will appear here." /> : (
         <div className="space-y-4">

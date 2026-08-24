@@ -1161,6 +1161,8 @@ export const handler = router({
       activeStaffCount: activeStaff.length, totalStaffCount: staffAll.length,
       waitingQueueCount: waitingQueue.length,
       customersCount: customersAll.length,
+      customers: customersAll.slice(0, 10),
+      commissionByClient,
       topStaff: Array.from(staffRevenue.values()).sort((a, b) => b.revenue - a.revenue).slice(0, 8),
       topServices: Array.from(serviceRevenue.values()).sort((a, b) => b.revenue - a.revenue).slice(0, 8),
       trend,
