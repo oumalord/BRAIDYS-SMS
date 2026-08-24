@@ -117,7 +117,7 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
 
   return (
     <div className="space-y-6">
-      <div><h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2"><ShoppingCart size={20} aria-hidden="true" />{appointment ? `Complete ${appointment.customerName}'s appointment` : 'Point of Sale'}</h1><p className="text-sm text-[#6E6E73]">{appointment ? 'Add products used, review the exact total, and record payment to complete the appointment.' : 'Build a cart, assign staff, and take payment in KES or USD.'}</p></div>
+      <div><h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2"><ShoppingCart size={20} aria-hidden="true" />{appointment ? `Complete ${appointment.customerName}'s appointment` : 'Point of Sale'}</h1><p className="text-sm text-[#6E6E73]">{appointment ? 'Add products used, review the exact total, and record payment to complete the appointment.' : 'Build a cart, assign staff, and take payment in KES or USD. Add multiple services from different staff for joint work.'}</p></div>
 
       <div className="grid lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-4">
@@ -155,7 +155,8 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
         </div>
 
         <Card className="p-5 h-fit sticky top-24">
-          <h2 className="font-semibold mb-3">Cart</h2>
+          <h2 className="font-semibold mb-1">Cart</h2>
+          <p className="text-xs text-[#6E6E73] mb-3">Assign each service to the staff member who performed it. Multiple services from different staff = joint work.</p>
           {cart.length === 0 ? <p className="text-sm text-[#6E6E73]">Add services or products to get started.</p> : (
             <div className="space-y-3 mb-4">
               {cart.map(l => (
@@ -164,6 +165,7 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
                     <div>
                       <p className="text-sm font-medium">{l.name}</p>
                       <p className="text-xs text-[#6E6E73]">{fmtMoney(l.price, l.currency)} × {l.qty}</p>
+                      {l.type === 'service' && l.staffName && <p className="text-xs font-medium text-blue-600">👤 {l.staffName}</p>}
                     </div>
                     <button onClick={() => removeLine(l.key)} aria-label={`Remove ${l.name} from cart`} className="text-xs text-[#FF3B30] hover:underline">Remove</button>
                   </div>
@@ -199,6 +201,43 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
                 {customerOptions.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </Select>
             </Field>
+
+            {(() => {
+              const servicesByStaff = new Map<string, { name: string; items: CartLine[]; total: number }>();
+              for (const line of cart.filter(l => l.type === 'service')) {
+                const staffId = line.staffId || 'unassigned';
+                const staffName = line.staffName || 'Unassigned';
+                const entry = servicesByStaff.get(staffId) || { name: staffName, items: [], total: 0 };
+                entry.items.push(line);
+                entry.total += line.price * line.qty;
+                servicesByStaff.set(staffId, entry);
+              }
+              const multiStaff = servicesByStaff.size > 1;
+              if (multiStaff && cart.some(l => l.type === 'service')) {
+                return (
+                  <div className="rounded-xl bg-blue-50 border border-blue-200 p-3">
+                    <p className="text-xs font-semibold text-blue-900 mb-2">👥 Joint Work Breakdown</p>
+                    <div className="space-y-2">
+                      {Array.from(servicesByStaff.values()).map(entry => (
+                        <div key={entry.name} className="text-xs">
+                          <p className="font-medium text-blue-800">{entry.name}</p>
+                          <ul className="ml-2 text-blue-700 space-y-0.5">
+                            {entry.items.map(item => (
+                              <li key={item.key}>
+                                · {item.name} {item.qty > 1 ? `× ${item.qty}` : ''} — {fmtMoney(item.price * item.qty, item.currency)}
+                              </li>
+                            ))}
+                          </ul>
+                          <p className="font-semibold text-blue-900 mt-1">Subtotal: {fmtMoney(entry.total, 'KES')}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              }
+              return null;
+            })()}
+            
             <Field label="Discount %" htmlFor="pos-discount"><Input id="pos-discount" type="number" min={0} max={100} value={discountPct} onChange={e => setDiscountPct(Number(e.target.value))} /></Field>
             <Field label="Promo code (optional)" htmlFor="pos-promo"><Input id="pos-promo" value={promoCode} onChange={e => setPromoCode(e.target.value.toUpperCase())} placeholder="e.g. TUESDAY15" /></Field>
             {customerId && (selectedCustomer?.loyaltyPoints || 0) > 0 && (
@@ -244,6 +283,37 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
           <div className="space-y-3 text-sm">
             <p className="text-[#6E6E73]">Receipt #{receipt.id?.slice(0, 8)} · {receipt.paymentMethod}</p>
             <p className="font-medium">{receipt.customerName}</p>
+            
+            {(() => {
+              const itemsByStaff = new Map<string, CartLine[]>();
+              for (const item of receipt.items) {
+                const staffKey = item.staffName || 'No staff assigned';
+                const items = itemsByStaff.get(staffKey) || [];
+                items.push(item);
+                itemsByStaff.set(staffKey, items);
+              }
+              if (itemsByStaff.size > 1 && receipt.items.some((i: CartLine) => i.type === 'service')) {
+                return (
+                  <div className="rounded-lg bg-blue-50 border border-blue-200 p-2">
+                    <p className="text-xs font-semibold text-blue-900 mb-2">👥 Joint Work Summary</p>
+                    <ul className="space-y-1 text-xs">
+                      {Array.from(itemsByStaff.entries()).map(([staff, items]) => (
+                        <li key={staff}>
+                          <p className="font-medium text-blue-800">{staff}</p>
+                          <ul className="ml-2 text-blue-700">
+                            {items.filter(i => i.type === 'service').map((item, idx) => (
+                              <li key={idx}>· {item.name} {item.qty > 1 ? `× ${item.qty}` : ''} — {fmtMoney(item.price * item.qty, item.currency)}</li>
+                            ))}
+                          </ul>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                );
+              }
+              return null;
+            })()}
+            
             <ul className="divide-y divide-black/5">
               {receipt.items.map((l: CartLine) => (
                 <li key={l.key} className="py-2 flex justify-between"><span>{l.name} × {l.qty}</span><span>{fmtMoney(l.price * l.qty, l.currency)}</span></li>
