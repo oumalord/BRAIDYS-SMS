@@ -98,8 +98,12 @@ function Appointments({ role }: { role: Role }) {
     const next = STATUS_FLOW[a.status];
     if (!next) return;
     if (next === 'completed') { setCheckoutAppointment(a); return; }
-    await AppointmentsApi.update(a.id, { status: next });
-    reload();
+    try {
+      await AppointmentsApi.update(a.id, { status: next });
+      reload();
+    } catch (cause: any) {
+      toast(cause?.message || `Could not mark as ${next}.`, 'error');
+    }
   };
   const setStatus = async (a: Appointment, status: AppointmentStatus) => {
     await AppointmentsApi.update(a.id, { status });
@@ -197,7 +201,15 @@ function Appointments({ role }: { role: Role }) {
             <Field label="Customer" htmlFor="appt-customer">
               <Select id="appt-customer" value={form.customerId} onChange={e => setForm(f => ({ ...f, customerId: e.target.value }))}>
                 <option value="">— New / walk-in customer —</option>
-                {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                {role === 'barber' ? (
+                  Array.from(new Map(
+                    appts
+                      .filter(a => a.staffId === account?.staffId && ['checked-in', 'in-service', 'pending', 'confirmed'].includes(a.status) && a.customerId)
+                      .map(a => [a.customerId, { id: a.customerId, name: a.customerName }])
+                  ).values()).map(c => <option key={c.id} value={c.id}>{c.name}</option>)
+                ) : (
+                  customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)
+                )}
               </Select>
             </Field>
             {!form.customerId && (

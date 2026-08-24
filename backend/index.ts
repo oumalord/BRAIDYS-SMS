@@ -591,9 +591,13 @@ export const handler = router({
     if (!customer && context?.role === 'customer') {
       const [account] = await db.get('accounts', [context.accountId]);
       if (account && [account.name, account.email, account.phone, account.id].some(value => String(value || '').toLowerCase().replace(/\s+/g, '').includes(normalizedSearch))) {
-        customer = { id: account.id, name: account.name, phone: account.phone || '', email: account.email || '', notes: '', loyaltyPoints: 0, totalSpent: 0, totalSpentUSD: 0, visits: 0, lastVisit: null, createdAt: Date.now(), membershipTier: 'none', membershipExpiry: null };
-        const existingCustomer = (customers as any[]).find(item => item.id === customer.id);
-        if (!existingCustomer) await db.add('customers', [customer]);
+        const existingCustomer = (customers as any[]).find(item => item.email === account.email);
+        if (!existingCustomer) {
+          customer = { id: `customer-${randomBytes(8).toString('hex')}`, name: account.name, phone: account.phone || '', email: account.email || '', notes: '', loyaltyPoints: 0, totalSpent: 0, totalSpentUSD: 0, visits: 0, lastVisit: null, createdAt: Date.now(), membershipTier: 'none', membershipExpiry: null };
+          await db.add('customers', [customer]);
+        } else {
+          customer = existingCustomer;
+        }
       }
     }
     if (!customer) return error('Customer profile not found', 404);
@@ -701,8 +705,9 @@ export const handler = router({
     if (!existing) return error('Appointment not found', 404);
     const patch: any = body;
     const isCancellation = patch.status === 'cancelled' || patch.status === 'no-show';
+    const isStatusOnlyChange = Object.keys(patch).length === 1 && 'status' in patch;
     if (context.role === 'barber' && existing.staffId !== context.staffId) return error('You can only update appointments assigned to you', 403);
-    if (!isCancellation && !['owner', 'admin'].includes(context.role)) return error('Only the owner or administrator can edit appointment details', 403);
+    if (!isCancellation && !isStatusOnlyChange && !['owner', 'admin', 'receptionist'].includes(context.role)) return error('Only the owner, administrator or receptionist can edit appointment details', 403);
     const editsDetails = patch.date || patch.time || patch.serviceId || patch.durationMin || 'staffId' in patch;
     if (editsDetails && !['owner', 'admin', 'receptionist'].includes(currentContext()?.role || '')) return error('Only the owner, administrator or receptionist can edit appointment details', 403);
     if (['completed', 'cancelled', 'no-show'].includes(existing.status) && (patch.date || patch.time || patch.serviceId || 'staffId' in patch)) return error('Completed or closed appointments cannot be edited', 409);
