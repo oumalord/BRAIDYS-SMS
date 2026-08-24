@@ -1,1 +1,3 @@
-module.exports = require('./server.cjs');
+import server from './server.cjs';
+
+export default server.app;
