@@ -371,11 +371,11 @@ export const handler = router({
     const phone = String(body?.phone || '').trim();
     const salonId = String(body?.salonId || '').trim();
     const branchId = String(body?.branchId || '').trim();
-    if (!name || !email || !/^\d{4}$/.test(pin)) return error('Name, email and a 4-digit PIN are required', 400);
+    if (!name || !phone || !/^\d{4}$/.test(pin)) return error('Name, phone and a 4-digit PIN are required', 400);
     if (!salonId) return error('Choose a salon before creating a customer account', 400);
     if (!branchId) return error('Choose a branch before creating a customer account', 400);
     const accounts = await db.list('accounts', { limit: 5000 });
-    if ((accounts.items as any[]).some(account => String(account.email).toLowerCase() === email)) return error('An account with that email already exists', 409);
+    if (email && (accounts.items as any[]).some(account => String(account.email || '').toLowerCase() === email)) return error('An account with that email already exists', 409);
     const [salon] = await db.get('salons', [salonId]);
     if (!salon) return error('Selected salon was not found', 404);
     const { items: branches } = await db.list('branches', { limit: 5000 });
@@ -491,13 +491,18 @@ export const handler = router({
     const { items: branches } = await db.list('branches', { limit: 5000 });
     const branch = (branches as any[]).find(item => item.id === branchId && (context?.role === 'admin' || item.salonId === context?.tenantId) && item.status === 'active');
     if (!branch) return error('Choose a valid branch for this staff member', 400);
-    if (!b.phone || String(b.password || '').length < 8) return error('Employee phone and a password of at least 8 characters are required', 400);
+    if (!b.phone) return error('Employee phone is required', 400);
+    const isReceptionist = String(b.role || '').toLowerCase().includes('reception');
+    const credential = String(isReceptionist ? b.password || '' : b.pin || '');
+    if (isReceptionist ? credential.length < 8 : !/^\d{4}$/.test(credential)) {
+      return error(isReceptionist ? 'Receptionist password must be at least 8 characters' : 'Staff PIN must be exactly 4 digits', 400);
+    }
     const [id] = await db.add('staff', [{ tenantId: branch.salonId, salonName: branch.salonName || context?.salonName || '', name: b.name, role: b.role || 'Staff', specialties: b.specialties || [], branch: branch.name, branchId: branch.id, branchName: branch.name, chair: b.chair || '', phone: b.phone || '', accountEmail: b.accountEmail || '', accountStatus: b.accountStatus || 'pending', employmentStatus: 'active', commissionPct: 50, status: b.status || 'available' }]);
     if (!id) return error('Failed to add staff', 500);
     await audit('created', 'staff', { id, name: b.name, role: b.role || 'Staff', accountEmail: b.accountEmail || '', commissionPct: 50 }, b.actor || 'owner');
     if (currentContext()) {
       const context = currentContext()!;
-      await db.add('accounts', [{ id: `account-${randomBytes(8).toString('hex')}`, tenantId: branch.salonId, salonName: branch.salonName || context.salonName, branchId: branch.id, name: b.name, email: '', phone: b.phone, role: String(b.role || '').toLowerCase().includes('reception') ? 'receptionist' : 'barber', status: 'active', passwordHash: passwordHash(String(b.password)), staffId: id, createdAt: Date.now() }]);
+      await db.add('accounts', [{ id: `account-${randomBytes(8).toString('hex')}`, tenantId: branch.salonId, salonName: branch.salonName || context.salonName, branchId: branch.id, name: b.name, email: '', phone: b.phone, role: isReceptionist ? 'receptionist' : 'barber', status: 'active', ...(isReceptionist ? { passwordHash: passwordHash(credential) } : { pinHash: passwordHash(credential) }), staffId: id, createdAt: Date.now() }]);
     }
     return json({ id });
   }],

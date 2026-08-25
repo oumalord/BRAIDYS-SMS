@@ -57,7 +57,7 @@ export const AuthApi = {
     if (result.data.account.branchId) window.localStorage.setItem('safigroom_selected_branch', result.data.account.branchId);
     return result.data.account;
   },
-  signup: async (payload: { name: string; email: string; phone: string; pin: string; salonId: string; branchId: string }) => {
+  signup: async (payload: { name: string; email?: string; phone: string; pin: string; salonId: string; branchId: string }) => {
     const result = await api.post('/api/auth/signup', payload);
     window.localStorage.setItem('safigroom_session', result.data.token);
     window.localStorage.setItem('safigroom_account', JSON.stringify(result.data.account));
