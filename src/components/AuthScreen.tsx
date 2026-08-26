@@ -13,7 +13,6 @@ export default function AuthScreen({ onAuthenticated }: { onAuthenticated: (acco
   const [branches, setBranches] = useState<BranchOption[]>([]);
   const [branchesLoading, setBranchesLoading] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [demoBusy, setDemoBusy] = useState(false);
   const [activeField, setActiveField] = useState<'identifier' | 'pin' | null>(null);
 
   const switchMode = (nextMode: 'login' | 'signup') => {
@@ -52,18 +51,6 @@ export default function AuthScreen({ onAuthenticated }: { onAuthenticated: (acco
     finally { setBusy(false); }
   };
 
-  const setupDemoAdmin = async () => {
-    setDemoBusy(true);
-    try {
-      const result = await AuthApi.demo();
-      const credentials = result.data.accounts[0];
-      setMode('login');
-      setForm(previous => ({ ...previous, identifier: credentials.email, pin: credentials.password }));
-      toast('Platform admin access is ready. You can log in now.', 'success');
-    } catch (cause: any) { toast(cause?.message || 'Could not prepare platform admin access.', 'error'); }
-    finally { setDemoBusy(false); }
-  };
-
   return (
     <div className="relative min-h-screen overflow-hidden bg-[#071a3d]">
       <video
@@ -94,15 +81,13 @@ export default function AuthScreen({ onAuthenticated }: { onAuthenticated: (acco
             {mode === 'signup' && <>
               <Field label="Salon to visit" htmlFor="auth-salon"><Select className="border-black/20 text-[#1D1D1F] focus-visible:ring-[#2F6BFF]" id="auth-salon" value={form.salonId} onChange={e => setForm({ ...form, salonId: e.target.value, branchId: '' })}><option value="">Choose an existing salon</option>{salons.map(salon => <option key={salon.id} value={salon.id}>{salon.name}</option>)}</Select></Field>
               <Field label="Branch to visit" htmlFor="auth-branch"><Select className="border-black/20 text-[#1D1D1F] focus-visible:ring-[#2F6BFF]" id="auth-branch" value={form.branchId} disabled={!form.salonId || branchesLoading} onChange={e => setForm({ ...form, branchId: e.target.value })}><option value="">{branchesLoading ? 'Loading branches...' : form.salonId ? 'Choose a branch' : 'Choose a salon first'}</option>{branches.map(branch => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</Select></Field>
-              <Field label="Full name" htmlFor="auth-name"><Input className="border-black/20 text-[#1D1D1F] placeholder:text-[#6E6E73] focus-visible:ring-[#2F6BFF]" id="auth-name" autoComplete="name" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></Field>
-              <Field label="Phone" htmlFor="auth-phone"><Input className="border-black/20 text-[#1D1D1F] placeholder:text-[#6E6E73] focus-visible:ring-[#2F6BFF]" id="auth-phone" autoComplete="tel" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} /></Field>
+              <Field label="Full name" htmlFor="auth-name"><Input className="border-black/20 text-[#1D1D1F] placeholder:text-[#6E6E73] focus-visible:ring-[#2F6BFF]" id="auth-name" autoComplete="off" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></Field>
+              <Field label="Phone" htmlFor="auth-phone"><Input className="border-black/20 text-[#1D1D1F] placeholder:text-[#6E6E73] focus-visible:ring-[#2F6BFF]" id="auth-phone" autoComplete="off" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} /></Field>
             </>}
-            {mode === 'login' ? <Field label="Email or phone" htmlFor="auth-identifier"><Input className="border-black/20 text-[#1D1D1F] placeholder:text-[#6E6E73] focus-visible:ring-[#2F6BFF]" id="auth-identifier" name="auth-identifier" autoComplete="username" readOnly={activeField !== 'identifier'} value={form.identifier} onFocus={() => setActiveField('identifier')} onChange={e => setForm({ ...form, identifier: e.target.value })} /></Field> : <Field label="Email (optional)" htmlFor="auth-email"><Input className="border-black/20 text-[#1D1D1F] placeholder:text-[#6E6E73] focus-visible:ring-[#2F6BFF]" id="auth-email" name="auth-email" autoComplete="off" type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></Field>}
-            <Field label={mode === 'login' ? 'Password or PIN' : 'Create 4-digit PIN'} htmlFor="auth-pin"><Input className="border-black/20 text-[#1D1D1F] placeholder:text-[#6E6E73] focus-visible:ring-[#2F6BFF]" id="auth-pin" name="auth-pin" autoComplete="current-password" inputMode={mode === 'signup' ? 'numeric' : undefined} maxLength={mode === 'signup' ? 4 : undefined} pattern={mode === 'signup' ? '[0-9]{4}' : undefined} readOnly={activeField !== 'pin'} type="password" value={form.pin} onFocus={() => setActiveField('pin')} onChange={e => setForm({ ...form, pin: mode === 'signup' ? e.target.value.replace(/\D/g, '').slice(0, 4) : e.target.value })} /></Field>
+            {mode === 'login' ? <Field label="Email or phone" htmlFor="auth-identifier"><Input className="border-black/20 text-[#1D1D1F] placeholder:text-[#6E6E73] focus-visible:ring-[#2F6BFF]" id="auth-identifier" name="auth-identifier" autoComplete="off" autoCorrect="off" autoCapitalize="none" spellCheck={false} readOnly={activeField !== 'identifier'} value={form.identifier} onFocus={() => setActiveField('identifier')} onChange={e => setForm({ ...form, identifier: e.target.value })} /></Field> : <Field label="Email (optional)" htmlFor="auth-email"><Input className="border-black/20 text-[#1D1D1F] placeholder:text-[#6E6E73] focus-visible:ring-[#2F6BFF]" id="auth-email" name="auth-email" autoComplete="off" autoCorrect="off" autoCapitalize="none" spellCheck={false} type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></Field>}
+            <Field label={mode === 'login' ? 'Password or PIN' : 'Create 4-digit PIN'} htmlFor="auth-pin"><Input className="border-black/20 text-[#1D1D1F] placeholder:text-[#6E6E73] focus-visible:ring-[#2F6BFF]" id="auth-pin" name="auth-pin" autoComplete="new-password" inputMode={mode === 'signup' ? 'numeric' : undefined} maxLength={mode === 'signup' ? 4 : undefined} pattern={mode === 'signup' ? '[0-9]{4}' : undefined} readOnly={activeField !== 'pin'} type="password" value={form.pin} onFocus={() => setActiveField('pin')} onChange={e => setForm({ ...form, pin: mode === 'signup' ? e.target.value.replace(/\D/g, '').slice(0, 4) : e.target.value })} /></Field>
             <Button type="submit" className="w-full" disabled={busy}>{busy ? 'Please wait...' : mode === 'login' ? 'Log in' : 'Create client account'}</Button>
           </form>
-          <p className="text-xs text-[#6E6E73] border-t border-black/10 mt-6 pt-5">Salon and employee accounts are created by the platform administrator or salon owner.</p>
-          <button type="button" className="mt-3 text-xs font-medium text-[#2F6BFF] hover:underline disabled:opacity-50" onClick={setupDemoAdmin} disabled={demoBusy}>{demoBusy ? 'Preparing admin access...' : 'Set up platform admin access'}</button>
         </Card>
         <ToastHost />
       </div>
