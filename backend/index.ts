@@ -966,9 +966,9 @@ export const handler = router({
   'GET /api/payroll/staff': [async () => {
     const context = currentContext();
     if (!context || !['owner', 'admin'].includes(context.role)) return error('Only the owner or administrator can view payroll staff', 403);
-    const { items } = context.role === 'admin' ? await db.list('staff', { limit: 2000 }) : await db.listAllTenant('staff', context.tenantId, { limit: 2000 });
+    const { items } = await db.list('staff', { limit: 2000 });
     const from = Date.now() - 14 * DAY;
-    const { items: orders } = context.role === 'admin' ? await db.list('orders', { limit: 5000 }) : await db.listAllTenant('orders', context.tenantId, { limit: 5000 });
+    const { items: orders } = await db.list('orders', { limit: 5000 });
     const totals = new Map<string, { commission: number; assistant: number }>();
     for (const order of orders as any[]) {
       if (!order.createdAt || order.createdAt < from) continue;
@@ -1001,9 +1001,9 @@ export const handler = router({
     if (range === 'month') from = now - 30 * DAY;
 
     const [{ items: orders }, { items: staff }, { items: paidItems }] = await Promise.all([
-      context.role === 'admin' ? db.list('orders', { limit: 5000 }) : db.listAllTenant('orders', context.tenantId, { limit: 5000 }),
-      context.role === 'admin' ? db.list('staff', { limit: 2000 }) : db.listAllTenant('staff', context.tenantId, { limit: 2000 }),
-      context.role === 'admin' ? db.list('payout_items', { limit: 10000 }) : db.listAllTenant('payout_items', context.tenantId, { limit: 10000 }),
+      db.list('orders', { limit: 5000 }),
+      db.list('staff', { limit: 2000 }),
+      db.list('payout_items', { limit: 10000 }),
     ]);
     const staffById = new Map((staff as any[]).map(member => [member.id, member]));
     const alreadyPaid = new Set((paidItems as any[]).map(item => item.itemKey));
@@ -1085,7 +1085,7 @@ export const handler = router({
       db.list('products', { limit: 500 }),
       db.list('appointments', { limit: 1000 }),
       db.list('queue', { limit: 200 }),
-      currentContext()?.role === 'admin' ? db.list('customers', { limit: 5000 }) : db.listAllTenant('customers', currentContext()?.tenantId || '', { limit: 5000 }),
+      db.list('customers', { limit: 5000 }),
     ]);
     const orders = ordersResult.items;
     const expensesAll = expensesResult.items;
