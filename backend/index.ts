@@ -883,25 +883,6 @@ export const handler = router({
       }
     }
 
-    const productItems = orderItems.filter((it: any) => it.type === 'product');
-    if (productItems.length) {
-      const quantities = new Map<string, number>();
-      for (const item of productItems) quantities.set(item.refId, (quantities.get(item.refId) || 0) + Number(item.qty || 0));
-      const ids = Array.from(quantities.keys());
-      const products = await db.get('products', ids);
-      const updates: any[] = [];
-      for (let i = 0; i < products.length; i++) {
-        const p = products[i];
-        const quantity = quantities.get(ids[i]) || 0;
-        if (!p) return error('One or more products could not be found', 404);
-        if (Number(p.stock || 0) < quantity) return error(`${p.name} has only ${p.stock} ${p.unit} in stock`, 409);
-        updates.push({ id: ids[i], record: { ...p, stock: Number(p.stock || 0) - quantity } });
-        for (const item of productItems) if (item.refId === ids[i]) item.cost = Number(p.cost || 0);
-      }
-      if (updates.length) await db.update('products', updates);
-      await db.add('stock_movements', productItems.map((item: any) => ({ productId: item.refId, productName: item.name, change: -Number(item.qty || 0), reason: 'POS sale', orderCustomerName: b.customerName || 'Walk-in Customer', createdAt: Date.now(), actor: b.actor || 'receptionist' })));
-    }
-
     const serviceItems = orderItems.filter((it: any) => it.type === 'service');
     for (const item of serviceItems) {
       const helperId = String(item.helperStaffId || '');
@@ -910,16 +891,89 @@ export const handler = router({
         if (!helper || helper.branchId !== context?.branchId) return error('Helper must be an employee from the active branch', 400);
         item.helperStaffName = helper.name;
       }
+      const consumedProducts = Array.isArray(item.consumedProducts) ? item.consumedProducts : [];
+      item.consumedProducts = consumedProducts
+        .map((entry: any) => ({
+          productId: String(entry?.productId || entry?.refId || ''),
+          name: String(entry?.name || ''),
+          qty: Math.max(0, Number(entry?.qty || 0)),
+          cost: Math.max(0, Number(entry?.cost || 0)),
+          unit: String(entry?.unit || ''),
+        }))
+        .filter((entry: any) => entry.productId && entry.qty > 0);
       item.assistantPayment = helperId ? assistantPayment(Number(item.lineTotalAfterDiscount || 0)) : 0;
       item.helperDeduction = item.assistantPayment;
     }
-    const helperDeductions = serviceItems.reduce((sum: number, item: any) => sum + Number(item.assistantPayment || 0), 0);
-    const productCostTotal = productItems.reduce((sum: number, item: any) => sum + Math.max(0, Number(item.cost || 0)) * Number(item.qty || 0), 0);
-    const serviceRevenueTotal = serviceItems.reduce((sum: number, item: any) => sum + Math.max(0, Number(item.lineTotalAfterDiscount || 0)), 0);
+
+    const productItems = orderItems.filter((it: any) => it.type === 'product');
+    const productQuantities = new Map<string, number>();
+    for (const item of productItems) {
+      productQuantities.set(item.refId, (productQuantities.get(item.refId) || 0) + Number(item.qty || 0));
+    }
     for (const item of serviceItems) {
-      const productShare = serviceRevenueTotal > 0 ? productCostTotal * (Number(item.lineTotalAfterDiscount || 0) / serviceRevenueTotal) : 0;
-      item.productCost = Math.round(productShare);
-      item.commissionBase = Math.max(0, Number(item.lineTotalAfterDiscount || 0) - Number(item.helperDeduction || 0));
+      for (const used of item.consumedProducts || []) {
+        productQuantities.set(used.productId, (productQuantities.get(used.productId) || 0) + Number(used.qty || 0));
+      }
+    }
+    const productIds = Array.from(productQuantities.keys());
+    if (productIds.length) {
+      const products = await db.get('products', productIds);
+      const updates: any[] = [];
+      const byId = new Map<string, any>();
+      for (let i = 0; i < products.length; i++) {
+        const p = products[i];
+        const id = productIds[i];
+        const quantity = productQuantities.get(id) || 0;
+        if (!p) return error('One or more products could not be found', 404);
+        if (Number(p.stock || 0) < quantity) return error(`${p.name} has only ${p.stock} ${p.unit} in stock`, 409);
+        byId.set(id, p);
+        updates.push({ id, record: { ...p, stock: Number(p.stock || 0) - quantity } });
+      }
+      for (const item of productItems) {
+        const product = byId.get(item.refId);
+        if (product) item.cost = Number(product.cost || 0);
+      }
+      for (const item of serviceItems) {
+        item.consumedProducts = (item.consumedProducts || []).map((used: any) => {
+          const product = byId.get(used.productId);
+          return {
+            ...used,
+            name: product?.name || used.name,
+            cost: Number(product?.cost || used.cost || 0),
+            unit: product?.unit || used.unit || '',
+          };
+        });
+      }
+      if (updates.length) await db.update('products', updates);
+      const productMoves = productItems.map((item: any) => ({
+        productId: item.refId,
+        productName: item.name,
+        change: -Number(item.qty || 0),
+        reason: 'POS sale',
+        orderCustomerName: b.customerName || 'Walk-in Customer',
+        createdAt: Date.now(),
+        actor: b.actor || 'receptionist',
+      }));
+      const usedMoves = serviceItems.flatMap((item: any) => (item.consumedProducts || []).map((used: any) => ({
+        productId: used.productId,
+        productName: used.name,
+        change: -Number(used.qty || 0),
+        reason: `Service usage: ${item.name}`,
+        orderCustomerName: b.customerName || 'Walk-in Customer',
+        createdAt: Date.now(),
+        actor: b.actor || item.staffName || 'staff',
+      })));
+      const movementEntries = [...productMoves, ...usedMoves].filter(move => Number(move.change) !== 0);
+      if (movementEntries.length) await db.add('stock_movements', movementEntries);
+    }
+
+    const helperDeductions = serviceItems.reduce((sum: number, item: any) => sum + Number(item.assistantPayment || 0), 0);
+    const productSalesCostTotal = productItems.reduce((sum: number, item: any) => sum + Math.max(0, Number(item.cost || 0)) * Number(item.qty || 0), 0);
+    const serviceProductCostTotal = serviceItems.reduce((sum: number, item: any) => sum + (item.consumedProducts || []).reduce((inner: number, used: any) => inner + Math.max(0, Number(used.cost || 0)) * Math.max(0, Number(used.qty || 0)), 0), 0);
+    const productCostTotal = productSalesCostTotal + serviceProductCostTotal;
+    for (const item of serviceItems) {
+      item.productCost = (item.consumedProducts || []).reduce((sum: number, used: any) => sum + Math.max(0, Number(used.cost || 0)) * Math.max(0, Number(used.qty || 0)), 0);
+      item.commissionBase = Math.max(0, Number(item.lineTotalAfterDiscount || 0) - Number(item.helperDeduction || 0) - Number(item.productCost || 0));
       item.commissionRate = 50;
       item.commission = item.commissionBase * 0.5;
     }
