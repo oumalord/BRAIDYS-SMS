@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { CalendarCheck, UserRound, Scissors, AlertTriangle, DollarSign, Clock } from 'lucide-react';
-import { AppointmentsApi, fmtKES } from '../lib/api';
+import { AppointmentsApi, StaffApi, fmtKES } from '../lib/api';
 import { Badge, Button, Card, EmptyState, LoadingState, toast } from '../components/ui';
 import type { Appointment } from '../types';
 
@@ -9,20 +9,22 @@ function todayStr() { return new Date().toISOString().slice(0, 10); }
 function EmployeeDashboard({ account, onAddService }: { account: { name?: string; staffId?: string }; onAddService: (appointment: Appointment) => void }) {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [dailyEarnings, setDailyEarnings] = useState(0);
+  const [fortnightEarnings, setFortnightEarnings] = useState(0);
+  const [dailyCommission, setDailyCommission] = useState(0);
+  const [dailyAssistant, setDailyAssistant] = useState(0);
   const [waitingClients, setWaitingClients] = useState<Appointment[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let active = true;
-    Promise.all([AppointmentsApi.list()]).then(([items]) => {
+    Promise.all([AppointmentsApi.list(), StaffApi.myEarnings()]).then(([items, earnings]) => {
       if (!active) return;
       const staffAppointments = items.filter(item => item.staffId === account.staffId);
       setAppointments(staffAppointments);
-      
-      // Calculate daily earnings from today's completed appointments
-      const todayCompleted = staffAppointments.filter(item => item.date === todayStr() && item.status === 'completed');
-      const earnings = todayCompleted.reduce((sum, item) => sum + (item.price || 0), 0);
-      setDailyEarnings(earnings);
+      setDailyEarnings(earnings.today.total || 0);
+      setFortnightEarnings(earnings.fortnight.total || 0);
+      setDailyCommission(earnings.today.commission || 0);
+      setDailyAssistant(earnings.today.assistant || 0);
       
       // Show waiting clients (those checked-in and waiting)
       const waiting = staffAppointments.filter(item => item.date === todayStr() && ['checked-in', 'pending'].includes(item.status));
@@ -50,9 +52,14 @@ function EmployeeDashboard({ account, onAddService }: { account: { name?: string
 
       <div className="grid gap-4 sm:grid-cols-3">
         <Card className="p-5"><Clock size={18} className="text-[#0071e3]" aria-hidden="true" /><p className="mt-3 text-xs text-[#6E6E73]">Waiting Now</p><p className="text-2xl font-semibold">{waitingClients.length}</p></Card>
-        <Card className="p-5"><DollarSign size={18} className="text-green-600" aria-hidden="true" /><p className="mt-3 text-xs text-[#6E6E73]">Today's Earnings</p><p className="text-2xl font-semibold">{fmtKES(dailyEarnings)}</p></Card>
+        <Card className="p-5"><DollarSign size={18} className="text-green-600" aria-hidden="true" /><p className="mt-3 text-xs text-[#6E6E73]">Today's Earnings</p><p className="text-2xl font-semibold">{fmtKES(dailyEarnings)}</p><p className="text-xs text-[#6E6E73] mt-1">Commission {fmtKES(dailyCommission)} + Assistant {fmtKES(dailyAssistant)}</p></Card>
         <Card className="p-5"><UserRound size={18} className="text-[#0071e3]" aria-hidden="true" /><p className="mt-3 text-xs text-[#6E6E73]">Assigned clients</p><p className="text-2xl font-semibold">{assignedClients.length}</p></Card>
       </div>
+
+      <Card className="p-5">
+        <p className="text-xs text-[#6E6E73]">My 14-day Earnings</p>
+        <p className="text-xl font-semibold mt-1">{fmtKES(fortnightEarnings)}</p>
+      </Card>
 
       {waitingClients.length > 0 && (
         <Card className="p-5 border-l-4 border-l-orange-500 bg-orange-50/50">

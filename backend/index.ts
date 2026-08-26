@@ -461,6 +461,43 @@ export const handler = router({
     await db.update('accounts', [{ id: account.id, record: { ...account, pinHash: passwordHash(pin), pinChangedAt: Date.now() } }]);
     return json({ ok: true });
   }],
+  'GET /api/staff/me/earnings': [async () => {
+    const context = currentContext();
+    if (!context?.staffId || !['barber', 'receptionist'].includes(context.role)) return error('Only an employee can view this earnings summary', 403);
+    const now = Date.now();
+    const dayStart = new Date();
+    dayStart.setHours(0, 0, 0, 0);
+    const todayFrom = dayStart.getTime();
+    const fortnightFrom = now - 14 * DAY;
+
+    const { items: orders } = await db.list('orders', { limit: 5000 });
+    let todayCommission = 0;
+    let todayAssistant = 0;
+    let fortnightCommission = 0;
+    let fortnightAssistant = 0;
+
+    for (const order of orders as any[]) {
+      if (!order.createdAt) continue;
+      for (const item of order.items || []) {
+        if (item.type !== 'service') continue;
+        const commission = Number(item.commission ?? (Number(item.lineTotalAfterDiscount ?? item.price * item.qty) * 0.5)) || 0;
+        const assistant = Number(item.assistantPayment ?? item.helperDeduction ?? 0) || 0;
+        if (item.staffId === context.staffId) {
+          if (order.createdAt >= todayFrom) todayCommission += commission;
+          if (order.createdAt >= fortnightFrom) fortnightCommission += commission;
+        }
+        if (item.helperStaffId === context.staffId) {
+          if (order.createdAt >= todayFrom) todayAssistant += assistant;
+          if (order.createdAt >= fortnightFrom) fortnightAssistant += assistant;
+        }
+      }
+    }
+
+    return json({
+      today: { commission: todayCommission, assistant: todayAssistant, total: todayCommission + todayAssistant },
+      fortnight: { commission: fortnightCommission, assistant: fortnightAssistant, total: fortnightCommission + fortnightAssistant },
+    });
+  }],
   'GET /api/audit-logs': [async ({ query }) => {
     const { items } = await db.list('audit_logs', { limit: 5000 });
     const collection = query.collection;
@@ -881,8 +918,24 @@ export const handler = router({
       lineTotalAfterDiscount: Math.round((Number(it.price || 0) * Number(it.qty || 0)) * (1 - discountPct / 100)),
     }));
     const context = currentContext();
-    if (context?.role === 'barber' && orderItems.some((item: any) => item.type === 'service' && item.staffId !== context.staffId)) {
-      return error('You can only record services assigned to you', 403);
+    const serviceItems = orderItems.filter((it: any) => it.type === 'service');
+    const serviceStaffIds = Array.from(new Set(serviceItems.map((item: any) => String(item.staffId || '')).filter(Boolean)));
+    if (serviceItems.some((item: any) => !item.staffId)) return error('Each service must be assigned to a staff member', 400);
+    if (context?.role === 'barber' && !serviceItems.some((item: any) => item.staffId === context.staffId)) {
+      return error('Include at least one service under your own account when recording this sale', 403);
+    }
+    if (serviceStaffIds.length) {
+      const serviceStaff = await db.get('staff', serviceStaffIds);
+      for (let i = 0; i < serviceStaff.length; i++) {
+        const member = serviceStaff[i];
+        const id = serviceStaffIds[i];
+        if (!member) return error('One or more assigned staff records could not be found', 404);
+        if (context?.branchId && member.branchId && member.branchId !== context.branchId) return error('Assigned service staff must belong to the active branch', 400);
+        if (member.employmentStatus === 'laid-off') return error(`Assigned staff ${member.name} is not active`, 409);
+        for (const item of serviceItems) {
+          if (item.staffId === id) item.staffName = member.name;
+        }
+      }
     }
     if (context?.role === 'barber') {
       const today = new Date().toISOString().slice(0, 10);
@@ -923,7 +976,6 @@ export const handler = router({
       }
     }
 
-    const serviceItems = orderItems.filter((it: any) => it.type === 'service');
     for (const item of serviceItems) {
       const helperId = String(item.helperStaffId || '');
       if (helperId) {

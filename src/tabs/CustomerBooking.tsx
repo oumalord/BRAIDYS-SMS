@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
 import { CalendarCheck, Ticket } from 'lucide-react';
 import { AppointmentsApi, StaffApi } from '../lib/api';
-import { Card, Button, Field, Select, toast } from '../components/ui';
+import { Card, Button, Field, Input, Select, toast } from '../components/ui';
 import type { Staff } from '../types';
 
 function CustomerBooking({ account }: { account: { id: string; name: string; email: string; phone?: string; branchId?: string } }) {
   const [staff, setStaff] = useState<Staff[]>([]);
-  const [form, setForm] = useState({ serviceCategories: [] as string[], staffId: '' });
+  const [form, setForm] = useState({ serviceCategories: [] as string[], staffId: '', date: new Date().toISOString().slice(0, 10) });
   const [saving, setSaving] = useState(false);
   const [ticket, setTicket] = useState<{ ticketNumber: string; date: string; time: string } | null>(null);
 
@@ -35,6 +35,7 @@ function CustomerBooking({ account }: { account: { id: string; name: string; ema
         customerEmail: account.email,
         customerPhone: account.phone || '',
         branchId: account.branchId,
+        date: form.date,
         serviceCategories: form.serviceCategories,
         staffId: assigned?.id || null,
         staffName: assigned?.name || null,
@@ -71,6 +72,7 @@ function CustomerBooking({ account }: { account: { id: string; name: string; ema
       <div><h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2"><CalendarCheck size={21} aria-hidden="true" />Request an appointment</h1><p className="text-sm text-[#6E6E73]">Tell reception what you need. They will assign the exact service and confirm the time.</p></div>
       <Card className="p-6 space-y-4">
         <div className="rounded-2xl bg-black/[0.03] px-4 py-3 text-sm text-[#6E6E73]">Booking for <span className="font-medium text-[#1D1D1F]">{account.name}</span> at your selected branch. Your saved contact details will be used for notifications.</div>
+        <Field label="Preferred date" htmlFor="customer-book-date"><Input id="customer-book-date" type="date" value={form.date} onChange={event => setForm(current => ({ ...current, date: event.target.value }))} min={new Date().toISOString().slice(0, 10)} /></Field>
         <Field label="Service needed (choose up to two)" htmlFor="customer-book-service"><div id="customer-book-service" className="grid grid-cols-2 gap-2">{serviceCategories.map(category => <button type="button" key={category} onClick={() => toggleCategory(category)} className={`rounded-xl border px-3 py-2.5 text-sm text-left ${form.serviceCategories.includes(category) ? 'border-[#0071e3] bg-[#0071e3]/10 text-[#0058b0]' : 'border-black/10 bg-white'}`}>{category}</button>)}</div></Field>
         <Field label="Preferred employee (optional)" htmlFor="customer-book-staff"><Select id="customer-book-staff" value={form.staffId} onChange={event => setForm(current => ({ ...current, staffId: event.target.value }))}><option value="">No preference</option>{availableStaff.map(member => <option key={member.id} value={member.id}>{member.name}</option>)}</Select></Field>
         <Button className="w-full" onClick={submit} disabled={saving}>{saving ? 'Sending request...' : 'Send booking request'}</Button>
