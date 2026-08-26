@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ShoppingCart } from 'lucide-react';
 import { Card, Button, Modal, Field, Input, Select, toast } from '../components/ui';
 import { CustomersApi, ServicesApi, ProductsApi, StaffApi, OrdersApi, AppointmentsApi, fmtMoney } from '../lib/api';
@@ -28,6 +28,7 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
   const [receipt, setReceipt] = useState<any>(null);
   const [tab, setTab] = useState<'services' | 'products'>('services');
   const [usagePickerByLine, setUsagePickerByLine] = useState<Record<string, string>>({});
+  const staffAutoSelectedClientRef = useRef(false);
 
   useEffect(() => {
     Promise.all([CustomersApi.list(), ServicesApi.list(), ProductsApi.list(), StaffApi.list()]).then(([c, s, p, st]) => { setCustomers(c); setServices(s); setProducts(p); setStaff(st); });
@@ -36,12 +37,31 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
   useEffect(() => {
     if (!currentStaffId) return;
     AppointmentsApi.list(todayStr()).then(appointments => {
-      const clientIds = new Set(appointments
-        .filter(item => item.staffId === currentStaffId && ['checked-in', 'in-service'].includes(item.status) && item.customerId)
-        .map(item => item.customerId as string));
+      const assigned = appointments.filter(item => item.staffId === currentStaffId && ['pending', 'confirmed', 'checked-in', 'in-service'].includes(item.status) && item.customerId);
+      const clientIds = new Set(assigned.map(item => item.customerId as string));
       setServingClients(customers.filter(customer => clientIds.has(customer.id)));
-    }).catch(() => toast('Could not load your checked-in clients.', 'error'));
-  }, [currentStaffId, customers]);
+      if (appointment?.customerId) return;
+      const priorityStatus = ['in-service', 'checked-in', 'confirmed', 'pending'];
+      const preferred = priorityStatus
+        .map(status => assigned.find(item => item.status === status))
+        .find(Boolean);
+      const preferredCustomerId = preferred?.customerId || '';
+      setCustomerId(previous => {
+        if (previous && clientIds.has(previous)) {
+          if (!staffAutoSelectedClientRef.current && preferredCustomerId && previous !== preferredCustomerId) {
+            staffAutoSelectedClientRef.current = true;
+            return preferredCustomerId;
+          }
+          return previous;
+        }
+        if (preferredCustomerId) {
+          staffAutoSelectedClientRef.current = true;
+          return preferredCustomerId;
+        }
+        return '';
+      });
+    }).catch(() => toast('Could not load your active clients.', 'error'));
+  }, [currentStaffId, customers, appointment?.customerId]);
 
   useEffect(() => {
     if (!appointment || !services.length || cart.length) return;

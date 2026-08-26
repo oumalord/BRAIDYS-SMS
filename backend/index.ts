@@ -888,9 +888,15 @@ export const handler = router({
       const today = new Date().toISOString().slice(0, 10);
       const { items: appointments } = await db.list('appointments', { limit: 2000 });
       const servingAppointment = (appointments as any[]).find(item => item.id === b.appointmentId);
-      const servingClient = (appointments as any[]).some(item => item.date === today && item.staffId === context.staffId && item.customerId === b.customerId && ['checked-in', 'in-service'].includes(item.status));
-      if (!b.customerId || (!servingClient && !(servingAppointment?.staffId === context.staffId && ['checked-in', 'in-service'].includes(servingAppointment.status)))) {
-        return error('Choose a client you have checked in before recording the service', 403);
+      const activeStatuses = ['pending', 'confirmed', 'checked-in', 'in-service'];
+      const servingClient = Boolean(b.customerId) && (appointments as any[]).some(item => item.date === today && item.staffId === context.staffId && item.customerId === b.customerId && activeStatuses.includes(item.status));
+      const servingAssignedAppointment = Boolean(servingAppointment?.staffId === context.staffId && activeStatuses.includes(servingAppointment.status));
+      const { items: queue } = await db.list('queue', { limit: 2000 });
+      const queueHandoff = (queue as any[]).some(item => item.staffId === context.staffId
+        && ['waiting', 'in-service'].includes(item.status)
+        && ((b.appointmentId && item.appointmentId === b.appointmentId) || (b.customerId && item.customerId === b.customerId)));
+      if (!servingClient && !servingAssignedAppointment && !queueHandoff) {
+        return error('Choose a client currently assigned to you before recording the service', 403);
       }
     }
 
