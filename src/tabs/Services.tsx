@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react';
-import { Plus, Tag } from 'lucide-react';
+import { Pencil, Plus, Tag } from 'lucide-react';
 import { Card, Button, Modal, Field, Input, Select, EmptyState, LoadingState, toast } from '../components/ui';
 import { ServicesApi, fmtMoney } from '../lib/api';
-import type { ServiceItem, Currency } from '../types';
+import type { ServiceItem, Currency, Role } from '../types';
 
-function Services() {
+function Services({ role }: { role: Role }) {
   const [services, setServices] = useState<ServiceItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
+  const [editId, setEditId] = useState<string | null>(null);
   const [form, setForm] = useState({ name: '', category: '', price: 0, currency: 'KES' as Currency, durationMin: 30, description: '' });
 
   const load = () => { ServicesApi.list().then(setServices).catch(() => toast('Could not load services.', 'error')).finally(() => setLoading(false)); };
@@ -22,15 +23,40 @@ function Services() {
     load();
   };
 
+  const beginEdit = (service: ServiceItem) => {
+    setEditId(service.id);
+    setForm({
+      name: service.name,
+      category: service.category,
+      price: service.price,
+      currency: service.currency,
+      durationMin: service.durationMin,
+      description: service.description || '',
+    });
+    setOpen(true);
+  };
+
+  const saveEdit = async () => {
+    if (!editId) return;
+    if (!form.name.trim() || form.price <= 0) { toast('Enter a service name and a price greater than zero.', 'error'); return; }
+    await ServicesApi.update(editId, form);
+    toast('Service updated.', 'success');
+    setOpen(false);
+    setEditId(null);
+    setForm({ name: '', category: '', price: 0, currency: 'KES', durationMin: 30, description: '' });
+    load();
+  };
+
   const categories = Array.from(new Set(services.map(s => s.category)));
+  const canEdit = role === 'owner' || role === 'admin';
 
   if (loading) return <LoadingState label="Loading services…" />;
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <div><h1 className="text-2xl font-semibold tracking-tight">Services Catalog</h1><p className="text-sm text-[#6E6E73]">{services.length} services across {categories.length} categories. Owners and receptionists can add new services in KES or USD.</p></div>
-        <Button onClick={() => setOpen(true)}><Plus size={16} aria-hidden="true" />Add Service</Button>
+        <div><h1 className="text-2xl font-semibold tracking-tight">Services Catalog</h1><p className="text-sm text-[#6E6E73]">{services.length} services across {categories.length} categories. Owner and admin accounts can edit services after adding them.</p></div>
+        <Button onClick={() => { setEditId(null); setOpen(true); }}><Plus size={16} aria-hidden="true" />Add Service</Button>
       </div>
 
       {services.length === 0 ? <EmptyState icon={Tag} title="No services yet" description="Add your first service to the catalog." /> : (
@@ -44,6 +70,9 @@ function Services() {
                     <p className="font-medium text-sm">{s.name}</p>
                     <p className="text-xs text-[#6E6E73] mt-1">{fmtMoney(s.price, s.currency)} · {s.durationMin} min</p>
                     {s.description && <p className="text-xs text-[#6E6E73] mt-2">{s.description}</p>}
+                    {canEdit && <div className="mt-3">
+                      <Button size="sm" variant="secondary" onClick={() => beginEdit(s)}><Pencil size={14} aria-hidden="true" />Edit</Button>
+                    </div>}
                   </Card>
                 ))}
               </div>
@@ -53,9 +82,9 @@ function Services() {
       )}
 
       {open && (
-        <Modal title="Add Service" onClose={() => setOpen(false)} footer={<>
-          <Button variant="secondary" onClick={() => setOpen(false)}>Cancel</Button>
-          <Button onClick={addService}>Add Service</Button>
+        <Modal title={editId ? 'Edit Service' : 'Add Service'} onClose={() => { setOpen(false); setEditId(null); }} footer={<>
+          <Button variant="secondary" onClick={() => { setOpen(false); setEditId(null); }}>Cancel</Button>
+          <Button onClick={editId ? saveEdit : addService}>{editId ? 'Save Changes' : 'Add Service'}</Button>
         </>}>
           <div className="space-y-4">
             <Field label="Service name" htmlFor="sv-name"><Input id="sv-name" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></Field>

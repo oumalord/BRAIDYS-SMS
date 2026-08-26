@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Plus, Package as PackageIcon, AlertTriangle } from 'lucide-react';
+import { Plus, Package as PackageIcon, AlertTriangle, Pencil, Trash2 } from 'lucide-react';
 import { Card, Button, Badge, Modal, Field, Input, Select, EmptyState, LoadingState, toast } from '../components/ui';
 import { ProductsApi, fmtKES } from '../lib/api';
 import type { Product } from '../types';
@@ -9,6 +9,8 @@ function Inventory() {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
+  const [editId, setEditId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [form, setForm] = useState({ name: '', category: 'Hair', color: '', price: 0, cost: 0, stock: 0, lowStockThreshold: 5, unit: 'pcs' });
 
   const load = () => { ProductsApi.list().then(setProducts).catch(() => toast('Could not load inventory.', 'error')).finally(() => setLoading(false)); };
@@ -20,6 +22,40 @@ function Inventory() {
     toast('Product added.', 'success');
     setOpen(false);
     setForm({ name: '', category: 'Hair', color: '', price: 0, cost: 0, stock: 0, lowStockThreshold: 5, unit: 'pcs' });
+    load();
+  };
+
+  const beginEdit = (product: Product) => {
+    setEditId(product.id);
+    setForm({
+      name: product.name,
+      category: product.category,
+      color: product.color || '',
+      price: Number(product.price || 0),
+      cost: Number(product.cost || 0),
+      stock: Number(product.stock || 0),
+      lowStockThreshold: Number(product.lowStockThreshold || 5),
+      unit: product.unit || 'pcs',
+    });
+    setOpen(true);
+  };
+
+  const saveEdit = async () => {
+    if (!editId) return;
+    if (!form.name.trim()) { toast('Product name is required.', 'error'); return; }
+    await ProductsApi.update(editId, form);
+    toast('Product updated.', 'success');
+    setOpen(false);
+    setEditId(null);
+    setForm({ name: '', category: 'Hair', color: '', price: 0, cost: 0, stock: 0, lowStockThreshold: 5, unit: 'pcs' });
+    load();
+  };
+
+  const removeProduct = async () => {
+    if (!deletingId) return;
+    await ProductsApi.remove(deletingId);
+    toast('Product archived.', 'success');
+    setDeletingId(null);
     load();
   };
 
@@ -54,6 +90,8 @@ function Inventory() {
                   <div className={`h-full rounded-full ${low ? 'bg-[#FF9500]' : 'bg-[#34C759]'}`} style={{ width: `${pct}%` }} />
                 </div>
                 <div className="flex gap-2">
+                  <Button size="sm" variant="secondary" onClick={() => beginEdit(p)}><Pencil size={14} aria-hidden="true" />Edit</Button>
+                  <Button size="sm" variant="danger" onClick={() => setDeletingId(p.id)}><Trash2 size={14} aria-hidden="true" />Delete</Button>
                   <Button size="sm" variant="secondary" onClick={() => adjustStock(p, -1)}>-1</Button>
                   <Button size="sm" variant="secondary" onClick={() => adjustStock(p, 1)}>+1</Button>
                   <Button size="sm" variant="secondary" onClick={() => adjustStock(p, 10)}>+10</Button>
@@ -65,9 +103,9 @@ function Inventory() {
       )}
 
       {open && (
-        <Modal title="Add Product" onClose={() => setOpen(false)} footer={<>
-          <Button variant="secondary" onClick={() => setOpen(false)}>Cancel</Button>
-          <Button onClick={addProduct}>Add Product</Button>
+        <Modal title={editId ? 'Edit Product' : 'Add Product'} onClose={() => { setOpen(false); setEditId(null); }} footer={<>
+          <Button variant="secondary" onClick={() => { setOpen(false); setEditId(null); }}>Cancel</Button>
+          <Button onClick={editId ? saveEdit : addProduct}>{editId ? 'Save Changes' : 'Add Product'}</Button>
         </>}>
           <div className="space-y-4">
             <Field label="Product name" htmlFor="p-name"><Input id="p-name" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></Field>
@@ -85,6 +123,15 @@ function Inventory() {
               </Select>
             </Field>
           </div>
+        </Modal>
+      )}
+
+      {deletingId && (
+        <Modal title="Delete Product" onClose={() => setDeletingId(null)} footer={<>
+          <Button variant="secondary" onClick={() => setDeletingId(null)}>Cancel</Button>
+          <Button variant="danger" onClick={removeProduct}>Delete Product</Button>
+        </>}>
+          <p className="text-sm text-[#6E6E73]">This will archive the product so it no longer appears in active inventory or POS product selection.</p>
         </Modal>
       )}
     </div>

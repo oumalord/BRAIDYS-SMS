@@ -236,7 +236,7 @@ function App() {
                 {tab === 'appointments' && <Appointments role={effectiveRole} />}
                 {tab === 'queue' && <Queue />}
                 {tab === 'staff' && <StaffTab role={effectiveRole} />}
-                {tab === 'services' && <Services />}
+                {tab === 'services' && <Services role={effectiveRole} />}
                 {tab === 'memberships' && <Memberships />}
                 {tab === 'promotions' && <Promotions role={effectiveRole} />}
                 {tab === 'customers' && <CustomersTab role={effectiveRole} />}

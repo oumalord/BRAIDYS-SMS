@@ -541,6 +541,27 @@ export const handler = router({
     await audit('created', 'service', { id, name: b.name, category: b.category || 'General', price: b.price, currency: b.currency === 'USD' ? 'USD' : 'KES' }, b.actor || 'owner');
     return json({ id });
   }],
+  'PUT /api/services/:id': [async ({ params, body }) => {
+    requireOwner();
+    const [existing] = await db.get('services', [params.id]);
+    if (!existing) return error('Service not found', 404);
+    const patch: any = body || {};
+    if (patch.name !== undefined && !String(patch.name).trim()) return error('Name is required', 400);
+    if (patch.price !== undefined && Number(patch.price) <= 0) return error('Price must be greater than zero', 400);
+    const updated = {
+      ...existing,
+      name: patch.name !== undefined ? String(patch.name).trim() : existing.name,
+      category: patch.category !== undefined ? String(patch.category || '').trim() || 'General' : existing.category,
+      price: patch.price !== undefined ? Number(patch.price) : existing.price,
+      currency: patch.currency === 'USD' ? 'USD' : patch.currency === 'KES' ? 'KES' : existing.currency,
+      durationMin: patch.durationMin !== undefined ? Math.max(5, Number(patch.durationMin) || 30) : existing.durationMin,
+      description: patch.description !== undefined ? String(patch.description || '') : existing.description,
+    };
+    const [ok] = await db.update('services', [{ id: params.id, record: updated }]);
+    if (!ok) return error('Update failed', 500);
+    await audit('updated', 'service', { id: params.id, name: updated.name, category: updated.category, price: updated.price, currency: updated.currency }, patch.actor || currentContext()?.name || 'owner');
+    return json({ ok: true });
+  }],
 
   'GET /api/customers': [async () => { const { items } = await db.list('customers', { limit: 1000 }); return json({ items }); }],
   'POST /api/customers': [async ({ body }) => {
@@ -786,11 +807,14 @@ export const handler = router({
     return error('Records cannot be deleted. Update the queue status to preserve the audit trail.', 405);
   }],
 
-  'GET /api/products': [async () => { const { items } = await db.list('products', { limit: 500 }); return json({ items }); }],
+  'GET /api/products': [async () => {
+    const { items } = await db.list('products', { limit: 500 });
+    return json({ items: (items as any[]).filter(product => !product.archivedAt) });
+  }],
   'POST /api/products': [async ({ body }) => {
     const b: any = body;
     if (!b.name) return error('Product name is required', 400);
-    const [id] = await db.add('products', [{ name: b.name, category: b.category || 'Other', color: b.color || '', price: b.price || 0, cost: b.cost || 0, stock: b.stock || 0, lowStockThreshold: b.lowStockThreshold ?? 5, unit: b.unit || 'pcs' }]);
+    const [id] = await db.add('products', [{ name: b.name, category: b.category || 'Other', color: b.color || '', price: b.price || 0, cost: b.cost || 0, stock: b.stock || 0, lowStockThreshold: b.lowStockThreshold ?? 5, unit: b.unit || 'pcs', archivedAt: null }]);
     if (!id) return error('Failed to add product', 500);
     await audit('created', 'product', { id, name: b.name, stock: b.stock || 0, unit: b.unit || 'pcs' }, b.actor || 'owner');
     return json({ id });
@@ -807,6 +831,16 @@ export const handler = router({
       await db.add('stock_movements', [{ productId: params.id, productName: existing.name, previousStock: existing.stock, newStock: patch.stock, change: Number(patch.stock) - Number(existing.stock), reason: patch.reason || 'manual adjustment', createdAt: Date.now(), actor: patch.actor || 'owner' }]);
     }
     await audit('updated', 'product', { ...updated, productName: existing.name }, patch.actor || 'owner');
+    return json({ ok: true });
+  }],
+  'DELETE /api/products/:id': [async ({ params, body }) => {
+    requireOwner();
+    const [existing] = await db.get('products', [params.id]);
+    if (!existing || existing.archivedAt) return error('Product not found', 404);
+    const archived = { ...existing, archivedAt: Date.now() };
+    const [ok] = await db.update('products', [{ id: params.id, record: archived }]);
+    if (!ok) return error('Archive failed', 500);
+    await audit('archived', 'product', { id: params.id, productName: existing.name, name: existing.name }, (body as any)?.actor || currentContext()?.name || 'owner');
     return json({ ok: true });
   }],
 

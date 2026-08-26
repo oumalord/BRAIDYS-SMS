@@ -96,6 +96,7 @@ export const StaffApi = {
 export const ServicesApi = {
   list: () => cached('services:list', 30000, () => api.get('/api/services').then(r => r.data.items as ServiceItem[])),
   create: (s: Partial<ServiceItem>) => api.post('/api/services', s).then(r => { invalidate('services'); return r; }),
+  update: (id: string, patch: Partial<ServiceItem>) => api.put(`/api/services/${id}`, patch).then(r => { invalidate('services'); return r; }),
 };
 
 export const CustomersApi = {
@@ -130,6 +131,7 @@ export const ProductsApi = {
   list: () => cached('products:list', 15000, () => api.get('/api/products').then(r => r.data.items as Product[])),
   create: (p: Partial<Product>) => api.post('/api/products', p).then(r => { invalidate('products'); return r; }),
   update: (id: string, patch: Partial<Product>) => api.put(`/api/products/${id}`, patch).then(r => { invalidate('products'); return r; }),
+  remove: (id: string) => api.delete(`/api/products/${id}`).then(r => { invalidate('products'); return r; }),
 };
 
 export const OrdersApi = {
