@@ -471,6 +471,7 @@ export const handler = router({
     const fortnightFrom = now - 14 * DAY;
 
     const { items: orders } = await db.list('orders', { limit: 5000 });
+    const linkedAppointmentIds = new Set<string>();
     let todayCommission = 0;
     let todayAssistant = 0;
     let fortnightCommission = 0;
@@ -485,12 +486,36 @@ export const handler = router({
         if (item.staffId === context.staffId) {
           if (order.createdAt >= todayFrom) todayCommission += commission;
           if (order.createdAt >= fortnightFrom) fortnightCommission += commission;
+          if (order.appointmentId) linkedAppointmentIds.add(String(order.appointmentId));
         }
         if (item.helperStaffId === context.staffId) {
           if (order.createdAt >= todayFrom) todayAssistant += assistant;
           if (order.createdAt >= fortnightFrom) fortnightAssistant += assistant;
+          if (order.appointmentId) linkedAppointmentIds.add(String(order.appointmentId));
         }
       }
+    }
+
+    const { items: appointments } = await db.list('appointments', { limit: 2000 });
+    for (const appointment of appointments as any[]) {
+      if (appointment.status !== 'completed') continue;
+      if (linkedAppointmentIds.has(String(appointment.id || ''))) continue;
+
+      let serviceValue = 0;
+      if (Array.isArray(appointment.items) && appointment.items.length) {
+        serviceValue = appointment.items
+          .filter((item: any) => item?.staffId === context.staffId)
+          .reduce((sum: number, item: any) => sum + (Number(item.price || 0) * Number(item.qty || 1)), 0);
+      } else if (appointment.staffId === context.staffId) {
+        serviceValue = Number(appointment.price || 0);
+      }
+
+      if (serviceValue <= 0) continue;
+      const appointmentTs = new Date(`${appointment.date || ''}T00:00:00`).getTime();
+      if (!Number.isFinite(appointmentTs)) continue;
+      const derivedCommission = serviceValue * 0.5;
+      if (appointmentTs >= todayFrom) todayCommission += derivedCommission;
+      if (appointmentTs >= fortnightFrom) fortnightCommission += derivedCommission;
     }
 
     return json({
@@ -1082,7 +1107,7 @@ export const handler = router({
       }
     }
 
-    const [orderId] = await db.add('orders', [{ customerId: b.customerId || null, customerName, items: orderItems, helperDeductions, productCostTotal, commissionRate: 50, branchId: context?.branchId || null, branchName: context?.branchId || null, discountPct, discountSource, promoCode: promoUsed ? promoUsed.code : null, pointsRedeemed, mpesaReceiptNumber: b.mpesaReceiptNumber || null, subtotalByCurrency, discountByCurrency, totalByCurrency, paymentMethod, createdAt: Date.now() }]);
+    const [orderId] = await db.add('orders', [{ customerId: b.customerId || null, customerName, appointmentId: b.appointmentId || null, items: orderItems, helperDeductions, productCostTotal, commissionRate: 50, branchId: context?.branchId || null, branchName: context?.branchId || null, discountPct, discountSource, promoCode: promoUsed ? promoUsed.code : null, pointsRedeemed, mpesaReceiptNumber: b.mpesaReceiptNumber || null, subtotalByCurrency, discountByCurrency, totalByCurrency, paymentMethod, createdAt: Date.now() }]);
     if (!orderId) return error('Failed to create order', 500);
     await audit('created', 'order', { id: orderId, customerName, items: orderItems.map((item: any) => ({ ...item, productName: item.type === 'product' ? item.name : undefined, serviceName: item.type === 'service' ? item.name : undefined })), totalByCurrency, paymentMethod }, b.actor || 'receptionist');
 
