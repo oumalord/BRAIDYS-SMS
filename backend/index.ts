@@ -574,7 +574,7 @@ export const handler = router({
   }],
   'POST /api/customers/:id/pin': [async ({ params, body }) => {
     const context = currentContext();
-    if (!context || !['owner', 'admin', 'receptionist'].includes(context.role)) return error('Only the owner, administrator or receptionist can change client PINs', 403);
+    if (!context || !['owner', 'admin'].includes(context.role)) return error('Only the owner or administrator can change client PINs', 403);
     const pin = String(body?.pin || '');
     if (!/^\d{4}$/.test(pin)) return error('Client PIN must be exactly 4 digits', 400);
     const [customer] = await db.get('customers', [params.id]);

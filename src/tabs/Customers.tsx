@@ -103,7 +103,7 @@ function CustomersTab({ role }: { role: string }) {
                 </Select>
               </div>
               {(role === 'owner' || role === 'admin') && <Button size="sm" variant="secondary" className="mt-3" onClick={() => editCustomer(c)}>Edit details</Button>}
-              {(role === 'owner' || role === 'admin' || role === 'receptionist') && <Button size="sm" variant="secondary" className="mt-3" onClick={() => setPinCustomer(c)}><KeyRound size={14} aria-hidden="true" />Change client PIN</Button>}
+              {(role === 'owner' || role === 'admin') && <Button size="sm" variant="secondary" className="mt-3" onClick={() => setPinCustomer(c)}><KeyRound size={14} aria-hidden="true" />Change client PIN</Button>}
             </Card>
           ))}
         </div>

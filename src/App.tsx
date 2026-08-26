@@ -33,7 +33,7 @@ const TABS: { key: TabKey; label: string; icon: any; roles: Role[] }[] = [
   { key: 'services', label: 'Services', icon: Tag, roles: ['owner', 'manager', 'receptionist', 'admin'] },
   { key: 'memberships', label: 'Memberships', icon: CreditCard, roles: ['owner', 'admin'] },
   { key: 'promotions', label: 'Promotions', icon: Percent, roles: ['owner', 'manager', 'receptionist', 'admin'] },
-  { key: 'customers', label: 'Customers', icon: Contact, roles: ['owner', 'manager', 'receptionist', 'admin'] },
+  { key: 'customers', label: 'Customers', icon: Contact, roles: ['owner', 'manager', 'admin'] },
   { key: 'pos', label: 'Point of Sale', icon: ShoppingCart, roles: ['owner', 'manager', 'receptionist', 'barber', 'admin'] },
   { key: 'inventory', label: 'Inventory', icon: Package, roles: ['owner', 'admin'] },
   { key: 'finance', label: 'Finance', icon: DollarSign, roles: ['owner', 'admin'] },
