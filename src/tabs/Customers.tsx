@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import { KeyRound, Plus, Search, Contact as ContactIcon } from 'lucide-react';
+import { Download, KeyRound, Plus, Search, Contact as ContactIcon } from 'lucide-react';
 import { Card, Button, Badge, Modal, Field, Input, Select, Textarea, EmptyState, LoadingState, toast } from '../components/ui';
-import { CustomersApi, MembershipsApi, fmtKES } from '../lib/api';
+import { CustomersApi, MembershipsApi, downloadCSV, fmtKES } from '../lib/api';
 import type { Customer, MembershipPlan } from '../types';
 
 function CustomersTab({ role }: { role: string }) {
@@ -63,6 +63,22 @@ function CustomersTab({ role }: { role: string }) {
 
   const normalizedQuery = query.trim().toLowerCase();
   const filtered = customers.filter(c => [c.name, c.phone, c.email, c.notes, c.id].some(value => String(value || '').toLowerCase().includes(normalizedQuery)));
+  const downloadCustomers = () => {
+    downloadCSV(`safigroom-customers-${new Date().toISOString().slice(0, 10)}.csv`, [
+      ['Name', 'Phone', 'Email', 'Loyalty Points', 'Visits', 'Total Spent (KES)', 'Membership', 'Last Visit', 'Notes'],
+      ...customers.map(customer => [
+        customer.name,
+        customer.phone || '',
+        customer.email || '',
+        customer.loyaltyPoints,
+        customer.visits,
+        Math.round(customer.totalSpent || 0),
+        customer.membershipTier || 'none',
+        customer.lastVisit ? new Date(customer.lastVisit).toISOString() : '',
+        customer.notes || '',
+      ]),
+    ]);
+  };
 
   if (loading) return <LoadingState label="Loading customers…" />;
 
@@ -70,7 +86,10 @@ function CustomersTab({ role }: { role: string }) {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div><h1 className="text-2xl font-semibold tracking-tight">Customers</h1><p className="text-sm text-[#6E6E73]">{customers.length} customers on file</p></div>
-        <Button onClick={() => setOpen(true)}><Plus size={16} aria-hidden="true" />Add Customer</Button>
+        <div className="flex items-center gap-2">
+          {(role === 'owner' || role === 'admin') && <Button variant="secondary" onClick={downloadCustomers} disabled={!customers.length}><Download size={16} aria-hidden="true" />Download CSV</Button>}
+          <Button onClick={() => setOpen(true)}><Plus size={16} aria-hidden="true" />Add Customer</Button>
+        </div>
       </div>
 
       <div className="relative max-w-sm">
