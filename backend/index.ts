@@ -33,6 +33,11 @@ function normalizeRole(role: unknown): string {
   if (value.includes('manager')) return 'manager';
   return 'barber';
 }
+function sameStaffIdentity(staffId: unknown, staffName: unknown, context: { staffId?: string; name: string }): boolean {
+  if (staffId && String(staffId) === String(context.staffId || '')) return true;
+  const normalize = (value: unknown) => String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  return Boolean(staffName && context.name && normalize(staffName) === normalize(context.name));
+}
 function sessionRecord(token: string, account: any) {
   return { id: createHash('sha256').update(token).digest('hex'), accountId: account.id, tenantId: account.tenantId, expiresAt: Date.now() + 7 * DAY, createdAt: Date.now() };
 }
@@ -483,12 +488,12 @@ export const handler = router({
         if (item.type !== 'service') continue;
         const commission = Number(item.commission ?? (Number(item.lineTotalAfterDiscount ?? item.price * item.qty) * 0.5)) || 0;
         const assistant = Number(item.assistantPayment ?? item.helperDeduction ?? 0) || 0;
-        if (item.staffId === context.staffId) {
+        if (sameStaffIdentity(item.staffId, item.staffName, context)) {
           if (order.createdAt >= todayFrom) todayCommission += commission;
           if (order.createdAt >= fortnightFrom) fortnightCommission += commission;
           if (order.appointmentId) linkedAppointmentIds.add(String(order.appointmentId));
         }
-        if (item.helperStaffId === context.staffId) {
+        if (sameStaffIdentity(item.helperStaffId, item.helperStaffName, context)) {
           if (order.createdAt >= todayFrom) todayAssistant += assistant;
           if (order.createdAt >= fortnightFrom) fortnightAssistant += assistant;
           if (order.appointmentId) linkedAppointmentIds.add(String(order.appointmentId));
@@ -504,9 +509,9 @@ export const handler = router({
       let serviceValue = 0;
       if (Array.isArray(appointment.items) && appointment.items.length) {
         serviceValue = appointment.items
-          .filter((item: any) => item?.staffId === context.staffId)
+          .filter((item: any) => sameStaffIdentity(item?.staffId, item?.staffName, context))
           .reduce((sum: number, item: any) => sum + (Number(item.price || 0) * Number(item.qty || 1)), 0);
-      } else if (appointment.staffId === context.staffId) {
+      } else if (sameStaffIdentity(appointment.staffId, appointment.staffName, context)) {
         serviceValue = Number(appointment.price || 0);
       }
 
