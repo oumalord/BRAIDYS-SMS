@@ -772,7 +772,7 @@ export const handler = router({
     const { items: purchases } = await db.list('membership_purchases', { limit: 2000 });
     return json({
       customer,
-      appointments: (appointments as any[]).filter(item => item.customerId === customer.id).sort((a, b) => String(b.date).localeCompare(String(a.date))),
+      appointments: (appointments as any[]).filter(item => item.customerId === customer.id && !item.deletedAt).sort((a, b) => String(b.date).localeCompare(String(a.date))),
       queue: (queue as any[]).filter(item => item.customerId === customer.id).sort((a, b) => b.joinedAt - a.joinedAt).slice(0, 10),
       reviews: (reviews as any[]).filter(item => item.customerId === customer.id),
       membershipPurchases: (purchases as any[]).filter(item => item.customerId === customer.id),
@@ -783,7 +783,8 @@ export const handler = router({
     const { items } = await db.list('appointments', { limit: 1000 });
     const date = query.date;
     const context = currentContext();
-    const visible = context?.role === 'barber' ? items.filter((a: any) => a.staffId === context.staffId) : items;
+    const activeItems = items.filter((appointment: any) => !appointment.deletedAt);
+    const visible = context?.role === 'barber' ? activeItems.filter((a: any) => a.staffId === context.staffId) : activeItems;
     return json({ items: date ? visible.filter((a: any) => a.date === date) : visible });
   }],
   'POST /api/appointments': [async ({ body }) => {
@@ -934,17 +935,21 @@ export const handler = router({
   'DELETE /api/appointments/cancelled': [async () => {
     requireOwner();
     const { items: appointments } = await db.list('appointments', { limit: 5000 });
-    const cancelledIds = (appointments as any[]).filter(item => item.status === 'cancelled').map(item => item.id);
+    const cancelledAppointments = (appointments as any[]).filter(item => item.status === 'cancelled' && !item.deletedAt);
+    const cancelledIds = cancelledAppointments.map(item => item.id);
     if (!cancelledIds.length) return json({ deleted: 0 });
     const { items: queue } = await db.list('queue', { limit: 5000 });
-    const queueIds = (queue as any[]).filter(item => cancelledIds.includes(item.appointmentId)).map(item => item.id);
-    await db.delete('appointments', cancelledIds);
-    if (queueIds.length) await db.delete('queue', queueIds);
+    const queueEntries = (queue as any[]).filter(item => cancelledIds.includes(item.appointmentId) && !item.deletedAt);
+    const deletedAt = Date.now();
+    const deletedBy = currentContext()?.name || 'owner';
+    await db.update('appointments', cancelledAppointments.map(item => ({ id: item.id, record: { ...item, deletedAt, deletedBy } })));
+    if (queueEntries.length) await db.update('queue', queueEntries.map(item => ({ id: item.id, record: { ...item, deletedAt, deletedBy } })));
+    const queueIds = queueEntries.map(item => item.id);
     await audit('deleted cancelled appointments', 'appointments', { appointmentIds: cancelledIds, queueIds }, currentContext()?.name || 'owner');
     return json({ deleted: cancelledIds.length });
   }],
 
-  'GET /api/queue': [async () => { const { items } = await db.list('queue', { limit: 200 }); return json({ items }); }],
+  'GET /api/queue': [async () => { const { items } = await db.list('queue', { limit: 200 }); return json({ items: (items as any[]).filter(item => !item.deletedAt) }); }],
   'POST /api/queue': [async ({ body }) => {
     const b: any = body;
     if (!b.customerName) return error('Customer name is required', 400);
@@ -1477,8 +1482,8 @@ export const handler = router({
     const expensesAll = expensesResult.items;
     const staffAll = staffResult.items;
     const productsAll = productsResult.items;
-    const appts = appointmentsResult.items;
-    const queueAll = queueResult.items;
+    const appts = (appointmentsResult.items as any[]).filter(item => !item.deletedAt);
+    const queueAll = (queueResult.items as any[]).filter(item => !item.deletedAt);
     const customersAll = customersResult.items;
 
     const staffById = new Map(staffAll.map((s: any) => [s.id, s]));

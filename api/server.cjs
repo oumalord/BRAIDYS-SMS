@@ -30459,7 +30459,7 @@ New temporary password: ${newPassword}`, account.id);
     const { items: purchases } = await db.list("membership_purchases", { limit: 2e3 });
     return json({
       customer,
-      appointments: appointments.filter((item) => item.customerId === customer.id).sort((a2, b2) => String(b2.date).localeCompare(String(a2.date))),
+      appointments: appointments.filter((item) => item.customerId === customer.id && !item.deletedAt).sort((a2, b2) => String(b2.date).localeCompare(String(a2.date))),
       queue: queue.filter((item) => item.customerId === customer.id).sort((a2, b2) => b2.joinedAt - a2.joinedAt).slice(0, 10),
       reviews: reviews.filter((item) => item.customerId === customer.id),
       membershipPurchases: purchases.filter((item) => item.customerId === customer.id)
@@ -30469,7 +30469,8 @@ New temporary password: ${newPassword}`, account.id);
     const { items } = await db.list("appointments", { limit: 1e3 });
     const date = query.date;
     const context = currentContext();
-    const visible = context?.role === "barber" ? items.filter((a2) => a2.staffId === context.staffId) : items;
+    const activeItems = items.filter((appointment) => !appointment.deletedAt);
+    const visible = context?.role === "barber" ? activeItems.filter((a2) => a2.staffId === context.staffId) : activeItems;
     return json({ items: date ? visible.filter((a2) => a2.date === date) : visible });
   }],
   "POST /api/appointments": [async ({ body }) => {
@@ -30635,18 +30636,22 @@ New temporary password: ${newPassword}`, account.id);
   "DELETE /api/appointments/cancelled": [async () => {
     requireOwner();
     const { items: appointments } = await db.list("appointments", { limit: 5e3 });
-    const cancelledIds = appointments.filter((item) => item.status === "cancelled").map((item) => item.id);
+    const cancelledAppointments = appointments.filter((item) => item.status === "cancelled" && !item.deletedAt);
+    const cancelledIds = cancelledAppointments.map((item) => item.id);
     if (!cancelledIds.length) return json({ deleted: 0 });
     const { items: queue } = await db.list("queue", { limit: 5e3 });
-    const queueIds = queue.filter((item) => cancelledIds.includes(item.appointmentId)).map((item) => item.id);
-    await db.delete("appointments", cancelledIds);
-    if (queueIds.length) await db.delete("queue", queueIds);
+    const queueEntries = queue.filter((item) => cancelledIds.includes(item.appointmentId) && !item.deletedAt);
+    const deletedAt = Date.now();
+    const deletedBy = currentContext()?.name || "owner";
+    await db.update("appointments", cancelledAppointments.map((item) => ({ id: item.id, record: { ...item, deletedAt, deletedBy } })));
+    if (queueEntries.length) await db.update("queue", queueEntries.map((item) => ({ id: item.id, record: { ...item, deletedAt, deletedBy } })));
+    const queueIds = queueEntries.map((item) => item.id);
     await audit("deleted cancelled appointments", "appointments", { appointmentIds: cancelledIds, queueIds }, currentContext()?.name || "owner");
     return json({ deleted: cancelledIds.length });
   }],
   "GET /api/queue": [async () => {
     const { items } = await db.list("queue", { limit: 200 });
-    return json({ items });
+    return json({ items: items.filter((item) => !item.deletedAt) });
   }],
   "POST /api/queue": [async ({ body }) => {
     const b2 = body;
@@ -31183,8 +31188,8 @@ New temporary password: ${newPassword}`, account.id);
     const expensesAll = expensesResult.items;
     const staffAll = staffResult.items;
     const productsAll = productsResult.items;
-    const appts = appointmentsResult.items;
-    const queueAll = queueResult.items;
+    const appts = appointmentsResult.items.filter((item) => !item.deletedAt);
+    const queueAll = queueResult.items.filter((item) => !item.deletedAt);
     const customersAll = customersResult.items;
     const staffById = new Map(staffAll.map((s) => [s.id, s]));
     const productById = new Map(productsAll.map((p2) => [p2.id, p2]));
