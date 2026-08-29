@@ -41,12 +41,16 @@ function commissionPct(value: unknown, staffCount?: unknown): 30 | 33.33 | 40 | 
   if (rate === 30 || rate === 33.33 || rate === 40 || rate === 50) return rate;
   return serviceStaffCount(staffCount) === 2 ? 33.33 : 50;
 }
-function assistantCompensation(serviceFee: unknown): number {
+function assistantCompensation(serviceFee: unknown, hasSpecialBraid = false): number {
+  if (hasSpecialBraid) return 400;
   const amount = Math.max(0, Number(serviceFee) || 0);
   if (amount <= 1800) return 200;
   if (amount <= 2400) return 300;
   if (amount <= 3300) return 400;
   return 500;
+}
+function hasSpecialAssistantBraid(item: any): boolean {
+  return (item.consumedProducts || []).some((product: any) => ['amara', 'diani'].includes(String(product?.name || '').trim().toLowerCase()));
 }
 function sameStaffIdentity(staffId: unknown, staffName: unknown, context: { staffId?: string; name: string }): boolean {
   if (staffId && String(staffId) === String(context.staffId || '')) return true;
@@ -503,6 +507,7 @@ export const handler = router({
     let fortnightAssistant = 0;
 
     for (const order of orders as any[]) {
+      if (order.deletedAt) continue;
       if (!order.createdAt) continue;
       for (const item of order.items || []) {
         if (item.type !== 'service') continue;
@@ -1027,7 +1032,7 @@ export const handler = router({
     return json({ ok: true });
   }],
 
-  'GET /api/orders': [async () => { const { items } = await db.list('orders', { limit: 1000 }); return json({ items }); }],
+  'GET /api/orders': [async () => { const { items } = await db.list('orders', { limit: 1000 }); return json({ items: (items as any[]).filter(item => !item.deletedAt) }); }],
   'GET /api/pos-drafts': [async ({ query }) => {
     const context = currentContext();
     if (!context) return error('Please log in.', 401);
@@ -1083,7 +1088,7 @@ export const handler = router({
       const rate = Number(adjustment.commissionPct);
       const commissionPct = Number.isFinite(rate) && rate >= 0 && rate <= 100 ? rate : Number(item.commissionPct || item.commissionRate || 50);
       const serviceRevenue = Number(item.lineTotalAfterDiscount ?? item.price * item.qty) || 0;
-      const assistantPayment = helper ? assistantCompensation(Number(item.price || 0) * Number(item.qty || 1)) : 0;
+      const assistantPayment = helper ? assistantCompensation(Number(item.price || 0) * Number(item.qty || 1), hasSpecialAssistantBraid(item)) : 0;
       const productCost = Math.max(0, Number(item.productCost || 0));
       const commissionBase = Math.max(0, serviceRevenue - productCost - assistantPayment);
       const commission = commissionBase * (commissionPct / 100);
@@ -1239,8 +1244,8 @@ export const handler = router({
           unit: String(entry?.unit || ''),
         }))
         .filter((entry: any) => entry.productId && entry.qty > 0);
-      item.assistantPayment = helperId ? assistantCompensation(Number(item.price || 0) * Number(item.qty || 1)) : 0;
-      item.helperDeduction = item.assistantPayment;
+      item.assistantPayment = 0;
+      item.helperDeduction = 0;
     }
 
     const productItems = orderItems.filter((it: any) => it.type === 'product');
@@ -1281,6 +1286,8 @@ export const handler = router({
             unit: product?.unit || used.unit || '',
           };
         });
+        item.assistantPayment = item.helperStaffId ? assistantCompensation(Number(item.price || 0) * Number(item.qty || 1), hasSpecialAssistantBraid(item)) : 0;
+        item.helperDeduction = item.assistantPayment;
       }
       if (updates.length) await db.update('products', updates);
       const productMoves = productItems.map((item: any) => ({
@@ -1367,6 +1374,7 @@ export const handler = router({
     const { items: orders } = await db.list('orders', { limit: 5000 });
     const totals = new Map<string, { commission: number; assistant: number }>();
     for (const order of orders as any[]) {
+      if (order.deletedAt) continue;
       if (!order.createdAt || order.createdAt < from) continue;
       for (const item of order.items || []) {
         if (item.type !== 'service') continue;
@@ -1410,6 +1418,7 @@ export const handler = router({
     const alreadyPaid = new Set((paidItems as any[]).map(item => item.itemKey));
     const lines: any[] = [];
     for (const order of orders as any[]) {
+      if (order.deletedAt) continue;
       if (!order.createdAt || order.createdAt < from || order.createdAt >= now) continue;
       (order.items || []).forEach((item: any, index: number) => {
         if (item.type !== 'service' || !item.staffId) return;
@@ -1504,7 +1513,7 @@ export const handler = router({
     const staffById = new Map(staffAll.map((s: any) => [s.id, s]));
     const productById = new Map(productsAll.map((p: any) => [p.id, p]));
 
-    const rangeOrders = (orders as any[]).filter(o => o.createdAt >= cutoff);
+    const rangeOrders = (orders as any[]).filter(o => !o.deletedAt && o.createdAt >= cutoff);
     const paymentMethodTotals: Record<'Cash' | 'Card' | 'M-Pesa', number> = { Cash: 0, Card: 0, 'M-Pesa': 0 };
     const revenueByCurrency: Record<string, number> = {};
     for (const o of rangeOrders) {

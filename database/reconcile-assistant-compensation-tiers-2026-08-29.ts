@@ -5,7 +5,8 @@ const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error('DATABASE_URL is required');
 
 const sql = neon(databaseUrl);
-function assistantCompensation(serviceFee: number): number {
+function assistantCompensation(serviceFee: number, hasSpecialBraid = false): number {
+  if (hasSpecialBraid) return 400;
   if (serviceFee <= 1800) return 200;
   if (serviceFee <= 2400) return 300;
   if (serviceFee <= 3300) return 400;
@@ -15,12 +16,14 @@ function assistantCompensation(serviceFee: number): number {
 const rows = await sql`SELECT id, record FROM app_records WHERE collection = 'orders' ORDER BY created_at ASC` as { id: string; record: any }[];
 const updates: { id: string; record: any }[] = [];
 for (const row of rows) {
+  if (row.record?.deletedAt) continue;
   const items = Array.isArray(row.record?.items) ? row.record.items : [];
   let changed = false;
   const correctedItems = items.map((item: any) => {
     if (item.type !== 'service' || !item.helperStaffId) return item;
     const serviceFee = Number(item.price || 0) * Number(item.qty || 1);
-    const assistantPayment = assistantCompensation(serviceFee);
+    const hasSpecialBraid = (item.consumedProducts || []).some((product: any) => ['amara', 'diani'].includes(String(product?.name || '').trim().toLowerCase()));
+    const assistantPayment = assistantCompensation(serviceFee, hasSpecialBraid);
     const serviceRevenue = Number(item.lineTotalAfterDiscount ?? serviceFee) || 0;
     const productCost = Math.max(0, Number(item.productCost || 0));
     const commissionBase = Math.max(0, serviceRevenue - productCost - assistantPayment);

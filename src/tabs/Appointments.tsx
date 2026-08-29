@@ -20,6 +20,7 @@ interface CompletionLine {
   name: string;
   staffId: string;
   serviceFee: number;
+  hasSpecialBraid: boolean;
   helperStaffId: string;
   assistantPayment: number;
   commissionBase: number;
@@ -27,7 +28,8 @@ interface CompletionLine {
   commission: number;
 }
 
-function assistantCompensation(serviceFee: number): number {
+function assistantCompensation(serviceFee: number, hasSpecialBraid = false): number {
+  if (hasSpecialBraid) return 400;
   if (serviceFee <= 1800) return 200;
   if (serviceFee <= 2400) return 300;
   if (serviceFee <= 3300) return 400;
@@ -184,7 +186,7 @@ function Appointments({ role }: { role: Role }) {
       const lines = (Array.isArray(order.items) ? order.items : [])
         .map((item: any, index: number) => ({ item, index }))
         .filter(({ item }: { item: any }) => item.type === 'service')
-        .map(({ item, index }: { item: any; index: number }) => { const serviceFee = Number(item.price || 0) * Number(item.qty || 1); const assistantPayment = item.helperStaffId ? assistantCompensation(serviceFee) : 0; return { index, name: item.name || appointment.serviceName, staffId: item.staffId || '', serviceFee, helperStaffId: item.helperStaffId || '', assistantPayment, commissionBase: Math.max(0, Number(item.lineTotalAfterDiscount ?? serviceFee) - Number(item.productCost || 0) - assistantPayment), commissionPct: Number(item.commissionPct ?? item.commissionRate ?? 50), commission: Number(item.commission || 0) }; });
+        .map(({ item, index }: { item: any; index: number }) => { const serviceFee = Number(item.price || 0) * Number(item.qty || 1); const hasSpecialBraid = (item.consumedProducts || []).some((product: any) => ['amara', 'diani'].includes(String(product?.name || '').trim().toLowerCase())); const assistantPayment = item.helperStaffId ? assistantCompensation(serviceFee, hasSpecialBraid) : 0; return { index, name: item.name || appointment.serviceName, staffId: item.staffId || '', serviceFee, hasSpecialBraid, helperStaffId: item.helperStaffId || '', assistantPayment, commissionBase: Math.max(0, Number(item.lineTotalAfterDiscount ?? serviceFee) - Number(item.productCost || 0) - assistantPayment), commissionPct: Number(item.commissionPct ?? item.commissionRate ?? 50), commission: Number(item.commission || 0) }; });
       if (!lines.length) { toast('This appointment has no completed service work to adjust.', 'error'); return; }
       setCompletionLines(lines);
       setCompletionEdit({ orderId: order.id, appointment });
@@ -341,7 +343,7 @@ function Appointments({ role }: { role: Role }) {
               <div key={line.index} className="border-b border-black/5 pb-4 space-y-3">
                 <p className="text-sm font-medium">{line.name}</p>
                 <Field label="Completed by" htmlFor={`completion-staff-${line.index}`}><Select id={`completion-staff-${line.index}`} value={line.staffId} onChange={event => setCompletionLines(current => current.map((item, index) => index === lineIndex ? { ...item, staffId: event.target.value } : item))}><option value="">Assign employee</option>{staff.filter(member => member.employmentStatus !== 'laid-off').map(member => <option key={member.id} value={member.id}>{member.name}</option>)}</Select></Field>
-                <Field label="Assistant (optional)" htmlFor={`completion-assistant-${line.index}`}><Select id={`completion-assistant-${line.index}`} value={line.helperStaffId} onChange={event => setCompletionLines(current => current.map((item, index) => index === lineIndex ? { ...item, helperStaffId: event.target.value, assistantPayment: event.target.value ? assistantCompensation(item.serviceFee) : 0, commissionBase: Math.max(0, item.serviceFee - (event.target.value ? assistantCompensation(item.serviceFee) : 0)) } : item))}><option value="">No assistant</option>{staff.filter(member => member.id !== line.staffId && member.employmentStatus !== 'laid-off').map(member => <option key={member.id} value={member.id}>{member.name}</option>)}</Select></Field>
+                <Field label="Assistant (optional)" htmlFor={`completion-assistant-${line.index}`}><Select id={`completion-assistant-${line.index}`} value={line.helperStaffId} onChange={event => setCompletionLines(current => current.map((item, index) => index === lineIndex ? { ...item, helperStaffId: event.target.value, assistantPayment: event.target.value ? assistantCompensation(item.serviceFee, item.hasSpecialBraid) : 0, commissionBase: Math.max(0, item.serviceFee - (event.target.value ? assistantCompensation(item.serviceFee, item.hasSpecialBraid) : 0)) } : item))}><option value="">No assistant</option>{staff.filter(member => member.id !== line.staffId && member.employmentStatus !== 'laid-off').map(member => <option key={member.id} value={member.id}>{member.name}</option>)}</Select></Field>
                 <div className="grid sm:grid-cols-2 gap-4">
                   <Field label="Commission rate (%)" htmlFor={`completion-rate-${line.index}`}><Input id={`completion-rate-${line.index}`} type="number" min={0} max={100} value={line.commissionPct} onChange={event => setCompletionLines(current => current.map((item, index) => index === lineIndex ? { ...item, commissionPct: Number(event.target.value) } : item))} /></Field>
                   {line.helperStaffId ? <Field label="Assistant compensation (KES)" htmlFor={`completion-assistant-payment-${line.index}`}><Input id={`completion-assistant-payment-${line.index}`} type="number" value={line.assistantPayment} readOnly className="py-1.5 text-xs bg-black/[0.03]" /></Field> : <div />}

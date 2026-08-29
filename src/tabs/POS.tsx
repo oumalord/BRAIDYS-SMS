@@ -9,7 +9,11 @@ interface ConsumedProductLine { productId: string; name: string; qty: number; co
 interface CartLine { key: string; type: 'service' | 'product'; refId: string; name: string; price: number; currency: Currency; qty: number; staffCount?: 1 | 2; commissionPct?: 30 | 33.33 | 40 | 50; staffId?: string; staffName?: string; coStaffId?: string; coStaffName?: string; helperStaffId?: string; helperStaffName?: string; assistantPayment?: number; consumedProducts?: ConsumedProductLine[]; }
 
 function todayStr() { return new Date().toISOString().slice(0, 10); }
-function assistantCompensation(serviceFee: number): number {
+function hasSpecialAssistantBraid(line: CartLine): boolean {
+  return (line.consumedProducts || []).some(product => ['amara', 'diani'].includes(product.name.trim().toLowerCase()));
+}
+function assistantCompensation(serviceFee: number, hasSpecialBraid = false): number {
+  if (hasSpecialBraid) return 400;
   if (serviceFee <= 1800) return 200;
   if (serviceFee <= 2400) return 300;
   if (serviceFee <= 3300) return 400;
@@ -117,7 +121,7 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
   };
   const setLineHelper = (key: string, helperStaffId: string) => {
     const helper = staff.find(x => x.id === helperStaffId);
-    setCart(c => c.map(l => l.key === key ? { ...l, helperStaffId: helper?.id, helperStaffName: helper?.name, assistantPayment: helper ? assistantCompensation(l.price * l.qty) : 0 } : l));
+    setCart(c => c.map(l => l.key === key ? { ...l, helperStaffId: helper?.id, helperStaffName: helper?.name, assistantPayment: helper ? assistantCompensation(l.price * l.qty, hasSpecialAssistantBraid(l)) : 0 } : l));
   };
   const setLineQty = (key: string, qty: number) => setCart(c => c.map(l => l.key === key ? { ...l, qty: Math.max(1, qty) } : l));
   const addUsedProduct = (lineKey: string, productId: string) => {
@@ -340,7 +344,7 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
                         ))}
                       </div>}
                       {l.staffCount === 2 && l.coStaffId && <p className="text-xs text-[#6E6E73]">Co-staff earns {l.commissionPct || 33.33}% commission; the salon receives the balance.</p>}
-                      {l.helperStaffId && <p className="text-xs text-[#6E6E73]">Assistant compensation: {fmtMoney(assistantCompensation(l.price * l.qty), 'KES')}</p>}
+                      {l.helperStaffId && <p className="text-xs text-[#6E6E73]">Assistant compensation: {fmtMoney(assistantCompensation(l.price * l.qty, hasSpecialAssistantBraid(l)), 'KES')}</p>}
                     </div>
                   )}
                 </div>

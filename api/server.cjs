@@ -29757,12 +29757,16 @@ function commissionPct(value, staffCount) {
   if (rate === 30 || rate === 33.33 || rate === 40 || rate === 50) return rate;
   return serviceStaffCount(staffCount) === 2 ? 33.33 : 50;
 }
-function assistantCompensation(serviceFee) {
+function assistantCompensation(serviceFee, hasSpecialBraid = false) {
+  if (hasSpecialBraid) return 400;
   const amount = Math.max(0, Number(serviceFee) || 0);
   if (amount <= 1800) return 200;
   if (amount <= 2400) return 300;
   if (amount <= 3300) return 400;
   return 500;
+}
+function hasSpecialAssistantBraid(item) {
+  return (item.consumedProducts || []).some((product) => ["amara", "diani"].includes(String(product?.name || "").trim().toLowerCase()));
 }
 function sameStaffIdentity(staffId, staffName, context) {
   if (staffId && String(staffId) === String(context.staffId || "")) return true;
@@ -30200,6 +30204,7 @@ New temporary password: ${newPassword}`, account.id);
     let fortnightCommission = 0;
     let fortnightAssistant = 0;
     for (const order of orders) {
+      if (order.deletedAt) continue;
       if (!order.createdAt) continue;
       for (const item of order.items || []) {
         if (item.type !== "service") continue;
@@ -30730,7 +30735,7 @@ New temporary password: ${newPassword}`, account.id);
   }],
   "GET /api/orders": [async () => {
     const { items } = await db.list("orders", { limit: 1e3 });
-    return json({ items });
+    return json({ items: items.filter((item) => !item.deletedAt) });
   }],
   "GET /api/pos-drafts": [async ({ query }) => {
     const context = currentContext();
@@ -30787,7 +30792,7 @@ New temporary password: ${newPassword}`, account.id);
       const rate = Number(adjustment.commissionPct);
       const commissionPct2 = Number.isFinite(rate) && rate >= 0 && rate <= 100 ? rate : Number(item.commissionPct || item.commissionRate || 50);
       const serviceRevenue = Number(item.lineTotalAfterDiscount ?? item.price * item.qty) || 0;
-      const assistantPayment = helper ? assistantCompensation(Number(item.price || 0) * Number(item.qty || 1)) : 0;
+      const assistantPayment = helper ? assistantCompensation(Number(item.price || 0) * Number(item.qty || 1), hasSpecialAssistantBraid(item)) : 0;
       const productCost = Math.max(0, Number(item.productCost || 0));
       const commissionBase = Math.max(0, serviceRevenue - productCost - assistantPayment);
       const commission = commissionBase * (commissionPct2 / 100);
@@ -30941,8 +30946,8 @@ New temporary password: ${newPassword}`, account.id);
         cost: Math.max(0, Number(entry?.cost || 0)),
         unit: String(entry?.unit || "")
       })).filter((entry) => entry.productId && entry.qty > 0);
-      item.assistantPayment = helperId ? assistantCompensation(Number(item.price || 0) * Number(item.qty || 1)) : 0;
-      item.helperDeduction = item.assistantPayment;
+      item.assistantPayment = 0;
+      item.helperDeduction = 0;
     }
     const productItems = orderItems.filter((it2) => it2.type === "product");
     const productQuantities = /* @__PURE__ */ new Map();
@@ -30982,6 +30987,8 @@ New temporary password: ${newPassword}`, account.id);
             unit: product?.unit || used.unit || ""
           };
         });
+        item.assistantPayment = item.helperStaffId ? assistantCompensation(Number(item.price || 0) * Number(item.qty || 1), hasSpecialAssistantBraid(item)) : 0;
+        item.helperDeduction = item.assistantPayment;
       }
       if (updates.length) await db.update("products", updates);
       const productMoves = productItems.map((item) => ({
@@ -31065,6 +31072,7 @@ New temporary password: ${newPassword}`, account.id);
     const { items: orders } = await db.list("orders", { limit: 5e3 });
     const totals = /* @__PURE__ */ new Map();
     for (const order of orders) {
+      if (order.deletedAt) continue;
       if (!order.createdAt || order.createdAt < from) continue;
       for (const item of order.items || []) {
         if (item.type !== "service") continue;
@@ -31111,6 +31119,7 @@ New temporary password: ${newPassword}`, account.id);
     const alreadyPaid = new Set(paidItems.map((item) => item.itemKey));
     const lines = [];
     for (const order of orders) {
+      if (order.deletedAt) continue;
       if (!order.createdAt || order.createdAt < from || order.createdAt >= now) continue;
       (order.items || []).forEach((item, index) => {
         if (item.type !== "service" || !item.staffId) return;
@@ -31210,7 +31219,7 @@ New temporary password: ${newPassword}`, account.id);
     const customersAll = customersResult.items;
     const staffById = new Map(staffAll.map((s) => [s.id, s]));
     const productById = new Map(productsAll.map((p2) => [p2.id, p2]));
-    const rangeOrders = orders.filter((o) => o.createdAt >= cutoff);
+    const rangeOrders = orders.filter((o) => !o.deletedAt && o.createdAt >= cutoff);
     const paymentMethodTotals = { Cash: 0, Card: 0, "M-Pesa": 0 };
     const revenueByCurrency = {};
     for (const o of rangeOrders) {
