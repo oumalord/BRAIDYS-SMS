@@ -30357,14 +30357,14 @@ New temporary password: ${newPassword}`, account.id);
   }],
   "GET /api/customers": [async () => {
     const { items } = await db.list("customers", { limit: 1e3 });
-    const customers = items;
+    const customers = items.filter((customer) => !customer.deletedAt);
     const byId = new Map(customers.map((customer) => [String(customer.id), customer]));
     const byEmail = new Map(customers.filter((customer) => customer.email).map((customer) => [String(customer.email).toLowerCase(), customer]));
     const { items: appointments } = await db.list("appointments", { limit: 3e3 });
     const toCreate = [];
     const appointmentUpdates = [];
     for (const appointment of appointments) {
-      if (!appointment?.customerName) continue;
+      if (!appointment?.customerName || appointment.deletedAt) continue;
       const appointmentCustomerId = String(appointment.customerId || "");
       const appointmentEmail = String(appointment.customerEmail || "").toLowerCase();
       const existing = appointmentCustomerId && byId.get(appointmentCustomerId) || appointmentEmail && byEmail.get(appointmentEmail);
@@ -30400,7 +30400,7 @@ New temporary password: ${newPassword}`, account.id);
     if (toCreate.length) await db.add("customers", toCreate);
     if (appointmentUpdates.length) await db.update("appointments", appointmentUpdates);
     const { items: refreshed } = await db.list("customers", { limit: 3e3 });
-    return json({ items: refreshed });
+    return json({ items: refreshed.filter((customer) => !customer.deletedAt) });
   }],
   "POST /api/customers": [async ({ body }) => {
     const b2 = body;
@@ -30431,6 +30431,24 @@ New temporary password: ${newPassword}`, account.id);
     }
     return json({ ok: true });
   }],
+  "DELETE /api/customers/:id/records": [async ({ params }) => {
+    requireOwner();
+    const [customer] = await db.get("customers", [params.id]);
+    if (!customer || customer.deletedAt) return error("Customer not found", 404);
+    const collections = ["customers", "appointments", "queue", "orders", "reviews", "membership_purchases", "pos_drafts", "notifications"];
+    const deletedAt = Date.now();
+    const deletedBy = currentContext()?.name || "owner";
+    const deleted = {};
+    for (const collection of collections) {
+      const { items } = await db.list(collection, { limit: 5e3 });
+      const matching = items.filter((item) => collection === "customers" ? item.id === customer.id : item.customerId === customer.id || item.clientId === customer.id);
+      if (!matching.length) continue;
+      await db.update(collection, matching.map((item) => ({ id: item.id, record: { ...item, deletedAt, deletedBy } })));
+      deleted[collection] = matching.length;
+    }
+    await audit("deleted customer records", "customer", { id: customer.id, name: customer.name, deleted }, deletedBy);
+    return json({ deleted });
+  }],
   "POST /api/customers/:id/pin": [async ({ params, body }) => {
     const context = currentContext();
     if (!context || !["owner", "admin"].includes(context.role)) return error("Only the owner or administrator can change client PINs", 403);
@@ -30451,11 +30469,12 @@ New temporary password: ${newPassword}`, account.id);
     if (!search) return error("A name, email or phone number is required", 400);
     const context = currentContext();
     const { items: customers } = context?.role === "admin" ? await db.list("customers", { limit: 2e3 }) : await db.listAllTenant("customers", context?.tenantId || "", { limit: 2e3 });
-    let customer = customers.find((item) => [item.name, item.email, item.phone, item.id].some((value) => String(value || "").toLowerCase().replace(/\s+/g, "").includes(normalizedSearch)));
+    const activeCustomers = customers.filter((item) => !item.deletedAt);
+    let customer = activeCustomers.find((item) => [item.name, item.email, item.phone, item.id].some((value) => String(value || "").toLowerCase().replace(/\s+/g, "").includes(normalizedSearch)));
     if (!customer && context?.role === "customer") {
       const [account] = await db.get("accounts", [context.accountId]);
       if (account && [account.name, account.email, account.phone, account.id].some((value) => String(value || "").toLowerCase().replace(/\s+/g, "").includes(normalizedSearch))) {
-        const existingCustomer = customers.find((item) => item.email === account.email);
+        const existingCustomer = activeCustomers.find((item) => item.email === account.email);
         if (!existingCustomer) {
           customer = { id: `customer-${(0, import_node_crypto2.randomBytes)(8).toString("hex")}`, name: account.name, phone: account.phone || "", email: account.email || "", notes: "", loyaltyPoints: 0, totalSpent: 0, totalSpentUSD: 0, visits: 0, lastVisit: null, createdAt: Date.now(), membershipTier: "none", membershipExpiry: null };
           await db.add("customers", [customer]);
@@ -30472,9 +30491,9 @@ New temporary password: ${newPassword}`, account.id);
     return json({
       customer,
       appointments: appointments.filter((item) => item.customerId === customer.id && !item.deletedAt).sort((a2, b2) => String(b2.date).localeCompare(String(a2.date))),
-      queue: queue.filter((item) => item.customerId === customer.id).sort((a2, b2) => b2.joinedAt - a2.joinedAt).slice(0, 10),
-      reviews: reviews.filter((item) => item.customerId === customer.id),
-      membershipPurchases: purchases.filter((item) => item.customerId === customer.id)
+      queue: queue.filter((item) => item.customerId === customer.id && !item.deletedAt).sort((a2, b2) => b2.joinedAt - a2.joinedAt).slice(0, 10),
+      reviews: reviews.filter((item) => item.customerId === customer.id && !item.deletedAt),
+      membershipPurchases: purchases.filter((item) => item.customerId === customer.id && !item.deletedAt)
     });
   }],
   "GET /api/appointments": [async ({ query }) => {

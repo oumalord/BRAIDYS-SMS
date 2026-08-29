@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Download, KeyRound, Plus, Search, Contact as ContactIcon } from 'lucide-react';
+import { Download, KeyRound, Plus, Search, Contact as ContactIcon, Trash2 } from 'lucide-react';
 import { Card, Button, Badge, Modal, Field, Input, Select, Textarea, EmptyState, LoadingState, toast } from '../components/ui';
 import { CustomersApi, MembershipsApi, downloadCSV, fmtKES } from '../lib/api';
 import type { Customer, MembershipPlan } from '../types';
@@ -14,6 +14,7 @@ function CustomersTab({ role }: { role: string }) {
   const [plans, setPlans] = useState<MembershipPlan[]>([]);
   const [pinCustomer, setPinCustomer] = useState<Customer | null>(null);
   const [newPin, setNewPin] = useState('');
+  const [deletingCustomerId, setDeletingCustomerId] = useState<string | null>(null);
 
   const load = () => { CustomersApi.list().then(setCustomers).catch(() => toast('Could not load customers.', 'error')).finally(() => setLoading(false)); };
   useEffect(load, []);
@@ -59,6 +60,19 @@ function CustomersTab({ role }: { role: string }) {
       setPinCustomer(null);
       setNewPin('');
     } catch (cause: any) { toast(cause?.message || 'Could not change client PIN.', 'error'); }
+  };
+  const deleteCustomerRecords = async (customer: Customer) => {
+    if (!window.confirm(`Delete ${customer.name} and all related appointments, queue entries, sales, reviews, memberships, drafts, and notifications? This cannot be undone from the application.`)) return;
+    setDeletingCustomerId(customer.id);
+    try {
+      await CustomersApi.deleteRecords(customer.id);
+      toast(`${customer.name}'s records were deleted.`, 'success');
+      load();
+    } catch (cause: any) {
+      toast(cause?.message || 'Could not delete customer records.', 'error');
+    } finally {
+      setDeletingCustomerId(null);
+    }
   };
 
   const normalizedQuery = query.trim().toLowerCase();
@@ -123,6 +137,7 @@ function CustomersTab({ role }: { role: string }) {
               </div>
               {(role === 'owner' || role === 'admin') && <Button size="sm" variant="secondary" className="mt-3" onClick={() => editCustomer(c)}>Edit details</Button>}
               {(role === 'owner' || role === 'admin') && <Button size="sm" variant="secondary" className="mt-3" onClick={() => setPinCustomer(c)}><KeyRound size={14} aria-hidden="true" />Change client PIN</Button>}
+              {(role === 'owner' || role === 'admin') && <Button size="sm" variant="danger" className="mt-3" disabled={deletingCustomerId === c.id} onClick={() => deleteCustomerRecords(c)}><Trash2 size={14} aria-hidden="true" />{deletingCustomerId === c.id ? 'Deleting...' : 'Delete client records'}</Button>}
             </Card>
           ))}
         </div>

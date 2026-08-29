@@ -665,7 +665,7 @@ export const handler = router({
 
   'GET /api/customers': [async () => {
     const { items } = await db.list('customers', { limit: 1000 });
-    const customers = items as any[];
+    const customers = (items as any[]).filter(customer => !customer.deletedAt);
     const byId = new Map(customers.map(customer => [String(customer.id), customer]));
     const byEmail = new Map(customers.filter(customer => customer.email).map(customer => [String(customer.email).toLowerCase(), customer]));
 
@@ -674,7 +674,7 @@ export const handler = router({
     const appointmentUpdates: { id: string; record: any }[] = [];
 
     for (const appointment of appointments as any[]) {
-      if (!appointment?.customerName) continue;
+      if (!appointment?.customerName || appointment.deletedAt) continue;
       const appointmentCustomerId = String(appointment.customerId || '');
       const appointmentEmail = String(appointment.customerEmail || '').toLowerCase();
       const existing = (appointmentCustomerId && byId.get(appointmentCustomerId)) || (appointmentEmail && byEmail.get(appointmentEmail));
@@ -713,7 +713,7 @@ export const handler = router({
     if (appointmentUpdates.length) await db.update('appointments', appointmentUpdates);
 
     const { items: refreshed } = await db.list('customers', { limit: 3000 });
-    return json({ items: refreshed });
+    return json({ items: (refreshed as any[]).filter(customer => !customer.deletedAt) });
   }],
   'POST /api/customers': [async ({ body }) => {
     const b: any = body;
@@ -744,6 +744,24 @@ export const handler = router({
     }
     return json({ ok: true });
   }],
+  'DELETE /api/customers/:id/records': [async ({ params }) => {
+    requireOwner();
+    const [customer] = await db.get('customers', [params.id]);
+    if (!customer || customer.deletedAt) return error('Customer not found', 404);
+    const collections = ['customers', 'appointments', 'queue', 'orders', 'reviews', 'membership_purchases', 'pos_drafts', 'notifications'];
+    const deletedAt = Date.now();
+    const deletedBy = currentContext()?.name || 'owner';
+    const deleted: Record<string, number> = {};
+    for (const collection of collections) {
+      const { items } = await db.list(collection, { limit: 5000 });
+      const matching = (items as any[]).filter(item => collection === 'customers' ? item.id === customer.id : item.customerId === customer.id || item.clientId === customer.id);
+      if (!matching.length) continue;
+      await db.update(collection, matching.map(item => ({ id: item.id, record: { ...item, deletedAt, deletedBy } })));
+      deleted[collection] = matching.length;
+    }
+    await audit('deleted customer records', 'customer', { id: customer.id, name: customer.name, deleted }, deletedBy);
+    return json({ deleted });
+  }],
   'POST /api/customers/:id/pin': [async ({ params, body }) => {
     const context = currentContext();
     if (!context || !['owner', 'admin'].includes(context.role)) return error('Only the owner or administrator can change client PINs', 403);
@@ -764,11 +782,12 @@ export const handler = router({
     if (!search) return error('A name, email or phone number is required', 400);
     const context = currentContext();
     const { items: customers } = context?.role === 'admin' ? await db.list('customers', { limit: 2000 }) : await db.listAllTenant('customers', context?.tenantId || '', { limit: 2000 });
-    let customer = (customers as any[]).find(item => [item.name, item.email, item.phone, item.id].some(value => String(value || '').toLowerCase().replace(/\s+/g, '').includes(normalizedSearch)));
+    const activeCustomers = (customers as any[]).filter(item => !item.deletedAt);
+    let customer = activeCustomers.find(item => [item.name, item.email, item.phone, item.id].some(value => String(value || '').toLowerCase().replace(/\s+/g, '').includes(normalizedSearch)));
     if (!customer && context?.role === 'customer') {
       const [account] = await db.get('accounts', [context.accountId]);
       if (account && [account.name, account.email, account.phone, account.id].some(value => String(value || '').toLowerCase().replace(/\s+/g, '').includes(normalizedSearch))) {
-        const existingCustomer = (customers as any[]).find(item => item.email === account.email);
+        const existingCustomer = activeCustomers.find(item => item.email === account.email);
         if (!existingCustomer) {
           customer = { id: `customer-${randomBytes(8).toString('hex')}`, name: account.name, phone: account.phone || '', email: account.email || '', notes: '', loyaltyPoints: 0, totalSpent: 0, totalSpentUSD: 0, visits: 0, lastVisit: null, createdAt: Date.now(), membershipTier: 'none', membershipExpiry: null };
           await db.add('customers', [customer]);
@@ -785,9 +804,9 @@ export const handler = router({
     return json({
       customer,
       appointments: (appointments as any[]).filter(item => item.customerId === customer.id && !item.deletedAt).sort((a, b) => String(b.date).localeCompare(String(a.date))),
-      queue: (queue as any[]).filter(item => item.customerId === customer.id).sort((a, b) => b.joinedAt - a.joinedAt).slice(0, 10),
-      reviews: (reviews as any[]).filter(item => item.customerId === customer.id),
-      membershipPurchases: (purchases as any[]).filter(item => item.customerId === customer.id),
+      queue: (queue as any[]).filter(item => item.customerId === customer.id && !item.deletedAt).sort((a, b) => b.joinedAt - a.joinedAt).slice(0, 10),
+      reviews: (reviews as any[]).filter(item => item.customerId === customer.id && !item.deletedAt),
+      membershipPurchases: (purchases as any[]).filter(item => item.customerId === customer.id && !item.deletedAt),
     });
   }],
 

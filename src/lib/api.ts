@@ -105,6 +105,7 @@ export const CustomersApi = {
   create: (c: Partial<Customer>) => api.post('/api/customers', c).then(r => { invalidate('customers'); return r; }),
   update: (id: string, patch: Partial<Customer> & { pin?: string }) => api.put(`/api/customers/${id}`, patch).then(r => { invalidate('customers'); return r; }),
   changePin: (customerId: string, pin: string) => api.post(`/api/customers/${customerId}/pin`, { pin }),
+  deleteRecords: (customerId: string) => api.delete(`/api/customers/${customerId}/records`).then(r => { invalidate('customers'); invalidate('dashboard'); return r; }),
 };
 
 export const AppointmentsApi = {
