@@ -309,8 +309,6 @@ async function seedDemoData() {
       discountByCurrency[cur] = d;
       totalByCurrency[cur] = subtotalByCurrency[cur] - d;
     }
-    const tipAmount = Math.max(0, Number(b.tipAmount || 0));
-    if (tipAmount > 0) totalByCurrency.KES = (totalByCurrency.KES || 0) + tipAmount;
 
     const d = new Date(now - daysAgo * DAY);
     d.setHours(hour, Math.floor(Math.random() * 50), 0, 0);
@@ -489,10 +487,8 @@ export const handler = router({
     const linkedAppointmentIds = new Set<string>();
     let todayCommission = 0;
     let todayAssistant = 0;
-    let todayTips = 0;
     let fortnightCommission = 0;
     let fortnightAssistant = 0;
-    let fortnightTips = 0;
 
     for (const order of orders as any[]) {
       if (!order.createdAt) continue;
@@ -503,15 +499,11 @@ export const handler = router({
         if (sameStaffIdentity(item.staffId, item.staffName, context)) {
           if (order.createdAt >= todayFrom) todayCommission += commission;
           if (order.createdAt >= fortnightFrom) fortnightCommission += commission;
-          if (order.createdAt >= todayFrom) todayTips += Number(item.tipShare || 0);
-          if (order.createdAt >= fortnightFrom) fortnightTips += Number(item.tipShare || 0);
           if (order.appointmentId) linkedAppointmentIds.add(String(order.appointmentId));
         }
         if (sameStaffIdentity(item.coStaffId, item.coStaffName, context)) {
           if (order.createdAt >= todayFrom) todayCommission += commission;
           if (order.createdAt >= fortnightFrom) fortnightCommission += commission;
-          if (order.createdAt >= todayFrom) todayTips += Number(item.tipShare || 0);
-          if (order.createdAt >= fortnightFrom) fortnightTips += Number(item.tipShare || 0);
           if (order.appointmentId) linkedAppointmentIds.add(String(order.appointmentId));
         }
         if (sameStaffIdentity(item.helperStaffId, item.helperStaffName, context)) {
@@ -545,8 +537,8 @@ export const handler = router({
     }
 
     return json({
-      today: { commission: todayCommission, assistant: todayAssistant, tips: todayTips, total: todayCommission + todayAssistant + todayTips },
-      fortnight: { commission: fortnightCommission, assistant: fortnightAssistant, tips: fortnightTips, total: fortnightCommission + fortnightAssistant + fortnightTips },
+      today: { commission: todayCommission, assistant: todayAssistant, total: todayCommission + todayAssistant },
+      fortnight: { commission: fortnightCommission, assistant: fortnightAssistant, total: fortnightCommission + fortnightAssistant },
     });
   }],
   'GET /api/audit-logs': [async ({ query }) => {
@@ -1019,6 +1011,35 @@ export const handler = router({
   }],
 
   'GET /api/orders': [async () => { const { items } = await db.list('orders', { limit: 1000 }); return json({ items }); }],
+  'GET /api/pos-drafts': [async ({ query }) => {
+    const context = currentContext();
+    if (!context) return error('Please log in.', 401);
+    const appointmentId = String(query.appointmentId || '');
+    const { items } = await db.list('pos_drafts', { limit: 5000 });
+    const draft = (items as any[]).find(item => item.accountId === context.accountId && String(item.appointmentId || '') === appointmentId && String(item.branchId || '') === String(context.branchId || ''));
+    return json({ item: draft || null });
+  }],
+  'POST /api/pos-drafts': [async ({ body }) => {
+    const context = currentContext();
+    if (!context) return error('Please log in.', 401);
+    const draft: any = body;
+    if (!Array.isArray(draft.cart) || !draft.cart.length) return error('Add a service or product before saving a draft', 400);
+    const appointmentId = String(draft.appointmentId || '');
+    const { items } = await db.list('pos_drafts', { limit: 5000 });
+    const existing = (items as any[]).filter(item => item.accountId === context.accountId && String(item.appointmentId || '') === appointmentId && String(item.branchId || '') === String(context.branchId || ''));
+    if (existing.length) await db.delete('pos_drafts', existing.map(item => item.id));
+    const [id] = await db.add('pos_drafts', [{ accountId: context.accountId, appointmentId, cart: draft.cart, customerId: String(draft.customerId || ''), discountPct: Math.max(0, Number(draft.discountPct || 0)), promoCode: String(draft.promoCode || ''), redeemPoints: Math.max(0, Number(draft.redeemPoints || 0)), paymentMethod: String(draft.paymentMethod || 'M-Pesa'), savedAt: Date.now() }]);
+    return json({ id });
+  }],
+  'DELETE /api/pos-drafts': [async ({ query }) => {
+    const context = currentContext();
+    if (!context) return error('Please log in.', 401);
+    const appointmentId = String(query.appointmentId || '');
+    const { items } = await db.list('pos_drafts', { limit: 5000 });
+    const ids = (items as any[]).filter(item => item.accountId === context.accountId && String(item.appointmentId || '') === appointmentId && String(item.branchId || '') === String(context.branchId || '')).map(item => item.id);
+    if (ids.length) await db.delete('pos_drafts', ids);
+    return json({ ok: true });
+  }],
   'PUT /api/orders/:id/completion': [async ({ params, body }) => {
     requireOwner();
     const [existing] = await db.get('orders', [params.id]);
@@ -1193,7 +1214,7 @@ export const handler = router({
           unit: String(entry?.unit || ''),
         }))
         .filter((entry: any) => entry.productId && entry.qty > 0);
-      item.assistantPayment = helperId ? assistantPayment(Number(item.lineTotalAfterDiscount || 0)) : 0;
+      item.assistantPayment = helperId ? Math.max(0, Number(item.assistantPayment || 0)) : 0;
       item.helperDeduction = item.assistantPayment;
     }
 
@@ -1263,17 +1284,6 @@ export const handler = router({
     const productSalesCostTotal = productItems.reduce((sum: number, item: any) => sum + Math.max(0, Number(item.cost || 0)) * Number(item.qty || 0), 0);
     const serviceProductCostTotal = serviceItems.reduce((sum: number, item: any) => sum + (item.consumedProducts || []).reduce((inner: number, used: any) => inner + Math.max(0, Number(used.cost || 0)) * Math.max(0, Number(used.qty || 0)), 0), 0);
     const productCostTotal = productSalesCostTotal + serviceProductCostTotal;
-    const serviceRevenueTotal = serviceItems.reduce((sum: number, item: any) => sum + Math.max(0, Number(item.lineTotalAfterDiscount || 0)), 0);
-    let remainingTip = tipAmount;
-    for (let i = 0; i < serviceItems.length; i++) {
-      const item = serviceItems[i];
-      const isLast = i === serviceItems.length - 1;
-      const share = serviceRevenueTotal > 0 && !isLast
-        ? Math.round((Number(item.lineTotalAfterDiscount || 0) / serviceRevenueTotal) * tipAmount)
-        : remainingTip;
-      item.tipShare = Math.max(0, share);
-      remainingTip = Math.max(0, remainingTip - item.tipShare);
-    }
     for (const item of serviceItems) {
       item.productCost = (item.consumedProducts || []).reduce((sum: number, used: any) => sum + Math.max(0, Number(used.cost || 0)) * Math.max(0, Number(used.qty || 0)), 0);
       item.commissionBase = Math.max(0, Number(item.lineTotalAfterDiscount || 0) - Number(item.productCost || 0));
@@ -1297,7 +1307,7 @@ export const handler = router({
       }
     }
 
-    const [orderId] = await db.add('orders', [{ customerId: b.customerId || null, customerName, appointmentId: b.appointmentId || null, items: orderItems, helperDeductions, productCostTotal, tipAmount, commissionRate: 50, branchId: context?.branchId || null, branchName: context?.branchId || null, discountPct, discountSource, promoCode: promoUsed ? promoUsed.code : null, pointsRedeemed, mpesaReceiptNumber: b.mpesaReceiptNumber || null, subtotalByCurrency, discountByCurrency, totalByCurrency, paymentMethod, createdAt: Date.now() }]);
+    const [orderId] = await db.add('orders', [{ customerId: b.customerId || null, customerName, appointmentId: b.appointmentId || null, items: orderItems, helperDeductions, productCostTotal, commissionRate: 50, branchId: context?.branchId || null, branchName: context?.branchId || null, discountPct, discountSource, promoCode: promoUsed ? promoUsed.code : null, pointsRedeemed, mpesaReceiptNumber: b.mpesaReceiptNumber || null, subtotalByCurrency, discountByCurrency, totalByCurrency, paymentMethod, createdAt: Date.now() }]);
     if (!orderId) return error('Failed to create order', 500);
     await audit('created', 'order', { id: orderId, customerName, items: orderItems.map((item: any) => ({ ...item, productName: item.type === 'product' ? item.name : undefined, serviceName: item.type === 'service' ? item.name : undefined })), totalByCurrency, paymentMethod }, b.actor || 'receptionist');
 
@@ -1307,7 +1317,7 @@ export const handler = router({
       if (appt) await db.update('appointments', [{ id: b.appointmentId, record: { ...appt, status: 'completed' } }]);
     }
 
-    return json({ id: orderId, subtotalByCurrency, discountByCurrency, totalByCurrency, tipAmount, discountSource, pointsRedeemed });
+    return json({ id: orderId, subtotalByCurrency, discountByCurrency, totalByCurrency, discountSource, pointsRedeemed });
   }],
 
   'GET /api/expenses': [async () => { const { items } = await db.list('expenses', { limit: 500 }); return json({ items }); }],
@@ -1330,32 +1340,30 @@ export const handler = router({
     const { items } = await db.list('staff', { limit: 2000 });
     const from = Date.now() - 14 * DAY;
     const { items: orders } = await db.list('orders', { limit: 5000 });
-    const totals = new Map<string, { commission: number; assistant: number; tips: number }>();
+    const totals = new Map<string, { commission: number; assistant: number }>();
     for (const order of orders as any[]) {
       if (!order.createdAt || order.createdAt < from) continue;
       for (const item of order.items || []) {
         if (item.type !== 'service') continue;
         const commission = Number(item.commission ?? (Number(item.lineTotalAfterDiscount ?? item.price * item.qty) * 0.5)) || 0;
-        const tipShare = Number(item.tipShare || 0) || 0;
         if (item.staffId) {
-          const total = totals.get(item.staffId) || { commission: 0, assistant: 0, tips: 0 };
+          const total = totals.get(item.staffId) || { commission: 0, assistant: 0 };
           total.commission += commission;
-          total.tips += tipShare;
           totals.set(item.staffId, total);
         }
         if (item.coStaffId) {
-          const total = totals.get(item.coStaffId) || { commission: 0, assistant: 0, tips: 0 };
+          const total = totals.get(item.coStaffId) || { commission: 0, assistant: 0 };
           total.commission += commission;
           totals.set(item.coStaffId, total);
         }
         if (item.helperStaffId) {
-          const total = totals.get(item.helperStaffId) || { commission: 0, assistant: 0, tips: 0 };
+          const total = totals.get(item.helperStaffId) || { commission: 0, assistant: 0 };
           total.assistant += Number(item.assistantPayment ?? item.helperDeduction ?? 0);
           totals.set(item.helperStaffId, total);
         }
       }
     }
-    return json({ items: (items as any[]).map(member => ({ ...member, commissionEarned14Days: totals.get(member.id)?.commission || 0, assistantEarned14Days: totals.get(member.id)?.assistant || 0, tipEarned14Days: totals.get(member.id)?.tips || 0 })) });
+    return json({ items: (items as any[]).map(member => ({ ...member, commissionEarned14Days: totals.get(member.id)?.commission || 0, assistantEarned14Days: totals.get(member.id)?.assistant || 0 })) });
   }],
   'POST /api/payouts': [async ({ body }) => {
     const context = currentContext();

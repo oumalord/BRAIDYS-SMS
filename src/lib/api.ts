@@ -91,7 +91,7 @@ export const StaffApi = {
   create: (s: Partial<Staff>) => api.post('/api/staff', s).then(r => { invalidate('staff'); return r; }),
   update: (id: string, patch: Partial<Staff> & { password?: string }) => api.put(`/api/staff/${id}`, patch).then(r => { invalidate('staff'); return r; }),
   changeMyPin: (pin: string) => api.post('/api/staff/me/pin', { pin }),
-  myEarnings: () => api.get('/api/staff/me/earnings').then(r => r.data as { today: { commission: number; assistant: number; tips: number; total: number }; fortnight: { commission: number; assistant: number; tips: number; total: number } }),
+  myEarnings: () => api.get('/api/staff/me/earnings').then(r => r.data as { today: { commission: number; assistant: number; total: number }; fortnight: { commission: number; assistant: number; total: number } }),
 };
 
 export const ServicesApi = {
@@ -141,6 +141,12 @@ export const OrdersApi = {
   checkout: (payload: unknown) => api.post('/api/orders', payload).then(r => { invalidate('products'); invalidate('customers'); invalidate('dashboard'); return r; }),
   completion: (appointmentId: string) => api.get(`/api/appointments/${appointmentId}/completion`).then(r => r.data.item),
   updateCompletion: (orderId: string, payload: unknown) => api.put(`/api/orders/${orderId}/completion`, payload).then(r => { invalidate('dashboard'); return r; }),
+};
+
+export const PosDraftsApi = {
+  load: (appointmentId?: string) => api.get(`/api/pos-drafts?appointmentId=${encodeURIComponent(appointmentId || '')}`).then(r => r.data.item),
+  save: (payload: unknown) => api.post('/api/pos-drafts', payload),
+  clear: (appointmentId?: string) => api.delete(`/api/pos-drafts?appointmentId=${encodeURIComponent(appointmentId || '')}`),
 };
 
 export const ExpensesApi = {

@@ -17,7 +17,6 @@ export interface Staff {
   branchName?: string;
   commissionEarned14Days?: number;
   assistantEarned14Days?: number;
-  tipEarned14Days?: number;
 }
 
 export interface Branch {

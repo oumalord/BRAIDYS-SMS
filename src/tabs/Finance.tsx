@@ -51,7 +51,7 @@ function Finance() {
   };
 
   const sendPayroll = async () => {
-    const recipients = staff.map(member => ({ staffId: member.id, amountKES: (member.commissionEarned14Days || 0) + (member.assistantEarned14Days || 0) + (member.tipEarned14Days || 0), phone: member.phone })).filter(recipient => recipient.amountKES > 0);
+    const recipients = staff.map(member => ({ staffId: member.id, amountKES: (member.commissionEarned14Days || 0) + (member.assistantEarned14Days || 0), phone: member.phone })).filter(recipient => recipient.amountKES > 0);
     if (!recipients.length) { toast('Enter a salary amount for at least one employee.', 'error'); return; }
     if (recipients.some(recipient => !/^(?:\+?254|0)[17]\d{8}$/.test(recipient.phone.replace(/\s+/g, '')))) { toast('Every selected employee needs a valid Kenyan phone number.', 'error'); return; }
     if (!window.confirm(`Send ${fmtMoney(recipients.reduce((sum, recipient) => sum + recipient.amountKES, 0), 'KES')} to ${recipients.length} employees now?`)) return;
@@ -131,7 +131,7 @@ function Finance() {
 
       <Card className="p-6">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4"><div><h2 className="font-semibold">Payroll</h2><p className="text-xs text-[#6E6E73]">Calculated from each employee's last 14 days of service commissions and assistant payments.</p></div><Button onClick={sendPayroll} disabled={payrollSending}>{payrollSending ? 'Sending…' : 'Send payroll batch'}</Button></div>
-        <div className="space-y-2">{staff.filter(member => member.employmentStatus !== 'laid-off').map(member => { const calculated = (member.commissionEarned14Days || 0) + (member.assistantEarned14Days || 0) + (member.tipEarned14Days || 0); return <div key={member.id} className="flex items-center justify-between gap-3 border-b border-black/5 pb-2"><div><p className="text-sm font-medium">{member.name}</p><p className="text-xs text-[#6E6E73]">{member.phone || 'No phone number'} · {member.branchName || member.branch}</p><p className="text-xs text-[#6E6E73]">14-day commission {fmtMoney(member.commissionEarned14Days || 0, 'KES')} + assistant pay {fmtMoney(member.assistantEarned14Days || 0, 'KES')} + tips {fmtMoney(member.tipEarned14Days || 0, 'KES')}</p></div><p className="font-semibold text-sm">{fmtMoney(calculated, 'KES')}</p></div>; })}</div>
+        <div className="space-y-2">{staff.filter(member => member.employmentStatus !== 'laid-off').map(member => { const calculated = (member.commissionEarned14Days || 0) + (member.assistantEarned14Days || 0); return <div key={member.id} className="flex items-center justify-between gap-3 border-b border-black/5 pb-2"><div><p className="text-sm font-medium">{member.name}</p><p className="text-xs text-[#6E6E73]">{member.phone || 'No phone number'} · {member.branchName || member.branch}</p><p className="text-xs text-[#6E6E73]">14-day commission {fmtMoney(member.commissionEarned14Days || 0, 'KES')} + assistant compensation {fmtMoney(member.assistantEarned14Days || 0, 'KES')}</p></div><p className="font-semibold text-sm">{fmtMoney(calculated, 'KES')}</p></div>; })}</div>
       </Card>
 
       <Card className="p-6">
