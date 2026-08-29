@@ -665,12 +665,15 @@ export const handler = router({
 
   'GET /api/customers': [async () => {
     const { items } = await db.list('customers', { limit: 1000 });
-    const customers = (items as any[]).filter(customer => !customer.deletedAt);
+    const allCustomers = items as any[];
+    const customers = allCustomers.filter(customer => !customer.deletedAt);
     const byId = new Map(customers.map(customer => [String(customer.id), customer]));
     const byEmail = new Map(customers.filter(customer => customer.email).map(customer => [String(customer.email).toLowerCase(), customer]));
+    const deletedById = new Map(allCustomers.filter(customer => customer.deletedAt).map(customer => [String(customer.id), customer]));
 
     const { items: appointments } = await db.list('appointments', { limit: 3000 });
     const toCreate: any[] = [];
+    const customerRestores: { id: string; record: any }[] = [];
     const appointmentUpdates: { id: string; record: any }[] = [];
 
     for (const appointment of appointments as any[]) {
@@ -679,13 +682,22 @@ export const handler = router({
       const appointmentEmail = String(appointment.customerEmail || '').toLowerCase();
       const existing = (appointmentCustomerId && byId.get(appointmentCustomerId)) || (appointmentEmail && byEmail.get(appointmentEmail));
       if (existing) {
-        if (!appointment.customerId) {
+        if (appointment.customerId !== existing.id) {
           appointmentUpdates.push({ id: appointment.id, record: { ...appointment, customerId: existing.id } });
         }
         continue;
       }
 
-      const newCustomerId = appointmentCustomerId || `customer-${randomBytes(8).toString('hex')}`;
+      const deletedCustomer = appointmentCustomerId && deletedById.get(appointmentCustomerId);
+      if (deletedCustomer) {
+        const restored = { ...deletedCustomer, deletedAt: undefined, deletedBy: undefined };
+        customerRestores.push({ id: restored.id, record: restored });
+        byId.set(String(restored.id), restored);
+        if (restored.email) byEmail.set(String(restored.email).toLowerCase(), restored);
+        continue;
+      }
+
+      const newCustomerId = `customer-${randomBytes(8).toString('hex')}`;
       const record = {
         id: newCustomerId,
         name: appointment.customerName,
@@ -702,6 +714,7 @@ export const handler = router({
         membershipExpiry: null,
       };
       toCreate.push(record);
+      if (appointmentCustomerId) byId.set(appointmentCustomerId, record);
       byId.set(String(record.id), record);
       if (record.email) byEmail.set(String(record.email).toLowerCase(), record);
       if (!appointment.customerId || appointment.customerId !== record.id) {
@@ -710,6 +723,7 @@ export const handler = router({
     }
 
     if (toCreate.length) await db.add('customers', toCreate);
+  if (customerRestores.length) await db.update('customers', customerRestores);
     if (appointmentUpdates.length) await db.update('appointments', appointmentUpdates);
 
     const { items: refreshed } = await db.list('customers', { limit: 3000 });
