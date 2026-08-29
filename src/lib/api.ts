@@ -91,7 +91,7 @@ export const StaffApi = {
   create: (s: Partial<Staff>) => api.post('/api/staff', s).then(r => { invalidate('staff'); return r; }),
   update: (id: string, patch: Partial<Staff> & { password?: string }) => api.put(`/api/staff/${id}`, patch).then(r => { invalidate('staff'); return r; }),
   changeMyPin: (pin: string) => api.post('/api/staff/me/pin', { pin }),
-  myEarnings: () => api.get('/api/staff/me/earnings').then(r => r.data as { today: { commission: number; assistant: number; total: number }; fortnight: { commission: number; assistant: number; total: number } }),
+  myEarnings: () => api.get('/api/staff/me/earnings').then(r => r.data as { today: { commission: number; assistant: number; tips: number; total: number }; fortnight: { commission: number; assistant: number; tips: number; total: number } }),
 };
 
 export const ServicesApi = {

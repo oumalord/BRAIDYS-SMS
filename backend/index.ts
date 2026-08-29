@@ -33,6 +33,14 @@ function normalizeRole(role: unknown): string {
   if (value.includes('manager')) return 'manager';
   return 'barber';
 }
+function serviceStaffCount(value: unknown): 1 | 2 {
+  return Number(value) === 2 ? 2 : 1;
+}
+function commissionPct(value: unknown, staffCount?: unknown): 30 | 33.33 | 40 | 50 {
+  const rate = Number(value);
+  if (rate === 30 || rate === 33.33 || rate === 40 || rate === 50) return rate;
+  return serviceStaffCount(staffCount) === 2 ? 33.33 : 50;
+}
 function sameStaffIdentity(staffId: unknown, staffName: unknown, context: { staffId?: string; name: string }): boolean {
   if (staffId && String(staffId) === String(context.staffId || '')) return true;
   const normalize = (value: unknown) => String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
@@ -301,6 +309,8 @@ async function seedDemoData() {
       discountByCurrency[cur] = d;
       totalByCurrency[cur] = subtotalByCurrency[cur] - d;
     }
+    const tipAmount = Math.max(0, Number(b.tipAmount || 0));
+    if (tipAmount > 0) totalByCurrency.KES = (totalByCurrency.KES || 0) + tipAmount;
 
     const d = new Date(now - daysAgo * DAY);
     d.setHours(hour, Math.floor(Math.random() * 50), 0, 0);
@@ -479,8 +489,10 @@ export const handler = router({
     const linkedAppointmentIds = new Set<string>();
     let todayCommission = 0;
     let todayAssistant = 0;
+    let todayTips = 0;
     let fortnightCommission = 0;
     let fortnightAssistant = 0;
+    let fortnightTips = 0;
 
     for (const order of orders as any[]) {
       if (!order.createdAt) continue;
@@ -491,6 +503,15 @@ export const handler = router({
         if (sameStaffIdentity(item.staffId, item.staffName, context)) {
           if (order.createdAt >= todayFrom) todayCommission += commission;
           if (order.createdAt >= fortnightFrom) fortnightCommission += commission;
+          if (order.createdAt >= todayFrom) todayTips += Number(item.tipShare || 0);
+          if (order.createdAt >= fortnightFrom) fortnightTips += Number(item.tipShare || 0);
+          if (order.appointmentId) linkedAppointmentIds.add(String(order.appointmentId));
+        }
+        if (sameStaffIdentity(item.coStaffId, item.coStaffName, context)) {
+          if (order.createdAt >= todayFrom) todayCommission += commission;
+          if (order.createdAt >= fortnightFrom) fortnightCommission += commission;
+          if (order.createdAt >= todayFrom) todayTips += Number(item.tipShare || 0);
+          if (order.createdAt >= fortnightFrom) fortnightTips += Number(item.tipShare || 0);
           if (order.appointmentId) linkedAppointmentIds.add(String(order.appointmentId));
         }
         if (sameStaffIdentity(item.helperStaffId, item.helperStaffName, context)) {
@@ -524,8 +545,8 @@ export const handler = router({
     }
 
     return json({
-      today: { commission: todayCommission, assistant: todayAssistant, total: todayCommission + todayAssistant },
-      fortnight: { commission: fortnightCommission, assistant: fortnightAssistant, total: fortnightCommission + fortnightAssistant },
+      today: { commission: todayCommission, assistant: todayAssistant, tips: todayTips, total: todayCommission + todayAssistant + todayTips },
+      fortnight: { commission: fortnightCommission, assistant: fortnightAssistant, tips: fortnightTips, total: fortnightCommission + fortnightAssistant + fortnightTips },
     });
   }],
   'GET /api/audit-logs': [async ({ query }) => {
@@ -603,7 +624,8 @@ export const handler = router({
   'POST /api/services': [async ({ body }) => {
     const b: any = body;
     if (!b.name || !b.price) return error('Name and price are required', 400);
-    const [id] = await db.add('services', [{ name: b.name, category: b.category || 'General', price: b.price, currency: b.currency === 'USD' ? 'USD' : 'KES', durationMin: b.durationMin || 30, description: b.description || '' }]);
+    const staffCount = serviceStaffCount(b.staffCount);
+    const [id] = await db.add('services', [{ name: b.name, category: b.category || 'General', price: b.price, currency: b.currency === 'USD' ? 'USD' : 'KES', durationMin: b.durationMin || 30, description: b.description || '', staffCount, commissionPct: commissionPct(b.commissionPct, staffCount) }]);
     if (!id) return error('Failed to add service', 500);
     await audit('created', 'service', { id, name: b.name, category: b.category || 'General', price: b.price, currency: b.currency === 'USD' ? 'USD' : 'KES' }, b.actor || 'owner');
     return json({ id });
@@ -623,6 +645,8 @@ export const handler = router({
       currency: patch.currency === 'USD' ? 'USD' : patch.currency === 'KES' ? 'KES' : existing.currency,
       durationMin: patch.durationMin !== undefined ? Math.max(5, Number(patch.durationMin) || 30) : existing.durationMin,
       description: patch.description !== undefined ? String(patch.description || '') : existing.description,
+      staffCount: patch.staffCount !== undefined ? serviceStaffCount(patch.staffCount) : serviceStaffCount(existing.staffCount),
+      commissionPct: commissionPct(patch.commissionPct !== undefined ? patch.commissionPct : existing.commissionPct, patch.staffCount !== undefined ? patch.staffCount : existing.staffCount),
     };
     const [ok] = await db.update('services', [{ id: params.id, record: updated }]);
     if (!ok) return error('Update failed', 500);
@@ -630,7 +654,58 @@ export const handler = router({
     return json({ ok: true });
   }],
 
-  'GET /api/customers': [async () => { const { items } = await db.list('customers', { limit: 1000 }); return json({ items }); }],
+  'GET /api/customers': [async () => {
+    const { items } = await db.list('customers', { limit: 1000 });
+    const customers = items as any[];
+    const byId = new Map(customers.map(customer => [String(customer.id), customer]));
+    const byEmail = new Map(customers.filter(customer => customer.email).map(customer => [String(customer.email).toLowerCase(), customer]));
+
+    const { items: appointments } = await db.list('appointments', { limit: 3000 });
+    const toCreate: any[] = [];
+    const appointmentUpdates: { id: string; record: any }[] = [];
+
+    for (const appointment of appointments as any[]) {
+      if (!appointment?.customerName) continue;
+      const appointmentCustomerId = String(appointment.customerId || '');
+      const appointmentEmail = String(appointment.customerEmail || '').toLowerCase();
+      const existing = (appointmentCustomerId && byId.get(appointmentCustomerId)) || (appointmentEmail && byEmail.get(appointmentEmail));
+      if (existing) {
+        if (!appointment.customerId) {
+          appointmentUpdates.push({ id: appointment.id, record: { ...appointment, customerId: existing.id } });
+        }
+        continue;
+      }
+
+      const newCustomerId = appointmentCustomerId || `customer-${randomBytes(8).toString('hex')}`;
+      const record = {
+        id: newCustomerId,
+        name: appointment.customerName,
+        phone: '',
+        email: appointment.customerEmail || '',
+        notes: 'Auto-created from appointment history',
+        loyaltyPoints: 0,
+        totalSpent: 0,
+        totalSpentUSD: 0,
+        visits: 0,
+        lastVisit: null,
+        createdAt: appointment.createdAt || Date.now(),
+        membershipTier: 'none',
+        membershipExpiry: null,
+      };
+      toCreate.push(record);
+      byId.set(String(record.id), record);
+      if (record.email) byEmail.set(String(record.email).toLowerCase(), record);
+      if (!appointment.customerId || appointment.customerId !== record.id) {
+        appointmentUpdates.push({ id: appointment.id, record: { ...appointment, customerId: record.id } });
+      }
+    }
+
+    if (toCreate.length) await db.add('customers', toCreate);
+    if (appointmentUpdates.length) await db.update('appointments', appointmentUpdates);
+
+    const { items: refreshed } = await db.list('customers', { limit: 3000 });
+    return json({ items: refreshed });
+  }],
   'POST /api/customers': [async ({ body }) => {
     const b: any = body;
     if (!b.name) return error('Name is required', 400);
@@ -758,15 +833,28 @@ export const handler = router({
     const staffNames = Array.from(new Set(items.map((it: any) => it.staffName).filter(Boolean)));
     let customerId = b.customerId || null;
     let customerEmail = b.customerEmail || '';
+    const normalizedPhone = String(b.customerPhone || '').replace(/\s+/g, '');
+    const { items: customers } = await db.list('customers', { limit: 2000 });
+    const findExistingCustomer = () => (customers as any[]).find(customer => (customerId && customer.id === customerId)
+      || (customerEmail && String(customer.email || '').toLowerCase() === String(customerEmail).toLowerCase())
+      || (normalizedPhone && String(customer.phone || '').replace(/\s+/g, '') === normalizedPhone));
+
     if (customerId) {
       const [customer] = await db.get('customers', [customerId]);
-      customerEmail = customer?.email || customerEmail;
-    } else if (customerEmail || b.customerPhone) {
-      const { items: customers } = await db.list('customers', { limit: 2000 });
-      const normalizedPhone = String(b.customerPhone || '').replace(/\s+/g, '');
-      const existingCustomer = (customers as any[]).find(customer => (customerEmail && String(customer.email || '').toLowerCase() === String(customerEmail).toLowerCase()) || (normalizedPhone && String(customer.phone || '').replace(/\s+/g, '') === normalizedPhone));
-      if (existingCustomer) customerId = existingCustomer.id;
-      else [customerId] = await db.add('customers', [{ name: b.customerName, phone: b.customerPhone || '', email: customerEmail, notes: '', loyaltyPoints: 0, totalSpent: 0, totalSpentUSD: 0, visits: 0, lastVisit: null, createdAt: Date.now(), membershipTier: 'none', membershipExpiry: null }]);
+      if (customer) {
+        customerEmail = customer?.email || customerEmail;
+      } else {
+        const existingCustomer = findExistingCustomer();
+        if (existingCustomer) customerId = existingCustomer.id;
+      }
+    }
+    if (!customerId) {
+      const existingCustomer = findExistingCustomer();
+      if (existingCustomer) {
+        customerId = existingCustomer.id;
+      } else {
+        [customerId] = await db.add('customers', [{ name: b.customerName, phone: b.customerPhone || '', email: customerEmail, notes: '', loyaltyPoints: 0, totalSpent: 0, totalSpentUSD: 0, visits: 0, lastVisit: null, createdAt: Date.now(), membershipTier: 'none', membershipExpiry: null }]);
+      }
     }
     const [id] = await db.add('appointments', [{
       customerId, customerName: b.customerName,
@@ -781,7 +869,7 @@ export const handler = router({
     const { items: activeQueue } = await db.list('queue', { limit: 2000 });
     const ticketNumber = createTicketNumber(appointmentDate);
     const [queueId] = await db.add('queue', [{
-      appointmentId: id, customerId: b.customerId || null, customerEmail,
+      appointmentId: id, customerId: customerId || null, customerEmail,
       customerName: b.customerName, serviceName, staffId: items[0].staffId || null,
       staffName: staffNames.join(', ') || null, status: 'waiting', joinedAt: Date.now(),
       branchId: branch.id, branchName: branch.name,
@@ -947,8 +1035,33 @@ export const handler = router({
       currency: it.currency || 'KES',
       lineTotalAfterDiscount: Math.round((Number(it.price || 0) * Number(it.qty || 0)) * (1 - discountPct / 100)),
     }));
+    for (const item of orderItems) {
+      if (item.type !== 'product') continue;
+      item.staffId = null;
+      item.staffName = null;
+      item.coStaffId = null;
+      item.coStaffName = null;
+      item.helperStaffId = null;
+      item.helperStaffName = null;
+      item.assistantPayment = 0;
+      item.helperDeduction = 0;
+      item.commissionPct = 0;
+      item.commissionRate = 0;
+      item.commissionBase = 0;
+      item.commission = 0;
+      item.consumedProducts = [];
+    }
     const context = currentContext();
     const serviceItems = orderItems.filter((it: any) => it.type === 'service');
+    for (const item of serviceItems) {
+      item.staffCount = serviceStaffCount(item.staffCount);
+      if (item.staffCount === 1) {
+        item.coStaffId = null;
+        item.coStaffName = null;
+      } else if (!item.coStaffId) {
+        return error('Assign co-staff to services configured for two staff', 400);
+      }
+    }
     const serviceStaffIds = Array.from(new Set(serviceItems.map((item: any) => String(item.staffId || '')).filter(Boolean)));
     if (serviceItems.some((item: any) => !item.staffId)) return error('Each service must be assigned to a staff member', 400);
     if (context?.role === 'barber' && !serviceItems.some((item: any) => item.staffId === context.staffId)) {
@@ -1007,10 +1120,18 @@ export const handler = router({
     }
 
     for (const item of serviceItems) {
+      const coStaffId = item.staffCount === 2 ? String(item.coStaffId || '') : '';
       const helperId = String(item.helperStaffId || '');
+      if (coStaffId) {
+        const [coStaff] = await db.get('staff', [coStaffId]);
+        if (!coStaff || coStaff.branchId !== context?.branchId) return error('Co-staff must be an employee from the active branch', 400);
+        if (coStaff.id === item.staffId) return error('Co-staff must be different from the primary staff member', 400);
+        item.coStaffName = coStaff.name;
+      }
       if (helperId) {
         const [helper] = await db.get('staff', [helperId]);
         if (!helper || helper.branchId !== context?.branchId) return error('Helper must be an employee from the active branch', 400);
+        if (helper.id === item.staffId || helper.id === coStaffId) return error('Assistant must be different from the service staff', 400);
         item.helperStaffName = helper.name;
       }
       const consumedProducts = Array.isArray(item.consumedProducts) ? item.consumedProducts : [];
@@ -1093,11 +1214,26 @@ export const handler = router({
     const productSalesCostTotal = productItems.reduce((sum: number, item: any) => sum + Math.max(0, Number(item.cost || 0)) * Number(item.qty || 0), 0);
     const serviceProductCostTotal = serviceItems.reduce((sum: number, item: any) => sum + (item.consumedProducts || []).reduce((inner: number, used: any) => inner + Math.max(0, Number(used.cost || 0)) * Math.max(0, Number(used.qty || 0)), 0), 0);
     const productCostTotal = productSalesCostTotal + serviceProductCostTotal;
+    const serviceRevenueTotal = serviceItems.reduce((sum: number, item: any) => sum + Math.max(0, Number(item.lineTotalAfterDiscount || 0)), 0);
+    let remainingTip = tipAmount;
+    for (let i = 0; i < serviceItems.length; i++) {
+      const item = serviceItems[i];
+      const isLast = i === serviceItems.length - 1;
+      const share = serviceRevenueTotal > 0 && !isLast
+        ? Math.round((Number(item.lineTotalAfterDiscount || 0) / serviceRevenueTotal) * tipAmount)
+        : remainingTip;
+      item.tipShare = Math.max(0, share);
+      remainingTip = Math.max(0, remainingTip - item.tipShare);
+    }
     for (const item of serviceItems) {
       item.productCost = (item.consumedProducts || []).reduce((sum: number, used: any) => sum + Math.max(0, Number(used.cost || 0)) * Math.max(0, Number(used.qty || 0)), 0);
-      item.commissionBase = Math.max(0, Number(item.lineTotalAfterDiscount || 0) - Number(item.helperDeduction || 0) - Number(item.productCost || 0));
-      item.commissionRate = 50;
-      item.commission = item.commissionBase * 0.5;
+      item.commissionBase = Math.max(0, Number(item.lineTotalAfterDiscount || 0) - Number(item.productCost || 0));
+      item.commissionBase = Math.max(0, item.commissionBase - Number(item.helperDeduction || 0));
+      item.commissionRate = commissionPct(item.commissionPct, item.staffCount);
+      item.commissionPct = item.commissionRate;
+      item.commission = item.commissionBase * (item.commissionRate / 100);
+      item.commissionParticipants = item.staffCount;
+      item.commissionSplit = item.staffCount === 2 ? 'two-staff' : 'one-staff';
     }
 
     let customerName = b.customerName || 'Walk-in Customer';
@@ -1112,7 +1248,7 @@ export const handler = router({
       }
     }
 
-    const [orderId] = await db.add('orders', [{ customerId: b.customerId || null, customerName, appointmentId: b.appointmentId || null, items: orderItems, helperDeductions, productCostTotal, commissionRate: 50, branchId: context?.branchId || null, branchName: context?.branchId || null, discountPct, discountSource, promoCode: promoUsed ? promoUsed.code : null, pointsRedeemed, mpesaReceiptNumber: b.mpesaReceiptNumber || null, subtotalByCurrency, discountByCurrency, totalByCurrency, paymentMethod, createdAt: Date.now() }]);
+    const [orderId] = await db.add('orders', [{ customerId: b.customerId || null, customerName, appointmentId: b.appointmentId || null, items: orderItems, helperDeductions, productCostTotal, tipAmount, commissionRate: 50, branchId: context?.branchId || null, branchName: context?.branchId || null, discountPct, discountSource, promoCode: promoUsed ? promoUsed.code : null, pointsRedeemed, mpesaReceiptNumber: b.mpesaReceiptNumber || null, subtotalByCurrency, discountByCurrency, totalByCurrency, paymentMethod, createdAt: Date.now() }]);
     if (!orderId) return error('Failed to create order', 500);
     await audit('created', 'order', { id: orderId, customerName, items: orderItems.map((item: any) => ({ ...item, productName: item.type === 'product' ? item.name : undefined, serviceName: item.type === 'service' ? item.name : undefined })), totalByCurrency, paymentMethod }, b.actor || 'receptionist');
 
@@ -1122,7 +1258,7 @@ export const handler = router({
       if (appt) await db.update('appointments', [{ id: b.appointmentId, record: { ...appt, status: 'completed' } }]);
     }
 
-    return json({ id: orderId, subtotalByCurrency, discountByCurrency, totalByCurrency, discountSource, pointsRedeemed });
+    return json({ id: orderId, subtotalByCurrency, discountByCurrency, totalByCurrency, tipAmount, discountSource, pointsRedeemed });
   }],
 
   'GET /api/expenses': [async () => { const { items } = await db.list('expenses', { limit: 500 }); return json({ items }); }],
@@ -1145,25 +1281,32 @@ export const handler = router({
     const { items } = await db.list('staff', { limit: 2000 });
     const from = Date.now() - 14 * DAY;
     const { items: orders } = await db.list('orders', { limit: 5000 });
-    const totals = new Map<string, { commission: number; assistant: number }>();
+    const totals = new Map<string, { commission: number; assistant: number; tips: number }>();
     for (const order of orders as any[]) {
       if (!order.createdAt || order.createdAt < from) continue;
       for (const item of order.items || []) {
         if (item.type !== 'service') continue;
         const commission = Number(item.commission ?? (Number(item.lineTotalAfterDiscount ?? item.price * item.qty) * 0.5)) || 0;
+        const tipShare = Number(item.tipShare || 0) || 0;
         if (item.staffId) {
-          const total = totals.get(item.staffId) || { commission: 0, assistant: 0 };
+          const total = totals.get(item.staffId) || { commission: 0, assistant: 0, tips: 0 };
           total.commission += commission;
+          total.tips += tipShare;
           totals.set(item.staffId, total);
         }
+        if (item.coStaffId) {
+          const total = totals.get(item.coStaffId) || { commission: 0, assistant: 0, tips: 0 };
+          total.commission += commission;
+          totals.set(item.coStaffId, total);
+        }
         if (item.helperStaffId) {
-          const total = totals.get(item.helperStaffId) || { commission: 0, assistant: 0 };
+          const total = totals.get(item.helperStaffId) || { commission: 0, assistant: 0, tips: 0 };
           total.assistant += Number(item.assistantPayment ?? item.helperDeduction ?? 0);
           totals.set(item.helperStaffId, total);
         }
       }
     }
-    return json({ items: (items as any[]).map(member => ({ ...member, commissionEarned14Days: totals.get(member.id)?.commission || 0, assistantEarned14Days: totals.get(member.id)?.assistant || 0 })) });
+    return json({ items: (items as any[]).map(member => ({ ...member, commissionEarned14Days: totals.get(member.id)?.commission || 0, assistantEarned14Days: totals.get(member.id)?.assistant || 0, tipEarned14Days: totals.get(member.id)?.tips || 0 })) });
   }],
   'POST /api/payouts': [async ({ body }) => {
     const context = currentContext();
@@ -1191,11 +1334,16 @@ export const handler = router({
         const member = staffById.get(item.staffId);
         if (!member) return;
         const revenue = Number(item.lineTotalAfterDiscount ?? item.price * item.qty) || 0;
-        const commissionBase = Number(item.commissionBase ?? (revenue * 0.5)) || 0;
-        if (!alreadyPaid.has(`${order.id}:${index}`)) lines.push({ itemKey: `${order.id}:${index}`, orderId: order.id, staffId: item.staffId, staffName: item.staffName || member.name, revenue, commissionBase, helperDeduction: Number(item.helperDeduction || 0), productCost: Number(item.productCost || 0), commission: commissionBase * 0.5, currency: item.currency || 'KES', branchId: order.branchId || context.branchId || null, createdAt: now });
+        const commissionBase = Number(item.commissionBase ?? (revenue - Number(item.productCost || 0))) || 0;
+        const commission = Number(item.commission ?? (commissionBase * (commissionPct(item.commissionPct, item.staffCount) / 100))) || 0;
+        if (!alreadyPaid.has(`${order.id}:${index}`)) lines.push({ itemKey: `${order.id}:${index}`, orderId: order.id, staffId: item.staffId, staffName: item.staffName || member.name, revenue, commissionBase, helperDeduction: Number(item.helperDeduction || 0), productCost: Number(item.productCost || 0), commission, currency: item.currency || 'KES', branchId: order.branchId || context.branchId || null, createdAt: now });
+        if (item.coStaffId && !alreadyPaid.has(`${order.id}:${index}:co-staff`)) {
+          const coStaff = staffById.get(item.coStaffId);
+          if (coStaff) lines.push({ itemKey: `${order.id}:${index}:co-staff`, orderId: order.id, staffId: item.coStaffId, staffName: item.coStaffName || coStaff.name, revenue, commissionBase, helperDeduction: Number(item.helperDeduction || 0), productCost: Number(item.productCost || 0), commission, currency: item.currency || 'KES', branchId: order.branchId || context.branchId || null, createdAt: now, role: 'co-staff' });
+        }
         if (item.helperStaffId && !alreadyPaid.has(`${order.id}:${index}:assistant`)) {
           const assistant = staffById.get(item.helperStaffId);
-          if (assistant) lines.push({ itemKey: `${order.id}:${index}:assistant`, orderId: order.id, staffId: item.helperStaffId, staffName: item.helperStaffName || assistant.name, revenue: 0, commissionBase: 0, helperDeduction: 0, productCost: 0, commission: Number(item.assistantPayment ?? item.helperDeduction ?? assistantPayment(revenue)), currency: item.currency || 'KES', branchId: order.branchId || context.branchId || null, createdAt: now, role: 'assistant' });
+          if (assistant) lines.push({ itemKey: `${order.id}:${index}:assistant`, orderId: order.id, staffId: item.helperStaffId, staffName: item.helperStaffName || assistant.name, revenue: 0, commissionBase: 0, helperDeduction: 0, productCost: 0, commission: Number(item.assistantPayment ?? item.helperDeduction ?? 0), currency: item.currency || 'KES', branchId: order.branchId || context.branchId || null, createdAt: now, role: 'assistant' });
         }
       });
     }

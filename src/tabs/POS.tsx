@@ -1,15 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
-import { ShoppingCart } from 'lucide-react';
+import { Plus, ShoppingCart } from 'lucide-react';
 import { Card, Button, Modal, Field, Input, Select, toast } from '../components/ui';
 import { CustomersApi, ServicesApi, ProductsApi, StaffApi, OrdersApi, AppointmentsApi, fmtMoney } from '../lib/api';
 import { MpesaPayModal } from '../components/MpesaPay';
 import type { Appointment, Customer, ServiceItem, Product, Staff, Currency } from '../types';
 
 interface ConsumedProductLine { productId: string; name: string; qty: number; cost: number; unit?: string; }
-interface CartLine { key: string; type: 'service' | 'product'; refId: string; name: string; price: number; currency: Currency; qty: number; staffId?: string; staffName?: string; helperStaffId?: string; helperStaffName?: string; consumedProducts?: ConsumedProductLine[]; }
+interface CartLine { key: string; type: 'service' | 'product'; refId: string; name: string; price: number; currency: Currency; qty: number; staffCount?: 1 | 2; commissionPct?: 30 | 33.33 | 40 | 50; staffId?: string; staffName?: string; coStaffId?: string; coStaffName?: string; helperStaffId?: string; helperStaffName?: string; consumedProducts?: ConsumedProductLine[]; }
 
 function todayStr() { return new Date().toISOString().slice(0, 10); }
-function assistantPayment(amount: number) { return amount <= 1800 ? 200 : amount <= 2400 ? 300 : 400; }
 
 function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: () => void; appointment?: Appointment; currentStaffId?: string }) {
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -20,15 +19,20 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
   const [cart, setCart] = useState<CartLine[]>([]);
   const [customerId, setCustomerId] = useState('');
   const [discountPct, setDiscountPct] = useState(0);
+  const [tipAmount, setTipAmount] = useState(0);
   const [promoCode, setPromoCode] = useState('');
   const [redeemPoints, setRedeemPoints] = useState(0);
   const [paymentMethod, setPaymentMethod] = useState('M-Pesa');
   const [checkingOut, setCheckingOut] = useState(false);
   const [showPay, setShowPay] = useState(false);
   const [receipt, setReceipt] = useState<any>(null);
+  const [hasDraft, setHasDraft] = useState(false);
   const [tab, setTab] = useState<'services' | 'products'>('services');
   const [usagePickerByLine, setUsagePickerByLine] = useState<Record<string, string>>({});
   const staffAutoSelectedClientRef = useRef(false);
+  const draftKey = `safigroom_pos_draft:${window.localStorage.getItem('safigroom_account') || 'anonymous'}:${window.localStorage.getItem('safigroom_selected_branch') || 'all'}:${appointment?.id || 'new'}`;
+
+  useEffect(() => { setHasDraft(Boolean(window.localStorage.getItem(draftKey))); }, [draftKey]);
 
   useEffect(() => {
     Promise.all([CustomersApi.list(), ServicesApi.list(), ProductsApi.list(), StaffApi.list()]).then(([c, s, p, st]) => { setCustomers(c); setServices(s); setProducts(p); setStaff(st); });
@@ -70,11 +74,17 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
     if (appointment.customerId) setCustomerId(appointment.customerId);
   }, [appointment, services]);
 
-  const addService = (s: ServiceItem) => setCart(c => [...c, { key: `${s.id}-${Date.now()}`, type: 'service', refId: s.id, name: s.name, price: s.price, currency: s.currency, qty: 1, staffId: currentStaffId, consumedProducts: [] }]);
+  const addService = (s: ServiceItem) => { const staffCount = s.staffCount || 1; return setCart(c => [...c, { key: `${s.id}-${Date.now()}`, type: 'service', refId: s.id, name: s.name, price: s.price, currency: s.currency, qty: 1, staffCount, commissionPct: s.commissionPct || (staffCount === 2 ? 33.33 : 50), staffId: currentStaffId, consumedProducts: [] }]); };
   const addProduct = (p: Product) => {
     setCart(c => {
       const existing = c.find(l => l.type === 'product' && l.refId === p.id);
-      if (existing) return c.map(l => l === existing ? { ...l, qty: l.qty + 1 } : l);
+      if (existing) {
+        if (existing.qty >= p.stock) {
+          toast(`Only ${p.stock} ${p.unit} of ${p.name} are available.`, 'error');
+          return c;
+        }
+        return c.map(l => l === existing ? { ...l, qty: l.qty + 1 } : l);
+      }
       return [...c, { key: `${p.id}-${Date.now()}`, type: 'product', refId: p.id, name: p.name, price: p.price, currency: 'KES', qty: 1 }];
     });
   };
@@ -82,6 +92,10 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
   const setLineStaff = (key: string, staffId: string) => {
     const s = staff.find(x => x.id === staffId);
     setCart(c => c.map(l => l.key === key ? { ...l, staffId: s?.id, staffName: s?.name } : l));
+  };
+  const setLineCoStaff = (key: string, coStaffId: string) => {
+    const coStaff = staff.find(x => x.id === coStaffId);
+    setCart(c => c.map(l => l.key === key ? { ...l, coStaffId: coStaff?.id, coStaffName: coStaff?.name } : l));
   };
   const setLineHelper = (key: string, helperStaffId: string) => {
     const helper = staff.find(x => x.id === helperStaffId);
@@ -126,11 +140,12 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
     }));
   };
 
-  const currencies = Array.from(new Set(cart.map(l => l.currency)));
+  const currencies = Array.from(new Set([...cart.map(l => l.currency), ...(tipAmount > 0 ? ['KES' as Currency] : [])]));
   const subtotalByCurrency: Record<string, number> = {};
   for (const l of cart) subtotalByCurrency[l.currency] = (subtotalByCurrency[l.currency] || 0) + l.price * l.qty;
   const totalByCurrency: Record<string, number> = {};
   for (const cur of currencies) totalByCurrency[cur] = Math.round((subtotalByCurrency[cur] || 0) * (1 - discountPct / 100));
+  totalByCurrency.KES = (totalByCurrency.KES || 0) + Math.max(0, tipAmount || 0);
   const serviceTotal = cart.filter(line => line.type === 'service').reduce((sum, line) => sum + line.price * line.qty, 0);
   const serviceTotalAfterDiscount = Math.round(serviceTotal * (1 - discountPct / 100));
   const productTotal = cart.filter(line => line.type === 'product').reduce((sum, line) => sum + line.price * line.qty, 0);
@@ -144,6 +159,21 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
 
   const customerOptions = currentStaffId ? servingClients : customers;
   const selectedCustomer = customerOptions.find(c => c.id === customerId);
+  const productQuantityInCart = (productId: string) => cart.find(line => line.type === 'product' && line.refId === productId)?.qty || 0;
+  const saveDraft = () => {
+    if (!cart.length) { toast('Add a service or product before saving a draft.', 'error'); return; }
+    window.localStorage.setItem(draftKey, JSON.stringify({ cart, customerId, discountPct, tipAmount, promoCode, redeemPoints, paymentMethod }));
+    setHasDraft(true);
+    toast('POS draft saved.', 'success');
+  };
+  const restoreDraft = () => {
+    try {
+      const draft = JSON.parse(window.localStorage.getItem(draftKey) || 'null');
+      if (!draft?.cart?.length) { toast('No saved draft was found.', 'error'); return; }
+      setCart(draft.cart); setCustomerId(draft.customerId || ''); setDiscountPct(Number(draft.discountPct || 0)); setTipAmount(Number(draft.tipAmount || 0)); setPromoCode(draft.promoCode || ''); setRedeemPoints(Number(draft.redeemPoints || 0)); setPaymentMethod(draft.paymentMethod || 'M-Pesa');
+      toast('POS draft restored.', 'success');
+    } catch { toast('The saved POS draft could not be restored.', 'error'); }
+  };
 
   const doCheckout = async (mpesaReceiptNumber?: string) => {
     setCheckingOut(true);
@@ -158,17 +188,14 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
             price: l.price,
             currency: l.currency,
             qty: l.qty,
-            staffId: l.staffId || null,
-            staffName: l.staffName || null,
-            helperStaffId: l.helperStaffId || null,
-            helperStaffName: l.helperStaffName || null,
-            assistantPayment: l.type === 'service' && l.helperStaffId ? assistantPayment(Math.round((l.price * l.qty) * (1 - discountPct / 100))) : 0,
-            consumedProducts: l.type === 'service' ? (l.consumedProducts || []).map(item => ({ productId: item.productId, name: item.name, qty: Number(item.qty || 0), cost: Number(item.cost || 0), unit: item.unit || '' })) : [],
+            ...(l.type === 'service' ? { staffCount: l.staffCount || 1, commissionPct: l.commissionPct || 50, staffId: l.staffId || null, staffName: l.staffName || null, coStaffId: l.staffCount === 2 ? l.coStaffId || null : null, coStaffName: l.staffCount === 2 ? l.coStaffName || null : null, helperStaffId: l.helperStaffId || null, helperStaffName: l.helperStaffName || null, consumedProducts: (l.consumedProducts || []).map(item => ({ productId: item.productId, name: item.name, qty: Number(item.qty || 0), cost: Number(item.cost || 0), unit: item.unit || '' })) } : {}),
           })),
         discountPct, paymentMethod, promoCode: promoCode.trim() || undefined, redeemPoints: redeemPoints || undefined, mpesaReceiptNumber, appointmentId: appointment?.id,
+        tipAmount: Math.max(0, tipAmount || 0),
       });
       setReceipt({ ...data, customerName: selectedCustomer?.name || 'Walk-in Customer', items: cart, paymentMethod });
-      setCart([]); setDiscountPct(0); setCustomerId(''); setPromoCode(''); setRedeemPoints(0); setShowPay(false);
+      setCart([]); setDiscountPct(0); setTipAmount(0); setCustomerId(''); setPromoCode(''); setRedeemPoints(0); setShowPay(false);
+      window.localStorage.removeItem(draftKey); setHasDraft(false);
       onSaleComplete();
     } catch (err: any) {
       console.error('Checkout error:', err);
@@ -225,9 +252,10 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
           ) : (
             <div className="grid sm:grid-cols-2 gap-2">
               {products.map(p => (
-                <button key={p.id} disabled={p.stock <= 0} onClick={() => addProduct(p)} className="text-left rounded-2xl border border-black/5 bg-white p-3 hover:border-[#0071e3]/40 hover:shadow-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]">
-                  <p className="font-medium text-sm">{p.name}</p>
+                <button key={p.id} disabled={p.stock <= 0} onClick={() => addProduct(p)} aria-label={p.stock > 0 ? `Add ${p.name} to cart` : `${p.name} is out of stock`} className="text-left rounded-2xl border border-black/5 bg-white p-3 hover:border-[#0071e3]/40 hover:shadow-sm transition-all disabled:cursor-not-allowed disabled:bg-black/[0.02] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]">
+                  <div className="flex items-center justify-between gap-2"><p className="font-medium text-sm">{p.name}</p>{p.stock > 0 ? <span className="inline-flex shrink-0 items-center gap-1 text-xs font-semibold text-[#0071e3]"><Plus size={13} aria-hidden="true" />Add</span> : <span className="shrink-0 text-xs font-medium text-[#6E6E73]">Out of stock</span>}</div>
                   <p className="text-xs text-[#6E6E73]">{fmtMoney(p.price, 'KES')} · {p.stock} {p.unit} in stock</p>
+                  {productQuantityInCart(p.id) > 0 && <p className="mt-1 text-xs font-semibold text-[#0071e3]">In cart: {productQuantityInCart(p.id)}</p>}
                 </button>
               ))}
             </div>
@@ -245,7 +273,7 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
                     <div>
                       <p className="text-sm font-medium">{l.name}</p>
                       <p className="text-xs text-[#6E6E73]">{fmtMoney(l.price, l.currency)} × {l.qty}</p>
-                      {l.type === 'service' && l.staffName && <p className="text-xs font-medium text-blue-600">👤 {l.staffName}</p>}
+                      {l.type === 'service' && <p className="text-xs text-[#6E6E73]">{l.staffCount || 1} staff · {l.commissionPct || 50}% commission{l.staffName ? ` · ${l.staffName}` : ''}</p>}
                     </div>
                     <button onClick={() => removeLine(l.key)} aria-label={`Remove ${l.name} from cart`} className="text-xs text-[#FF3B30] hover:underline">Remove</button>
                   </div>
@@ -261,6 +289,10 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
                         <option value="">Assign staff…</option>
                         {staff.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                       </Select>
+                      {l.staffCount === 2 && <Select aria-label={`Assign co-staff for ${l.name}`} className="text-xs py-1.5" value={l.coStaffId || ''} onChange={e => setLineCoStaff(l.key, e.target.value)}>
+                        <option value="">Assign co-staff...</option>
+                        {staff.filter(s => s.id !== l.staffId).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                      </Select>}
                       <Select aria-label={`Assign assistant for ${l.name}`} className="text-xs py-1.5" value={l.helperStaffId || ''} onChange={e => setLineHelper(l.key, e.target.value)}>
                         <option value="">No assistant</option>
                         {staff.filter(s => s.id !== l.staffId).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
@@ -282,6 +314,7 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
                           </div>
                         ))}
                       </div>}
+                      {l.staffCount === 2 && l.coStaffId && <p className="text-xs text-[#6E6E73]">Co-staff earns {l.commissionPct || 33.33}% commission; the salon receives the balance.</p>}
                       {l.helperStaffId && <p className="text-xs text-[#6E6E73]">Assistant payment: {fmtMoney(assistantPayment(Math.round((l.price * l.qty) * (1 - discountPct / 100))), 'KES')}</p>}
                     </div>
                   )}
@@ -336,6 +369,7 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
             })()}
             
             <Field label="Discount %" htmlFor="pos-discount"><Input id="pos-discount" type="number" min={0} max={100} value={discountPct} onChange={e => setDiscountPct(Number(e.target.value))} /></Field>
+            <Field label="Tip (KES)" htmlFor="pos-tip"><Input id="pos-tip" type="number" min={0} value={tipAmount} onChange={e => setTipAmount(Math.max(0, Number(e.target.value) || 0))} placeholder="Optional" /></Field>
             <Field label="Promo code (optional)" htmlFor="pos-promo"><Input id="pos-promo" value={promoCode} onChange={e => setPromoCode(e.target.value.toUpperCase())} placeholder="e.g. TUESDAY15" /></Field>
             {customerId && (selectedCustomer?.loyaltyPoints || 0) > 0 && (
               <Field label={`Redeem loyalty points (has ${selectedCustomer?.loyaltyPoints})`} htmlFor="pos-points"><Input id="pos-points" type="number" min={0} max={selectedCustomer?.loyaltyPoints || 0} value={redeemPoints} onChange={e => setRedeemPoints(Number(e.target.value))} /></Field>
@@ -357,13 +391,15 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
               <div className="flex justify-between"><span>Assistant payments</span><span>-{fmtMoney(assistantTotal, 'KES')}</span></div>
               <div className="flex justify-between font-medium"><span>Expected employee income (50%)</span><span>{fmtMoney(expectedIncome, 'KES')}</span></div>
             </>}
+            {tipAmount > 0 && <div className="flex justify-between"><span>Tips</span><span>{fmtMoney(tipAmount, 'KES')}</span></div>}
             {currencies.length === 0 ? (
               <div className="flex justify-between font-semibold text-base"><span>Total</span><span>{fmtMoney(0, 'KES')}</span></div>
             ) : currencies.map(cur => (
               <div key={cur} className="flex justify-between font-semibold text-base"><span>Total ({cur})</span><span>{fmtMoney(totalByCurrency[cur], cur)}</span></div>
             ))}
           </div>
-          <Button className="w-full mt-4" onClick={checkout} disabled={checkingOut || cart.length === 0 || (currentStaffId && !customerId)}>{checkingOut ? 'Processing…' : paymentMethod === 'M-Pesa' && (totalByCurrency.KES || 0) > 0 ? 'Pay with M-Pesa' : 'Charge'}</Button>
+          <div className="mt-4 flex gap-2"><Button className="flex-1" variant="secondary" onClick={saveDraft} disabled={checkingOut || cart.length === 0}>Save draft</Button>{hasDraft && <Button className="flex-1" variant="secondary" onClick={restoreDraft} disabled={checkingOut}>Restore draft</Button>}</div>
+          <Button className="w-full mt-2" onClick={checkout} disabled={checkingOut || cart.length === 0 || (currentStaffId && !customerId)}>{checkingOut ? 'Processing…' : paymentMethod === 'M-Pesa' && (totalByCurrency.KES || 0) > 0 ? 'Pay with M-Pesa' : 'Charge'}</Button>
         </Card>
       </div>
 
@@ -422,6 +458,7 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
               {Object.keys(receipt.totalByCurrency || {}).map(cur => (
                 <div key={cur} className="flex justify-between font-semibold"><span>Total Paid ({cur})</span><span>{fmtMoney(receipt.totalByCurrency[cur], cur)}</span></div>
               ))}
+              {Number(receipt.tipAmount || 0) > 0 && <div className="flex justify-between text-xs text-[#6E6E73]"><span>Tips (KES)</span><span>{fmtMoney(receipt.tipAmount, 'KES')}</span></div>}
             </div>
             {receipt.discountSource && receipt.discountSource !== 'none' && <p className="text-xs text-[#6E6E73]">Discount applied via {receipt.discountSource}.</p>}
             {receipt.pointsRedeemed > 0 && <p className="text-xs text-[#6E6E73]">{receipt.pointsRedeemed} loyalty points redeemed.</p>}

@@ -12,6 +12,7 @@ function EmployeeDashboard({ account, onAddService }: { account: { name?: string
   const [fortnightEarnings, setFortnightEarnings] = useState(0);
   const [dailyCommission, setDailyCommission] = useState(0);
   const [dailyAssistant, setDailyAssistant] = useState(0);
+  const [dailyTips, setDailyTips] = useState(0);
   const [waitingClients, setWaitingClients] = useState<Appointment[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -25,6 +26,7 @@ function EmployeeDashboard({ account, onAddService }: { account: { name?: string
       setFortnightEarnings(earnings.fortnight.total || 0);
       setDailyCommission(earnings.today.commission || 0);
       setDailyAssistant(earnings.today.assistant || 0);
+      setDailyTips(earnings.today.tips || 0);
       
       // Show waiting clients (those checked-in and waiting)
       const waiting = staffAppointments.filter(item => item.date === todayStr() && ['checked-in', 'pending'].includes(item.status));
@@ -52,7 +54,7 @@ function EmployeeDashboard({ account, onAddService }: { account: { name?: string
 
       <div className="grid gap-4 sm:grid-cols-3">
         <Card className="p-5"><Clock size={18} className="text-[#0071e3]" aria-hidden="true" /><p className="mt-3 text-xs text-[#6E6E73]">Waiting Now</p><p className="text-2xl font-semibold">{waitingClients.length}</p></Card>
-        <Card className="p-5"><DollarSign size={18} className="text-green-600" aria-hidden="true" /><p className="mt-3 text-xs text-[#6E6E73]">Today's Earnings</p><p className="text-2xl font-semibold">{fmtKES(dailyEarnings)}</p><p className="text-xs text-[#6E6E73] mt-1">Commission {fmtKES(dailyCommission)} + Assistant {fmtKES(dailyAssistant)}</p></Card>
+        <Card className="p-5"><DollarSign size={18} className="text-green-600" aria-hidden="true" /><p className="mt-3 text-xs text-[#6E6E73]">Today's Earnings</p><p className="text-2xl font-semibold">{fmtKES(dailyEarnings)}</p><p className="text-xs text-[#6E6E73] mt-1">Commission {fmtKES(dailyCommission)} + Assistant {fmtKES(dailyAssistant)} + Tips {fmtKES(dailyTips)}</p></Card>
         <Card className="p-5"><UserRound size={18} className="text-[#0071e3]" aria-hidden="true" /><p className="mt-3 text-xs text-[#6E6E73]">Assigned clients</p><p className="text-2xl font-semibold">{assignedClients.length}</p></Card>
       </div>
 

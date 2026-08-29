@@ -17,6 +17,7 @@ export interface Staff {
   branchName?: string;
   commissionEarned14Days?: number;
   assistantEarned14Days?: number;
+  tipEarned14Days?: number;
 }
 
 export interface Branch {
@@ -35,6 +36,8 @@ export interface ServiceItem {
   currency: Currency;
   durationMin: number;
   description: string;
+  staffCount: 1 | 2;
+  commissionPct: 30 | 33.33 | 40 | 50;
 }
 
 export interface Customer {

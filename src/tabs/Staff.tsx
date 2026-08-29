@@ -30,11 +30,15 @@ function StaffTab({ role = 'owner' }: { role?: Role }) {
     const isReceptionist = form.role === 'Receptionist';
     if (isReceptionist ? form.credential.length < 8 : !/^\d{4}$/.test(form.credential)) { toast(isReceptionist ? 'Receptionist password must be at least 8 characters.' : 'Staff PIN must be exactly 4 digits.', 'error'); return; }
     if (!form.branchId) { toast('Choose a branch for this staff member.', 'error'); return; }
-    await StaffApi.create({ ...form, password: form.role === 'Receptionist' ? form.credential : undefined, pin: form.role === 'Receptionist' ? undefined : form.credential, accountStatus: 'active', specialties: [], status: 'available' });
-    toast('Staff member and worker account created.', 'success');
-    setOpen(false);
-    setForm({ name: '', role: 'Barber', chair: '', phone: '', credential: '', branchId: branches[0]?.id || '' });
-    load();
+    try {
+      await StaffApi.create({ ...form, password: form.role === 'Receptionist' ? form.credential : undefined, pin: form.role === 'Receptionist' ? undefined : form.credential, accountStatus: 'active', specialties: [], status: 'available' });
+      toast('Staff member and worker account created.', 'success');
+      setOpen(false);
+      setForm({ name: '', role: 'Barber', chair: '', phone: '', credential: '', branchId: branches[0]?.id || '' });
+      load();
+    } catch (cause: any) {
+      toast(cause?.message || 'Could not create this staff member.', 'error');
+    }
   };
 
   const changeStatus = async (s: Staff, status: Staff['status']) => { await StaffApi.update(s.id, { status }); load(); };
@@ -132,7 +136,7 @@ function StaffTab({ role = 'owner' }: { role?: Role }) {
             <Field label="Full name" htmlFor="s-name"><Input id="s-name" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></Field>
             <Field label="Role" htmlFor="s-role">
               <Select id="s-role" value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value }))}>
-                <option>Barber</option><option>Hair Stylist</option><option>Nail Technician</option><option>Spa Therapist</option><option>Makeup Artist</option><option>Receptionist</option>
+                <option>Barber</option><option>Hair Stylist</option><option>Nail Technician</option><option>Spa Therapist</option><option>Makeup Artist</option><option>Assistant</option><option>Receptionist</option>
               </Select>
             </Field>
             <Field label="Chair / Station" htmlFor="s-chair"><Input id="s-chair" value={form.chair} onChange={e => setForm(f => ({ ...f, chair: e.target.value }))} placeholder="e.g. Chair 3" /></Field>
