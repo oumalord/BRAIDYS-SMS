@@ -29688,7 +29688,8 @@ var db = {
     await init();
     if (!ids.length) return true;
     const context = currentContext();
-    await sql`DELETE FROM app_records WHERE collection = ${collection} AND tenant_id = ${context?.tenantId || null} AND id = ANY(${ids})`;
+    if (context?.role === "admin") await sql`DELETE FROM app_records WHERE collection = ${collection} AND id = ANY(${ids})`;
+    else await sql`DELETE FROM app_records WHERE collection = ${collection} AND tenant_id = ${context?.tenantId || null} AND id = ANY(${ids})`;
     return true;
   }
 };
@@ -30633,6 +30634,18 @@ New temporary password: ${newPassword}`, account.id);
     const order = items.find((item) => String(item.appointmentId || "") === params.id);
     if (!order) return error("No completed work was found for this appointment", 404);
     return json({ item: order });
+  }],
+  "DELETE /api/appointments/cancelled": [async () => {
+    requireOwner();
+    const { items: appointments } = await db.list("appointments", { limit: 5e3 });
+    const cancelledIds = appointments.filter((item) => item.status === "cancelled").map((item) => item.id);
+    if (!cancelledIds.length) return json({ deleted: 0 });
+    const { items: queue } = await db.list("queue", { limit: 5e3 });
+    const queueIds = queue.filter((item) => cancelledIds.includes(item.appointmentId)).map((item) => item.id);
+    await db.delete("appointments", cancelledIds);
+    if (queueIds.length) await db.delete("queue", queueIds);
+    await audit("deleted cancelled appointments", "appointments", { appointmentIds: cancelledIds, queueIds }, currentContext()?.name || "owner");
+    return json({ deleted: cancelledIds.length });
   }],
   "GET /api/queue": [async () => {
     const { items } = await db.list("queue", { limit: 200 });

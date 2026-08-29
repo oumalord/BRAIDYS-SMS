@@ -105,7 +105,8 @@ export const db = {
     await init();
     if (!ids.length) return true;
     const context = currentContext();
-    await sql`DELETE FROM app_records WHERE collection = ${collection} AND tenant_id = ${context?.tenantId || null} AND id = ANY(${ids})`;
+    if (context?.role === 'admin') await sql`DELETE FROM app_records WHERE collection = ${collection} AND id = ANY(${ids})`;
+    else await sql`DELETE FROM app_records WHERE collection = ${collection} AND tenant_id = ${context?.tenantId || null} AND id = ANY(${ids})`;
     return true;
   },
 };

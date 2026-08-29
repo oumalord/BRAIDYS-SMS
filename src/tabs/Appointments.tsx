@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Plus, Calendar, Clock, Pencil } from 'lucide-react';
+import { Plus, Calendar, Clock, Pencil, Trash2 } from 'lucide-react';
 import { Card, Button, Badge, Modal, Field, Input, Select, EmptyState, LoadingState, toast } from '../components/ui';
 import { AppointmentsApi, StaffApi, ServicesApi, CustomersApi, OrdersApi, fmtKES } from '../lib/api';
 import POS from './POS';
@@ -119,6 +119,20 @@ function Appointments({ role }: { role: Role }) {
     await AppointmentsApi.update(a.id, { status });
     reload();
   };
+  const deleteCancelled = async () => {
+    const cancelledCount = appts.filter(appointment => appointment.status === 'cancelled').length;
+    if (!cancelledCount || !window.confirm(`Delete all ${cancelledCount} cancelled appointment${cancelledCount === 1 ? '' : 's'} for this view? This cannot be undone.`)) return;
+    setSaving(true);
+    try {
+      const { data } = await AppointmentsApi.deleteCancelled();
+      toast(`${data.deleted} cancelled appointment${data.deleted === 1 ? '' : 's'} deleted.`, 'success');
+      reload();
+    } catch (cause: any) {
+      toast(cause?.message || 'Could not delete cancelled appointments.', 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const beginEdit = (appointment: Appointment) => {
     setEditing(appointment);
@@ -201,6 +215,7 @@ function Appointments({ role }: { role: Role }) {
         </div>
         <div className="flex items-center gap-2">
           <Field label="Date" htmlFor="date-picker"><Input id="date-picker" type="date" value={date} onChange={e => setDate(e.target.value)} aria-label="Select date" /></Field>
+          {(role === 'owner' || role === 'admin') && appts.some(appointment => appointment.status === 'cancelled') && <Button variant="danger" onClick={deleteCancelled} disabled={saving}><Trash2 size={16} aria-hidden="true" />Delete canceled</Button>}
           <Button onClick={() => setOpen(true)}><Plus size={16} aria-hidden="true" />New Appointment</Button>
         </div>
       </div>

@@ -111,6 +111,7 @@ export const AppointmentsApi = {
   list: (date?: string) => api.get(date ? `/api/appointments?date=${date}` : '/api/appointments').then(r => r.data.items as Appointment[]),
   create: (a: unknown) => api.post('/api/appointments', a).then(r => { invalidate('dashboard'); return r; }),
   update: (id: string, patch: Partial<Appointment>) => api.put(`/api/appointments/${id}`, patch).then(r => { invalidate('dashboard'); return r; }),
+  deleteCancelled: () => api.delete('/api/appointments/cancelled').then(r => { invalidate('dashboard'); return r; }),
 };
 
 export const CustomerApi = {

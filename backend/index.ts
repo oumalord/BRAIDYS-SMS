@@ -934,6 +934,18 @@ export const handler = router({
     if (!order) return error('No completed work was found for this appointment', 404);
     return json({ item: order });
   }],
+  'DELETE /api/appointments/cancelled': [async () => {
+    requireOwner();
+    const { items: appointments } = await db.list('appointments', { limit: 5000 });
+    const cancelledIds = (appointments as any[]).filter(item => item.status === 'cancelled').map(item => item.id);
+    if (!cancelledIds.length) return json({ deleted: 0 });
+    const { items: queue } = await db.list('queue', { limit: 5000 });
+    const queueIds = (queue as any[]).filter(item => cancelledIds.includes(item.appointmentId)).map(item => item.id);
+    await db.delete('appointments', cancelledIds);
+    if (queueIds.length) await db.delete('queue', queueIds);
+    await audit('deleted cancelled appointments', 'appointments', { appointmentIds: cancelledIds, queueIds }, currentContext()?.name || 'owner');
+    return json({ deleted: cancelledIds.length });
+  }],
 
   'GET /api/queue': [async () => { const { items } = await db.list('queue', { limit: 200 }); return json({ items }); }],
   'POST /api/queue': [async ({ body }) => {
