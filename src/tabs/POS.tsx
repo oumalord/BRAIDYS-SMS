@@ -9,6 +9,12 @@ interface ConsumedProductLine { productId: string; name: string; qty: number; co
 interface CartLine { key: string; type: 'service' | 'product'; refId: string; name: string; price: number; currency: Currency; qty: number; staffCount?: 1 | 2; commissionPct?: 30 | 33.33 | 40 | 50; staffId?: string; staffName?: string; coStaffId?: string; coStaffName?: string; helperStaffId?: string; helperStaffName?: string; assistantPayment?: number; consumedProducts?: ConsumedProductLine[]; }
 
 function todayStr() { return new Date().toISOString().slice(0, 10); }
+function assistantCompensation(serviceFee: number): number {
+  if (serviceFee <= 1800) return 200;
+  if (serviceFee <= 2400) return 300;
+  if (serviceFee <= 3300) return 400;
+  return 500;
+}
 
 function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: () => void; appointment?: Appointment; currentStaffId?: string }) {
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -111,9 +117,8 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
   };
   const setLineHelper = (key: string, helperStaffId: string) => {
     const helper = staff.find(x => x.id === helperStaffId);
-    setCart(c => c.map(l => l.key === key ? { ...l, helperStaffId: helper?.id, helperStaffName: helper?.name, assistantPayment: helper ? Number(l.assistantPayment || 0) : 0 } : l));
+    setCart(c => c.map(l => l.key === key ? { ...l, helperStaffId: helper?.id, helperStaffName: helper?.name, assistantPayment: helper ? assistantCompensation(l.price * l.qty) : 0 } : l));
   };
-  const setAssistantPayment = (key: string, amount: number) => setCart(current => current.map(line => line.key === key ? { ...line, assistantPayment: Math.max(0, amount || 0) } : line));
   const setLineQty = (key: string, qty: number) => setCart(c => c.map(l => l.key === key ? { ...l, qty: Math.max(1, qty) } : l));
   const addUsedProduct = (lineKey: string, productId: string) => {
     const product = products.find(item => item.id === productId);
@@ -232,8 +237,6 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
     if (currentStaffId && !customerId) { toast('Please select a client you are serving.', 'error'); return; }
     const missingStaff = cart.find(l => l.type === 'service' && !l.staffId);
     if (missingStaff) { toast('Assign a staff member to every service before checkout.', 'error'); return; }
-    const missingAssistantCompensation = cart.find(line => line.type === 'service' && line.helperStaffId && Number(line.assistantPayment || 0) <= 0);
-    if (missingAssistantCompensation) { toast(`Enter the assistant compensation for ${missingAssistantCompensation.name}.`, 'error'); return; }
     const kesDue = totalByCurrency.KES || 0;
     if (paymentMethod === 'M-Pesa' && kesDue > 0) {
       setShowPay(true);
@@ -337,7 +340,7 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
                         ))}
                       </div>}
                       {l.staffCount === 2 && l.coStaffId && <p className="text-xs text-[#6E6E73]">Co-staff earns {l.commissionPct || 33.33}% commission; the salon receives the balance.</p>}
-                      {l.helperStaffId && <Field label="Assistant compensation (KES)" htmlFor={`assistant-payment-${l.key}`}><Input id={`assistant-payment-${l.key}`} type="number" min={0} value={l.assistantPayment || ''} onChange={event => setAssistantPayment(l.key, Number(event.target.value))} placeholder="Enter amount" className="py-1.5 text-xs" /></Field>}
+                      {l.helperStaffId && <p className="text-xs text-[#6E6E73]">Assistant compensation: {fmtMoney(assistantCompensation(l.price * l.qty), 'KES')}</p>}
                     </div>
                   )}
                 </div>

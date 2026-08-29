@@ -29757,6 +29757,13 @@ function commissionPct(value, staffCount) {
   if (rate === 30 || rate === 33.33 || rate === 40 || rate === 50) return rate;
   return serviceStaffCount(staffCount) === 2 ? 33.33 : 50;
 }
+function assistantCompensation(serviceFee) {
+  const amount = Math.max(0, Number(serviceFee) || 0);
+  if (amount <= 1800) return 200;
+  if (amount <= 2400) return 300;
+  if (amount <= 3300) return 400;
+  return 500;
+}
 function sameStaffIdentity(staffId, staffName, context) {
   if (staffId && String(staffId) === String(context.staffId || "")) return true;
   const normalize = (value) => String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
@@ -29796,8 +29803,8 @@ function serviceCommission(item) {
   if (Number.isFinite(recorded)) return Math.max(0, recorded);
   const revenue = Number(item.lineTotalAfterDiscount ?? Number(item.price || 0) * Number(item.qty || 1)) || 0;
   const productCost = Math.max(0, Number(item.productCost || 0));
-  const assistantCompensation = Math.max(0, Number(item.assistantPayment ?? item.helperDeduction ?? 0));
-  const commissionBase = Math.max(0, Number(item.commissionBase ?? revenue - productCost - assistantCompensation) || 0);
+  const assistantCompensation2 = Math.max(0, Number(item.assistantPayment ?? item.helperDeduction ?? 0));
+  const commissionBase = Math.max(0, Number(item.commissionBase ?? revenue - productCost - assistantCompensation2) || 0);
   const rate = Number(item.commissionPct ?? item.commissionRate ?? 50);
   return commissionBase * (Number.isFinite(rate) ? rate / 100 : 0.5);
 }
@@ -30777,11 +30784,10 @@ New temporary password: ${newPassword}`, account.id);
         if (context?.branchId && helper.branchId && helper.branchId !== context.branchId) return error("Assistant must belong to the active branch", 400);
         if (helper.id === staffMember.id) return error("Assistant must be different from the staff member who completed the service", 400);
       }
-      const assistantPayment = helper ? Number(adjustment.assistantPayment) : 0;
-      if (helper && (!Number.isFinite(assistantPayment) || assistantPayment <= 0)) return error("Enter a positive assistant compensation amount", 400);
       const rate = Number(adjustment.commissionPct);
       const commissionPct2 = Number.isFinite(rate) && rate >= 0 && rate <= 100 ? rate : Number(item.commissionPct || item.commissionRate || 50);
       const serviceRevenue = Number(item.lineTotalAfterDiscount ?? item.price * item.qty) || 0;
+      const assistantPayment = helper ? assistantCompensation(Number(item.price || 0) * Number(item.qty || 1)) : 0;
       const productCost = Math.max(0, Number(item.productCost || 0));
       const commissionBase = Math.max(0, serviceRevenue - productCost - assistantPayment);
       const commission = commissionBase * (commissionPct2 / 100);
@@ -30935,9 +30941,7 @@ New temporary password: ${newPassword}`, account.id);
         cost: Math.max(0, Number(entry?.cost || 0)),
         unit: String(entry?.unit || "")
       })).filter((entry) => entry.productId && entry.qty > 0);
-      const assistantPayment = Number(item.assistantPayment);
-      if (helperId && (!Number.isFinite(assistantPayment) || assistantPayment <= 0)) return error(`Enter a positive assistant compensation amount for ${item.name}`, 400);
-      item.assistantPayment = helperId ? assistantPayment : 0;
+      item.assistantPayment = helperId ? assistantCompensation(Number(item.price || 0) * Number(item.qty || 1)) : 0;
       item.helperDeduction = item.assistantPayment;
     }
     const productItems = orderItems.filter((it2) => it2.type === "product");
