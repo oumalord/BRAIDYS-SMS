@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Plus, Calendar, Clock, Pencil } from 'lucide-react';
 import { Card, Button, Badge, Modal, Field, Input, Select, EmptyState, LoadingState, toast } from '../components/ui';
-import { AppointmentsApi, StaffApi, ServicesApi, CustomersApi, fmtKES } from '../lib/api';
+import { AppointmentsApi, StaffApi, ServicesApi, CustomersApi, OrdersApi, fmtKES } from '../lib/api';
 import POS from './POS';
 import type { Appointment, Staff, ServiceItem, Customer, AppointmentStatus, Role } from '../types';
 
@@ -14,6 +14,14 @@ const STATUS_FLOW: Record<AppointmentStatus, AppointmentStatus | null> = {
 const STATUS_TONE: Record<AppointmentStatus, 'neutral' | 'success' | 'warning' | 'danger' | 'info'> = {
   pending: 'neutral', confirmed: 'info', 'checked-in': 'warning', 'in-service': 'warning', completed: 'success', cancelled: 'danger', 'no-show': 'danger',
 };
+
+interface CompletionLine {
+  index: number;
+  name: string;
+  staffId: string;
+  commissionPct: number;
+  commission: number;
+}
 
 function Appointments({ role }: { role: Role }) {
   const [date, setDate] = useState(todayStr());
@@ -28,6 +36,8 @@ function Appointments({ role }: { role: Role }) {
   const [editing, setEditing] = useState<Appointment | null>(null);
   const [editForm, setEditForm] = useState({ serviceId: '', date: '', time: '', staffId: '' });
   const [checkoutAppointment, setCheckoutAppointment] = useState<Appointment | null>(null);
+  const [completionEdit, setCompletionEdit] = useState<{ orderId: string; appointment: Appointment } | null>(null);
+  const [completionLines, setCompletionLines] = useState<CompletionLine[]>([]);
 
   useEffect(() => {
     Promise.all([StaffApi.list(), ServicesApi.list(), CustomersApi.list()]).then(([s, sv, c]) => { setStaff(s); setServices(sv); setCustomers(c); });
@@ -143,7 +153,42 @@ function Appointments({ role }: { role: Role }) {
     }
   };
 
-  const sorted = [...appts].sort((a, b) => a.time.localeCompare(b.time));
+  const beginCompletionEdit = async (appointment: Appointment) => {
+    try {
+      const order = await OrdersApi.completion(appointment.id);
+      const lines = (Array.isArray(order.items) ? order.items : [])
+        .map((item: any, index: number) => ({ item, index }))
+        .filter(({ item }: { item: any }) => item.type === 'service')
+        .map(({ item, index }: { item: any; index: number }) => ({ index, name: item.name || appointment.serviceName, staffId: item.staffId || '', commissionPct: Number(item.commissionPct ?? item.commissionRate ?? 50), commission: Number(item.commission || 0) }));
+      if (!lines.length) { toast('This appointment has no completed service work to adjust.', 'error'); return; }
+      setCompletionLines(lines);
+      setCompletionEdit({ orderId: order.id, appointment });
+    } catch (cause: any) {
+      toast(cause?.message || 'Could not load the completed work record.', 'error');
+    }
+  };
+
+  const saveCompletionEdit = async () => {
+    if (!completionEdit) return;
+    if (completionLines.some(line => !line.staffId || line.commission < 0 || line.commissionPct < 0 || line.commissionPct > 100)) { toast('Assign staff and enter valid commission values.', 'error'); return; }
+    setSaving(true);
+    try {
+      await OrdersApi.updateCompletion(completionEdit.orderId, { items: completionLines });
+      toast('Completed work and commission totals updated.', 'success');
+      setCompletionEdit(null);
+      reload();
+    } catch (cause: any) {
+      toast(cause?.message || 'Could not update completed work.', 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const orderByBookingTime = ['owner', 'admin', 'receptionist'].includes(role);
+  const sorted = [...appts].sort((a, b) => {
+    const bookingDifference = Number(a.createdAt || 0) - Number(b.createdAt || 0);
+    return orderByBookingTime && bookingDifference !== 0 ? bookingDifference : a.time.localeCompare(b.time);
+  });
   let account: { staffId?: string } | null = null;
   try { account = JSON.parse(window.localStorage.getItem('safigroom_account') || 'null'); } catch { account = null; }
 
@@ -152,7 +197,7 @@ function Appointments({ role }: { role: Role }) {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Appointments</h1>
-          <p className="text-sm text-[#6E6E73]">Calendar for {date}</p>
+          <p className="text-sm text-[#6E6E73]">Calendar for {date}{orderByBookingTime ? ' · ordered by booking time' : ''}</p>
         </div>
         <div className="flex items-center gap-2">
           <Field label="Date" htmlFor="date-picker"><Input id="date-picker" type="date" value={date} onChange={e => setDate(e.target.value)} aria-label="Select date" /></Field>
@@ -174,6 +219,7 @@ function Appointments({ role }: { role: Role }) {
               <Badge tone={STATUS_TONE[a.status]}>{a.status.replace('-', ' ')}</Badge>
               {(role === 'owner' || role === 'admin' || role === 'receptionist' || (role === 'barber' && a.staffId === account?.staffId)) && <div className="flex flex-wrap gap-2">
                 {(role === 'owner' || role === 'admin') && !['completed', 'cancelled', 'no-show'].includes(a.status) && <Button size="sm" variant="secondary" onClick={() => beginEdit(a)}><Pencil size={14} aria-hidden="true" />Edit</Button>}
+                {(role === 'owner' || role === 'admin') && a.status === 'completed' && <Button size="sm" variant="secondary" onClick={() => beginCompletionEdit(a)}><Pencil size={14} aria-hidden="true" />Adjust completion</Button>}
                 {(role === 'owner' || role === 'admin') && !['completed', 'cancelled', 'no-show'].includes(a.status) && (
                     <Select aria-label={`Assign employee for ${a.customerName}`} value={a.staffId || ''} onChange={e => {
                       const selected = staff.find(s => s.id === e.target.value);
@@ -254,6 +300,28 @@ function Appointments({ role }: { role: Role }) {
             <Field label="Service" htmlFor="edit-appt-service"><Select id="edit-appt-service" value={editForm.serviceId} onChange={e => setEditForm(current => ({ ...current, serviceId: e.target.value }))}>{services.map(service => <option key={service.id} value={service.id}>{service.name} — {fmtKES(service.price)} ({service.durationMin} min)</option>)}</Select></Field>
             <Field label="Employee" htmlFor="edit-appt-staff"><Select id="edit-appt-staff" value={editForm.staffId} onChange={e => setEditForm(current => ({ ...current, staffId: e.target.value }))}><option value="">Assign later</option>{staff.filter(member => member.status === 'available' || member.id === editing.staffId).map(member => <option key={member.id} value={member.id}>{member.name} — {member.role}</option>)}</Select></Field>
             <div className="grid sm:grid-cols-2 gap-4"><Field label="Date" htmlFor="edit-appt-date"><Input id="edit-appt-date" type="date" value={editForm.date} onChange={e => setEditForm(current => ({ ...current, date: e.target.value }))} /></Field><Field label="Time" htmlFor="edit-appt-time"><Input id="edit-appt-time" type="time" value={editForm.time} onChange={e => setEditForm(current => ({ ...current, time: e.target.value }))} /></Field></div>
+          </div>
+        </Modal>
+      )}
+
+      {completionEdit && (
+        <Modal title="Adjust completed work" onClose={() => setCompletionEdit(null)} footer={<>
+          <Button variant="secondary" onClick={() => setCompletionEdit(null)}>Cancel</Button>
+          <Button onClick={saveCompletionEdit} disabled={saving}>{saving ? 'Saving…' : 'Save completion'}</Button>
+        </>}>
+          <div className="space-y-4">
+            <p className="text-sm text-[#6E6E73]">{completionEdit.appointment.customerName}'s completed services and employee commissions.</p>
+            {completionLines.map((line, lineIndex) => (
+              <div key={line.index} className="border-b border-black/5 pb-4 space-y-3">
+                <p className="text-sm font-medium">{line.name}</p>
+                <Field label="Completed by" htmlFor={`completion-staff-${line.index}`}><Select id={`completion-staff-${line.index}`} value={line.staffId} onChange={event => setCompletionLines(current => current.map((item, index) => index === lineIndex ? { ...item, staffId: event.target.value } : item))}><option value="">Assign employee</option>{staff.filter(member => member.employmentStatus !== 'laid-off').map(member => <option key={member.id} value={member.id}>{member.name}</option>)}</Select></Field>
+                <div className="grid sm:grid-cols-2 gap-4">
+                  <Field label="Commission rate (%)" htmlFor={`completion-rate-${line.index}`}><Input id={`completion-rate-${line.index}`} type="number" min={0} max={100} value={line.commissionPct} onChange={event => setCompletionLines(current => current.map((item, index) => index === lineIndex ? { ...item, commissionPct: Number(event.target.value) } : item))} /></Field>
+                  <Field label="Commission total (KES)" htmlFor={`completion-total-${line.index}`}><Input id={`completion-total-${line.index}`} type="number" min={0} value={line.commission} onChange={event => setCompletionLines(current => current.map((item, index) => index === lineIndex ? { ...item, commission: Number(event.target.value) } : item))} /></Field>
+                </div>
+              </div>
+            ))}
+            <div className="flex justify-between text-sm font-semibold"><span>Total commission</span><span>{fmtKES(completionLines.reduce((sum, line) => sum + Number(line.commission || 0), 0))}</span></div>
           </div>
         </Modal>
       )}

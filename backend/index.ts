@@ -927,6 +927,13 @@ export const handler = router({
     await audit(patch.staffId ? 'assigned' : `status:${patch.status || 'updated'}`, 'appointment', { ...existing, ...patch }, patch.actor || 'receptionist');
     return json({ ok: true });
   }],
+  'GET /api/appointments/:id/completion': [async ({ params }) => {
+    requireOwner();
+    const { items } = await db.list('orders', { limit: 1000 });
+    const order = (items as any[]).find(item => String(item.appointmentId || '') === params.id);
+    if (!order) return error('No completed work was found for this appointment', 404);
+    return json({ item: order });
+  }],
 
   'GET /api/queue': [async () => { const { items } = await db.list('queue', { limit: 200 }); return json({ items }); }],
   'POST /api/queue': [async ({ body }) => {
@@ -1000,6 +1007,36 @@ export const handler = router({
   }],
 
   'GET /api/orders': [async () => { const { items } = await db.list('orders', { limit: 1000 }); return json({ items }); }],
+  'PUT /api/orders/:id/completion': [async ({ params, body }) => {
+    requireOwner();
+    const [existing] = await db.get('orders', [params.id]);
+    if (!existing) return error('Completed work record not found', 404);
+    const adjustments = Array.isArray((body as any)?.items) ? (body as any).items : [];
+    if (!adjustments.length) return error('Provide at least one completed service adjustment', 400);
+    const updatedItems = Array.isArray(existing.items) ? [...existing.items] : [];
+    const context = currentContext();
+    for (const adjustment of adjustments) {
+      const index = Number(adjustment?.index);
+      const item = updatedItems[index];
+      if (!Number.isInteger(index) || !item || item.type !== 'service') return error('A completed service adjustment is invalid', 400);
+      const [staffMember] = await db.get('staff', [String(adjustment.staffId || '')]);
+      if (!staffMember) return error('Assigned staff member was not found', 404);
+      if (context?.branchId && staffMember.branchId && staffMember.branchId !== context.branchId) return error('Assigned staff must belong to the active branch', 400);
+      const rate = Number(adjustment.commissionPct);
+      const commissionPct = Number.isFinite(rate) && rate >= 0 && rate <= 100 ? rate : Number(item.commissionPct || item.commissionRate || 50);
+      const commissionBase = Math.max(0, Number(item.commissionBase || 0));
+      const enteredCommission = Number(adjustment.commission);
+      const commission = Number.isFinite(enteredCommission) && enteredCommission >= 0
+        ? enteredCommission
+        : commissionBase * (commissionPct / 100);
+      updatedItems[index] = { ...item, staffId: staffMember.id, staffName: staffMember.name, commissionPct, commissionRate: commissionPct, commission };
+    }
+    const updated = { ...existing, items: updatedItems };
+    const [ok] = await db.update('orders', [{ id: params.id, record: updated }]);
+    if (!ok) return error('Completed work update failed', 500);
+    await audit('updated completion', 'order', updated, (body as any)?.actor || context?.name || 'owner');
+    return json({ item: updated });
+  }],
   'POST /api/orders': [async ({ body }) => {
     const b: any = body;
     const items = b.items;

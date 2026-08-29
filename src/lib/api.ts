@@ -138,6 +138,8 @@ export const ProductsApi = {
 export const OrdersApi = {
   list: () => api.get('/api/orders').then(r => r.data.items as Order[]),
   checkout: (payload: unknown) => api.post('/api/orders', payload).then(r => { invalidate('products'); invalidate('customers'); invalidate('dashboard'); return r; }),
+  completion: (appointmentId: string) => api.get(`/api/appointments/${appointmentId}/completion`).then(r => r.data.item),
+  updateCompletion: (orderId: string, payload: unknown) => api.put(`/api/orders/${orderId}/completion`, payload).then(r => { invalidate('dashboard'); return r; }),
 };
 
 export const ExpensesApi = {
