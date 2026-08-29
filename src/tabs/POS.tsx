@@ -92,11 +92,15 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
   useEffect(() => {
     if (!appointment || !services.length || cart.length) return;
     const service = services.find(item => item.id === appointment.serviceId);
-    if (service) addService(service);
+    if (service) addService(service, appointment.staffId || currentStaffId);
     if (appointment.customerId) setCustomerId(appointment.customerId);
   }, [appointment, services]);
 
-  const addService = (s: ServiceItem) => { const staffCount = s.staffCount || 1; return setCart(c => [...c, { key: `${s.id}-${Date.now()}`, type: 'service', refId: s.id, name: s.name, price: s.price, currency: s.currency, qty: 1, staffCount, commissionPct: s.commissionPct || (staffCount === 2 ? 33.33 : 50), staffId: currentStaffId, consumedProducts: [] }]); };
+  const addService = (s: ServiceItem, assignedStaffId = currentStaffId) => {
+    const assignedStaff = staff.find(member => member.id === assignedStaffId);
+    const staffCount = s.staffCount || 1;
+    return setCart(c => [...c, { key: `${s.id}-${Date.now()}`, type: 'service', refId: s.id, name: s.name, price: s.price, currency: s.currency, qty: 1, staffCount, commissionPct: s.commissionPct || (staffCount === 2 ? 33.33 : 50), staffId: assignedStaff?.id, staffName: assignedStaff?.name, consumedProducts: [] }]);
+  };
   const addProduct = (p: Product) => {
     setCart(c => {
       const existing = c.find(l => l.type === 'product' && l.refId === p.id);
@@ -250,6 +254,7 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
   };
 
   const categories = Array.from(new Set(services.map(s => s.category)));
+  const assignableStaff = staff.filter(member => member.employmentStatus !== 'laid-off' && member.status !== 'off');
 
   return (
     <div className="space-y-6">
@@ -316,15 +321,15 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
                     <div className="mt-1 space-y-1.5">
                       <Select aria-label={`Assign staff for ${l.name}`} className="text-xs py-1.5" value={l.staffId || ''} onChange={e => setLineStaff(l.key, e.target.value)}>
                         <option value="">Assign staff…</option>
-                        {staff.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                        {assignableStaff.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                       </Select>
                       {l.staffCount === 2 && <Select aria-label={`Assign co-staff for ${l.name}`} className="text-xs py-1.5" value={l.coStaffId || ''} onChange={e => setLineCoStaff(l.key, e.target.value)}>
                         <option value="">Assign co-staff...</option>
-                        {staff.filter(s => s.id !== l.staffId).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                        {assignableStaff.filter(s => s.id !== l.staffId).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                       </Select>}
                       <Select aria-label={`Assign assistant for ${l.name}`} className="text-xs py-1.5" value={l.helperStaffId || ''} onChange={e => setLineHelper(l.key, e.target.value)}>
                         <option value="">No assistant</option>
-                        {staff.filter(s => s.id !== l.staffId).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                        {assignableStaff.filter(s => s.id !== l.staffId).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                       </Select>
                       <div className="grid grid-cols-[1fr_auto] gap-2">
                         <Select aria-label={`Product used for ${l.name}`} className="text-xs py-1.5" value={usagePickerByLine[l.key] || ''} onChange={e => { const value = e.target.value; setUsagePickerByLine(prev => ({ ...prev, [l.key]: value })); if (value) addUsedProduct(l.key, value); }}>

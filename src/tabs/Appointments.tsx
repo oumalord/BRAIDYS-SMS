@@ -36,6 +36,10 @@ function assistantCompensation(serviceFee: number, hasSpecialBraid = false): num
   return 500;
 }
 
+function canAssignStaff(member: Staff) {
+  return member.employmentStatus !== 'laid-off' && member.status !== 'off';
+}
+
 function Appointments({ role }: { role: Role }) {
   const [date, setDate] = useState(todayStr());
   const [appts, setAppts] = useState<Appointment[]>([]);
@@ -218,6 +222,7 @@ function Appointments({ role }: { role: Role }) {
   });
   let account: { staffId?: string } | null = null;
   try { account = JSON.parse(window.localStorage.getItem('safigroom_account') || 'null'); } catch { account = null; }
+  const assignableStaff = staff.filter(canAssignStaff);
 
   return (
     <div className="space-y-6">
@@ -254,7 +259,7 @@ function Appointments({ role }: { role: Role }) {
                       AppointmentsApi.update(a.id, { staffId: selected?.id || null, staffName: selected?.name || null }).then(reload);
                     }} className="text-xs py-1.5 w-auto">
                       <option value="">Assign employee</option>
-                      {staff.filter(s => s.status === 'available' || s.id === a.staffId).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                      {assignableStaff.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                     </Select>
                   )}
                 {STATUS_FLOW[a.status] && <Button size="sm" variant="secondary" onClick={() => advance(a)}>{STATUS_FLOW[a.status] === 'completed' ? 'Open POS & complete' : `Mark ${STATUS_FLOW[a.status]?.replace('-', ' ')}`}</Button>}
@@ -308,7 +313,7 @@ function Appointments({ role }: { role: Role }) {
             <Field label="Employee (optional; receptionist can assign later)" htmlFor="appt-staff">
               <Select id="appt-staff" value={form.staffId} onChange={e => setForm(f => ({ ...f, staffId: e.target.value }))}>
                 <option value="">Assign later</option>
-                {staff.filter(s => s.status === 'available').map(s => <option key={s.id} value={s.id}>{s.name} — {s.role}</option>)}
+                {assignableStaff.map(s => <option key={s.id} value={s.id}>{s.name} — {s.role}</option>)}
               </Select>
             </Field>
             <Field label="Time" htmlFor="appt-time">
@@ -326,7 +331,7 @@ function Appointments({ role }: { role: Role }) {
           <div className="space-y-4">
             <p className="text-sm text-[#6E6E73]">Editing {editing.customerName}'s appointment.</p>
             <Field label="Service" htmlFor="edit-appt-service"><Select id="edit-appt-service" value={editForm.serviceId} onChange={e => setEditForm(current => ({ ...current, serviceId: e.target.value }))}>{services.map(service => <option key={service.id} value={service.id}>{service.name} — {fmtKES(service.price)} ({service.durationMin} min)</option>)}</Select></Field>
-            <Field label="Employee" htmlFor="edit-appt-staff"><Select id="edit-appt-staff" value={editForm.staffId} onChange={e => setEditForm(current => ({ ...current, staffId: e.target.value }))}><option value="">Assign later</option>{staff.filter(member => member.status === 'available' || member.id === editing.staffId).map(member => <option key={member.id} value={member.id}>{member.name} — {member.role}</option>)}</Select></Field>
+            <Field label="Employee" htmlFor="edit-appt-staff"><Select id="edit-appt-staff" value={editForm.staffId} onChange={e => setEditForm(current => ({ ...current, staffId: e.target.value }))}><option value="">Assign later</option>{assignableStaff.map(member => <option key={member.id} value={member.id}>{member.name} — {member.role}</option>)}</Select></Field>
             <div className="grid sm:grid-cols-2 gap-4"><Field label="Date" htmlFor="edit-appt-date"><Input id="edit-appt-date" type="date" value={editForm.date} onChange={e => setEditForm(current => ({ ...current, date: e.target.value }))} /></Field><Field label="Time" htmlFor="edit-appt-time"><Input id="edit-appt-time" type="time" value={editForm.time} onChange={e => setEditForm(current => ({ ...current, time: e.target.value }))} /></Field></div>
           </div>
         </Modal>
@@ -342,8 +347,8 @@ function Appointments({ role }: { role: Role }) {
             {completionLines.map((line, lineIndex) => (
               <div key={line.index} className="border-b border-black/5 pb-4 space-y-3">
                 <p className="text-sm font-medium">{line.name}</p>
-                <Field label="Completed by" htmlFor={`completion-staff-${line.index}`}><Select id={`completion-staff-${line.index}`} value={line.staffId} onChange={event => setCompletionLines(current => current.map((item, index) => index === lineIndex ? { ...item, staffId: event.target.value } : item))}><option value="">Assign employee</option>{staff.filter(member => member.employmentStatus !== 'laid-off').map(member => <option key={member.id} value={member.id}>{member.name}</option>)}</Select></Field>
-                <Field label="Assistant (optional)" htmlFor={`completion-assistant-${line.index}`}><Select id={`completion-assistant-${line.index}`} value={line.helperStaffId} onChange={event => setCompletionLines(current => current.map((item, index) => index === lineIndex ? { ...item, helperStaffId: event.target.value, assistantPayment: event.target.value ? assistantCompensation(item.serviceFee, item.hasSpecialBraid) : 0, commissionBase: Math.max(0, item.serviceFee - (event.target.value ? assistantCompensation(item.serviceFee, item.hasSpecialBraid) : 0)) } : item))}><option value="">No assistant</option>{staff.filter(member => member.id !== line.staffId && member.employmentStatus !== 'laid-off').map(member => <option key={member.id} value={member.id}>{member.name}</option>)}</Select></Field>
+                <Field label="Completed by" htmlFor={`completion-staff-${line.index}`}><Select id={`completion-staff-${line.index}`} value={line.staffId} onChange={event => setCompletionLines(current => current.map((item, index) => index === lineIndex ? { ...item, staffId: event.target.value } : item))}><option value="">Assign employee</option>{assignableStaff.map(member => <option key={member.id} value={member.id}>{member.name}</option>)}</Select></Field>
+                <Field label="Assistant (optional)" htmlFor={`completion-assistant-${line.index}`}><Select id={`completion-assistant-${line.index}`} value={line.helperStaffId} onChange={event => setCompletionLines(current => current.map((item, index) => index === lineIndex ? { ...item, helperStaffId: event.target.value, assistantPayment: event.target.value ? assistantCompensation(item.serviceFee, item.hasSpecialBraid) : 0, commissionBase: Math.max(0, item.serviceFee - (event.target.value ? assistantCompensation(item.serviceFee, item.hasSpecialBraid) : 0)) } : item))}><option value="">No assistant</option>{assignableStaff.filter(member => member.id !== line.staffId).map(member => <option key={member.id} value={member.id}>{member.name}</option>)}</Select></Field>
                 <div className="grid sm:grid-cols-2 gap-4">
                   <Field label="Commission rate (%)" htmlFor={`completion-rate-${line.index}`}><Input id={`completion-rate-${line.index}`} type="number" min={0} max={100} value={line.commissionPct} onChange={event => setCompletionLines(current => current.map((item, index) => index === lineIndex ? { ...item, commissionPct: Number(event.target.value) } : item))} /></Field>
                   {line.helperStaffId ? <Field label="Assistant compensation (KES)" htmlFor={`completion-assistant-payment-${line.index}`}><Input id={`completion-assistant-payment-${line.index}`} type="number" value={line.assistantPayment} readOnly className="py-1.5 text-xs bg-black/[0.03]" /></Field> : <div />}

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Home, Calendar, Users, Scissors, Contact, ShoppingCart, Package, DollarSign, Sparkles, Menu, X, Tag, BarChart3, CreditCard, Percent, ClipboardList, Building2, KeyRound, MessageSquare } from 'lucide-react';
 import { AuthApi, BranchesApi, StaffApi } from './lib/api';
 import { Button, Field, Input, Modal, ToastHost, toast } from './components/ui';
+import AppErrorBoundary from './components/AppErrorBoundary';
 import type { Branch, Role } from './types';
 import Dashboard from './tabs/Dashboard';
 import Appointments from './tabs/Appointments';
@@ -231,7 +232,7 @@ function App() {
             {!ready ? (
               <div className="flex items-center justify-center py-24 text-[#6E6E73]" role="status">Loading SafiGroom OS…</div>
             ) : (
-              <>
+              <AppErrorBoundary key={tab} onRecover={() => setTab(initialTabFor(account))}>
                 {tab === 'dashboard' && (effectiveRole === 'owner' || effectiveRole === 'admin') && <Dashboard />}
                 {tab === 'dashboard' && effectiveRole === 'barber' && <EmployeeDashboard account={account} onAddService={appointment => { setPosAppointment(appointment); setTab('pos'); }} />}
                 {tab === 'dashboard' && effectiveRole === 'customer' && <CustomerDashboard account={account} onBook={() => setTab('booking')} />}
@@ -251,7 +252,7 @@ function App() {
                 {tab === 'booking' && <CustomerBooking account={account} />}
                 {tab === 'logs' && <AuditLogs />}
                 {tab === 'admin' && account?.role === 'admin' && <Admin />}
-              </>
+              </AppErrorBoundary>
             )}
           </div>
         </main>
