@@ -223,6 +223,20 @@ function Appointments({ role }: { role: Role }) {
     }
   };
 
+  const reopenCompletedDeal = async (appointment: Appointment) => {
+    if (!window.confirm(`Undo ${appointment.customerName}'s completed deal? The recorded sale will be voided, product stock restored, and the appointment returned to in service.`)) return;
+    setSaving(true);
+    try {
+      await AppointmentsApi.reopenCompleted(appointment.id);
+      toast('Completed deal undone. The appointment is now in service and ready to correct.', 'success');
+      reload();
+    } catch (cause: any) {
+      toast(cause?.message || 'Could not reopen the completed deal.', 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const saveCompletionEdit = async () => {
     if (!completionEdit) return;
     if (completionLines.some(line => !line.staffId || line.commissionPct < 0 || line.commissionPct > 100)) { toast('Assign staff and a valid commission rate.', 'error'); return; }
@@ -278,6 +292,7 @@ function Appointments({ role }: { role: Role }) {
                 {(role === 'owner' || (role === 'admin' && !['completed', 'cancelled', 'no-show'].includes(a.status))) && <Button size="sm" variant="secondary" onClick={() => beginEdit(a)}><Pencil size={14} aria-hidden="true" />Edit</Button>}
                 {(role === 'owner' || role === 'admin') && a.status === 'completed' && <Button size="sm" variant="secondary" onClick={() => showCompletionSummary(a)}>Deal summary</Button>}
                 {(role === 'owner' || role === 'admin') && a.status === 'completed' && <Button size="sm" variant="secondary" onClick={() => beginCompletionEdit(a)}><Pencil size={14} aria-hidden="true" />Adjust completion</Button>}
+                {role === 'owner' && a.status === 'completed' && <Button size="sm" variant="danger" onClick={() => reopenCompletedDeal(a)} disabled={saving}>Undo completed deal</Button>}
                 {(role === 'owner' || role === 'admin') && !['completed', 'cancelled', 'no-show'].includes(a.status) && (
                     <Select aria-label={`Assign employee for ${a.customerName}`} value={a.staffId || ''} onChange={e => {
                       const selected = staff.find(s => s.id === e.target.value);

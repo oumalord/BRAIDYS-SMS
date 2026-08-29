@@ -94,13 +94,13 @@ function Dashboard() {
           {data.customers.length === 0 ? <p className="text-sm text-[#6E6E73]">No customer profiles registered yet.</p> : <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{data.customers.map(customer => <div key={customer.id} className="flex items-center justify-between border-b border-black/5 pb-2 text-sm"><span>{customer.name}</span><span className="text-xs text-[#6E6E73]">{customer.phone || customer.email || 'No contact'}</span></div>)}</div>}
         </Card>
         <Card className="p-4 sm:p-4 sm:p-6">
-          <h2 className="font-semibold mb-4">Top Staff by Revenue</h2>
+          <h2 className="font-semibold mb-4">Top Staff by Earnings</h2>
           {data.topStaff.length === 0 ? <p className="text-sm text-[#6E6E73]">No sales recorded yet.</p> : (
             <ul className="space-y-3">
               {data.topStaff.map(s => (
                 <li key={`${s.name}-${s.currency}`} className="flex items-center justify-between text-sm">
                   <span>{s.name}</span>
-                  <span className="font-medium">{fmtMoney(s.revenue, s.currency)}</span>
+                  <span className="font-medium">{fmtMoney(s.commission, s.currency)}</span>
                 </li>
               ))}
             </ul>

@@ -100,6 +100,13 @@ function serviceCommission(item: any): number {
   return commissionBase * (Number.isFinite(rate) ? rate / 100 : 0.5);
 }
 
+function staffCommission(item: any, staffId: unknown): number {
+  if (!staffId) return 0;
+  return String(item.staffId || '') === String(staffId) || String(item.coStaffId || '') === String(staffId)
+    ? serviceCommission(item)
+    : 0;
+}
+
 function createTicketNumber(date: string): string {
   const datePart = date.replace(/[^0-9]/g, '').slice(-4);
   const randomPart = String(Math.floor(1000 + Math.random() * 9000));
@@ -978,6 +985,54 @@ export const handler = router({
     if (!order) return error('No completed work was found for this appointment', 404);
     return json({ item: order });
   }],
+  'POST /api/appointments/:id/reopen': [async ({ params }) => {
+    requireOwner();
+    const [appointment] = await db.get('appointments', [params.id]);
+    if (!appointment || appointment.deletedAt) return error('Appointment not found', 404);
+    if (appointment.status !== 'completed') return error('Only completed appointments can be reopened', 409);
+
+    const { items: orders } = await db.list('orders', { limit: 5000 });
+    const order = (orders as any[]).find(item => String(item.appointmentId || '') === appointment.id && !item.deletedAt);
+    if (order) {
+      const { items: payoutItems } = await db.list('payout_items', { limit: 10000 });
+      if ((payoutItems as any[]).some(item => !item.deletedAt && item.orderId === order.id)) return error('This deal is already included in a recorded payout and cannot be undone', 409);
+    }
+    const reopenedAt = Date.now();
+    if (order) {
+      const productQuantities = new Map<string, number>();
+      for (const item of order.items || []) {
+        if (item.type === 'product' && item.refId) productQuantities.set(item.refId, (productQuantities.get(item.refId) || 0) + Number(item.qty || 0));
+        for (const used of item.consumedProducts || []) if (used.productId) productQuantities.set(used.productId, (productQuantities.get(used.productId) || 0) + Number(used.qty || 0));
+      }
+      const productIds = [...productQuantities.keys()];
+      if (productIds.length) {
+        const products = await db.get('products', productIds);
+        const productUpdates = products.flatMap((product, index) => product ? [{ id: productIds[index], record: { ...product, stock: Number(product.stock || 0) + (productQuantities.get(productIds[index]) || 0) } }] : []);
+        if (productUpdates.length) await db.update('products', productUpdates);
+        await db.add('stock_movements', productUpdates.map(update => ({ productId: update.id, productName: update.record.name, change: productQuantities.get(update.id) || 0, reason: `Completed deal reopened: ${appointment.customerName}`, createdAt: reopenedAt, actor: currentContext()?.name || 'owner' })));
+      }
+
+      await db.update('orders', [{ id: order.id, record: { ...order, deletedAt: reopenedAt, deletedBy: currentContext()?.name || 'owner', voidReason: 'Owner reopened the linked completed appointment' } }]);
+      if (order.customerId) {
+        const [customer] = await db.get('customers', [order.customerId]);
+        if (customer) {
+          const remainingOrders = (orders as any[]).filter(item => !item.deletedAt && item.id !== order.id && item.customerId === customer.id);
+          const totalSpent = remainingOrders.reduce((sum, item) => sum + Number(item.totalByCurrency?.KES || 0), 0);
+          const totalSpentUSD = remainingOrders.reduce((sum, item) => sum + Number(item.totalByCurrency?.USD || 0), 0);
+          const loyaltyPoints = Math.max(0, remainingOrders.reduce((sum, item) => sum + Math.floor(Number(item.totalByCurrency?.KES || 0) / 100) - Number(item.pointsRedeemed || 0), 0));
+          const lastVisit = remainingOrders.reduce((latest, item) => Math.max(latest, Number(item.createdAt || 0)), 0) || null;
+          await db.update('customers', [{ id: customer.id, record: { ...customer, totalSpent, totalSpentUSD, visits: remainingOrders.length, loyaltyPoints, lastVisit } }]);
+        }
+      }
+    }
+
+    await db.update('appointments', [{ id: appointment.id, record: { ...appointment, status: 'in-service', reopenedAt, reopenedBy: currentContext()?.name || 'owner' } }]);
+    const { items: queue } = await db.list('queue', { limit: 2000 });
+    const queueEntry = (queue as any[]).find(item => item.appointmentId === appointment.id && !item.deletedAt);
+    if (queueEntry) await db.update('queue', [{ id: queueEntry.id, record: { ...queueEntry, status: 'waiting', joinedAt: reopenedAt } }]);
+    await audit('reopened completed appointment', 'appointment', { id: appointment.id, customerName: appointment.customerName, orderId: order?.id || null, status: 'in-service' }, currentContext()?.name || 'owner');
+    return json({ ok: true, orderVoided: Boolean(order), status: 'in-service' });
+  }],
   'DELETE /api/appointments/:id': [async ({ params }) => {
     requireOwner();
     const [appointment] = await db.get('appointments', [params.id]);
@@ -1584,7 +1639,7 @@ export const handler = router({
         } else if (it.type === 'service') {
           const staff: any = it.staffId ? staffById.get(it.staffId) : null;
           const serviceRevenueAfterDiscount = it.lineTotalAfterDiscount ?? it.price * it.qty;
-          const comm = serviceCommission(it);
+          const comm = staffCommission(it, it.staffId);
           const assistantAmount = Number(it.assistantPayment ?? it.helperDeduction ?? 0);
           commissionsByCurrency[cur] = (commissionsByCurrency[cur] || 0) + comm;
           if (it.staffId) {
@@ -1593,6 +1648,16 @@ export const handler = router({
             entry.revenue += serviceRevenueAfterDiscount; entry.commission += comm; entry.helperDeductions += assistantAmount; entry.count += it.qty;
             staffRevenue.set(key, entry);
             commissionByClient.push({ clientId: o.customerId || null, clientName: o.customerName || 'Walk-in Customer', staffName: it.staffName || staff.name, serviceName: it.name, revenue: serviceRevenueAfterDiscount, assistantPayment: assistantAmount, commission: comm, currency: cur, createdAt: o.createdAt });
+          }
+          if (it.coStaffId) {
+            const coStaff: any = staffById.get(it.coStaffId);
+            const coStaffCommission = staffCommission(it, it.coStaffId);
+            commissionsByCurrency[cur] = (commissionsByCurrency[cur] || 0) + coStaffCommission;
+            const key = `${it.coStaffId}|${cur}`;
+            const entry = staffRevenue.get(key) || { name: it.coStaffName || coStaff?.name || 'Unknown', currency: cur, revenue: 0, commission: 0, helperDeductions: 0, count: 0 };
+            entry.revenue += serviceRevenueAfterDiscount; entry.commission += coStaffCommission; entry.count += it.qty;
+            staffRevenue.set(key, entry);
+            commissionByClient.push({ clientId: o.customerId || null, clientName: o.customerName || 'Walk-in Customer', staffName: it.coStaffName || coStaff?.name || 'Unknown', serviceName: it.name, revenue: serviceRevenueAfterDiscount, assistantPayment: 0, commission: coStaffCommission, currency: cur, createdAt: o.createdAt });
           }
           const skey = `${it.name}|${cur}`;
           const s = serviceRevenue.get(skey) || { name: it.name, currency: cur, revenue: 0, count: 0 };
