@@ -232,6 +232,8 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
     if (currentStaffId && !customerId) { toast('Please select a client you are serving.', 'error'); return; }
     const missingStaff = cart.find(l => l.type === 'service' && !l.staffId);
     if (missingStaff) { toast('Assign a staff member to every service before checkout.', 'error'); return; }
+    const missingAssistantCompensation = cart.find(line => line.type === 'service' && line.helperStaffId && Number(line.assistantPayment || 0) <= 0);
+    if (missingAssistantCompensation) { toast(`Enter the assistant compensation for ${missingAssistantCompensation.name}.`, 'error'); return; }
     const kesDue = totalByCurrency.KES || 0;
     if (paymentMethod === 'M-Pesa' && kesDue > 0) {
       setShowPay(true);

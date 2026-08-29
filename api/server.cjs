@@ -30769,14 +30769,25 @@ New temporary password: ${newPassword}`, account.id);
       const [staffMember] = await db.get("staff", [String(adjustment.staffId || "")]);
       if (!staffMember) return error("Assigned staff member was not found", 404);
       if (context?.branchId && staffMember.branchId && staffMember.branchId !== context.branchId) return error("Assigned staff must belong to the active branch", 400);
+      const helperId = String(adjustment.helperStaffId || "");
+      let helper = null;
+      if (helperId) {
+        [helper] = await db.get("staff", [helperId]);
+        if (!helper) return error("Assistant staff member was not found", 404);
+        if (context?.branchId && helper.branchId && helper.branchId !== context.branchId) return error("Assistant must belong to the active branch", 400);
+        if (helper.id === staffMember.id) return error("Assistant must be different from the staff member who completed the service", 400);
+      }
+      const assistantPayment = helper ? Number(adjustment.assistantPayment) : 0;
+      if (helper && (!Number.isFinite(assistantPayment) || assistantPayment <= 0)) return error("Enter a positive assistant compensation amount", 400);
       const rate = Number(adjustment.commissionPct);
       const commissionPct2 = Number.isFinite(rate) && rate >= 0 && rate <= 100 ? rate : Number(item.commissionPct || item.commissionRate || 50);
-      const commissionBase = Math.max(0, Number(item.commissionBase || 0));
-      const enteredCommission = Number(adjustment.commission);
-      const commission = Number.isFinite(enteredCommission) && enteredCommission >= 0 ? enteredCommission : commissionBase * (commissionPct2 / 100);
-      updatedItems[index] = { ...item, staffId: staffMember.id, staffName: staffMember.name, commissionPct: commissionPct2, commissionRate: commissionPct2, commission };
+      const serviceRevenue = Number(item.lineTotalAfterDiscount ?? item.price * item.qty) || 0;
+      const productCost = Math.max(0, Number(item.productCost || 0));
+      const commissionBase = Math.max(0, serviceRevenue - productCost - assistantPayment);
+      const commission = commissionBase * (commissionPct2 / 100);
+      updatedItems[index] = { ...item, staffId: staffMember.id, staffName: staffMember.name, helperStaffId: helper?.id || null, helperStaffName: helper?.name || null, assistantPayment, helperDeduction: assistantPayment, commissionBase, commissionPct: commissionPct2, commissionRate: commissionPct2, commission };
     }
-    const updated = { ...existing, items: updatedItems };
+    const updated = { ...existing, items: updatedItems, helperDeductions: updatedItems.reduce((sum, item) => sum + (item.type === "service" ? Number(item.assistantPayment || 0) : 0), 0) };
     const [ok] = await db.update("orders", [{ id: params.id, record: updated }]);
     if (!ok) return error("Completed work update failed", 500);
     await audit("updated completion", "order", updated, body?.actor || context?.name || "owner");
@@ -30924,7 +30935,9 @@ New temporary password: ${newPassword}`, account.id);
         cost: Math.max(0, Number(entry?.cost || 0)),
         unit: String(entry?.unit || "")
       })).filter((entry) => entry.productId && entry.qty > 0);
-      item.assistantPayment = helperId ? Math.max(0, Number(item.assistantPayment || 0)) : 0;
+      const assistantPayment = Number(item.assistantPayment);
+      if (helperId && (!Number.isFinite(assistantPayment) || assistantPayment <= 0)) return error(`Enter a positive assistant compensation amount for ${item.name}`, 400);
+      item.assistantPayment = helperId ? assistantPayment : 0;
       item.helperDeduction = item.assistantPayment;
     }
     const productItems = orderItems.filter((it2) => it2.type === "product");
