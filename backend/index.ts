@@ -928,13 +928,14 @@ export const handler = router({
     const [existing] = await db.get('appointments', [params.id]);
     if (!existing) return error('Appointment not found', 404);
     const patch: any = body;
+    const isOwner = context.role === 'owner';
     const isCancellation = patch.status === 'cancelled' || patch.status === 'no-show';
     const isStatusOnlyChange = Object.keys(patch).length === 1 && 'status' in patch;
     if (context.role === 'barber' && existing.staffId !== context.staffId) return error('You can only update appointments assigned to you', 403);
     if (!isCancellation && !isStatusOnlyChange && !['owner', 'admin', 'receptionist'].includes(context.role)) return error('Only the owner, administrator or receptionist can edit appointment details', 403);
     const editsDetails = patch.date || patch.time || patch.serviceId || patch.durationMin || 'staffId' in patch;
     if (editsDetails && !['owner', 'admin', 'receptionist'].includes(currentContext()?.role || '')) return error('Only the owner, administrator or receptionist can edit appointment details', 403);
-    if (['completed', 'cancelled', 'no-show'].includes(existing.status) && (patch.date || patch.time || patch.serviceId || 'staffId' in patch)) return error('Completed or closed appointments cannot be edited', 409);
+    if (!isOwner && ['completed', 'cancelled', 'no-show'].includes(existing.status) && (patch.date || patch.time || patch.serviceId || 'staffId' in patch)) return error('Completed or closed appointments can only be edited by the owner', 409);
     const nextDate = patch.date || existing.date;
     const nextTime = patch.time || existing.time;
     const nextStaffId = 'staffId' in patch ? patch.staffId : existing.staffId;
@@ -976,6 +977,19 @@ export const handler = router({
     const order = (items as any[]).find(item => String(item.appointmentId || '') === params.id);
     if (!order) return error('No completed work was found for this appointment', 404);
     return json({ item: order });
+  }],
+  'DELETE /api/appointments/:id': [async ({ params }) => {
+    requireOwner();
+    const [appointment] = await db.get('appointments', [params.id]);
+    if (!appointment || appointment.deletedAt) return error('Appointment not found', 404);
+    const deletedAt = Date.now();
+    const deletedBy = currentContext()?.name || 'owner';
+    await db.update('appointments', [{ id: appointment.id, record: { ...appointment, deletedAt, deletedBy } }]);
+    const { items: queue } = await db.list('queue', { limit: 2000 });
+    const queueEntry = (queue as any[]).find(item => item.appointmentId === appointment.id && !item.deletedAt);
+    if (queueEntry) await db.update('queue', [{ id: queueEntry.id, record: { ...queueEntry, deletedAt, deletedBy } }]);
+    await audit('deleted appointment', 'appointment', { id: appointment.id, customerName: appointment.customerName, status: appointment.status, queueId: queueEntry?.id || null, completedDealRetained: appointment.status === 'completed' }, deletedBy);
+    return json({ ok: true, completedDealRetained: appointment.status === 'completed' });
   }],
   'DELETE /api/appointments/cancelled': [async () => {
     requireOwner();

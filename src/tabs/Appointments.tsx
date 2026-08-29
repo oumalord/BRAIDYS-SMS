@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Plus, Calendar, Clock, Pencil, Trash2 } from 'lucide-react';
 import { Card, Button, Badge, Modal, Field, Input, Select, EmptyState, LoadingState, toast } from '../components/ui';
-import { AppointmentsApi, StaffApi, ServicesApi, CustomersApi, OrdersApi, fmtKES } from '../lib/api';
+import { AppointmentsApi, StaffApi, ServicesApi, CustomersApi, OrdersApi, fmtKES, fmtMoney } from '../lib/api';
 import POS from './POS';
 import type { Appointment, Staff, ServiceItem, Customer, AppointmentStatus, Role } from '../types';
 
@@ -55,6 +55,7 @@ function Appointments({ role }: { role: Role }) {
   const [checkoutAppointment, setCheckoutAppointment] = useState<Appointment | null>(null);
   const [completionEdit, setCompletionEdit] = useState<{ orderId: string; appointment: Appointment } | null>(null);
   const [completionLines, setCompletionLines] = useState<CompletionLine[]>([]);
+  const [completionSummary, setCompletionSummary] = useState<{ appointment: Appointment; order: any } | null>(null);
 
   useEffect(() => {
     Promise.all([StaffApi.list(), ServicesApi.list(), CustomersApi.list()]).then(([s, sv, c]) => { setStaff(s); setServices(sv); setCustomers(c); });
@@ -199,6 +200,29 @@ function Appointments({ role }: { role: Role }) {
     }
   };
 
+  const showCompletionSummary = async (appointment: Appointment) => {
+    try {
+      const order = await OrdersApi.completion(appointment.id);
+      setCompletionSummary({ appointment, order });
+    } catch (cause: any) {
+      toast(cause?.message || 'Could not load the completed deal summary.', 'error');
+    }
+  };
+
+  const removeAppointment = async (appointment: Appointment) => {
+    if (!window.confirm(`Delete ${appointment.customerName}'s ${appointment.status} appointment?${appointment.status === 'completed' ? ' The completed deal stays in financial history.' : ''}`)) return;
+    setSaving(true);
+    try {
+      await AppointmentsApi.remove(appointment.id);
+      toast('Appointment deleted.', 'success');
+      reload();
+    } catch (cause: any) {
+      toast(cause?.message || 'Could not delete the appointment.', 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const saveCompletionEdit = async () => {
     if (!completionEdit) return;
     if (completionLines.some(line => !line.staffId || line.commissionPct < 0 || line.commissionPct > 100)) { toast('Assign staff and a valid commission rate.', 'error'); return; }
@@ -251,7 +275,8 @@ function Appointments({ role }: { role: Role }) {
               </div>
               <Badge tone={STATUS_TONE[a.status]}>{a.status.replace('-', ' ')}</Badge>
               {(role === 'owner' || role === 'admin' || role === 'receptionist' || (role === 'barber' && a.staffId === account?.staffId)) && <div className="flex flex-wrap gap-2">
-                {(role === 'owner' || role === 'admin') && !['completed', 'cancelled', 'no-show'].includes(a.status) && <Button size="sm" variant="secondary" onClick={() => beginEdit(a)}><Pencil size={14} aria-hidden="true" />Edit</Button>}
+                {(role === 'owner' || (role === 'admin' && !['completed', 'cancelled', 'no-show'].includes(a.status))) && <Button size="sm" variant="secondary" onClick={() => beginEdit(a)}><Pencil size={14} aria-hidden="true" />Edit</Button>}
+                {(role === 'owner' || role === 'admin') && a.status === 'completed' && <Button size="sm" variant="secondary" onClick={() => showCompletionSummary(a)}>Deal summary</Button>}
                 {(role === 'owner' || role === 'admin') && a.status === 'completed' && <Button size="sm" variant="secondary" onClick={() => beginCompletionEdit(a)}><Pencil size={14} aria-hidden="true" />Adjust completion</Button>}
                 {(role === 'owner' || role === 'admin') && !['completed', 'cancelled', 'no-show'].includes(a.status) && (
                     <Select aria-label={`Assign employee for ${a.customerName}`} value={a.staffId || ''} onChange={e => {
@@ -265,6 +290,7 @@ function Appointments({ role }: { role: Role }) {
                 {STATUS_FLOW[a.status] && <Button size="sm" variant="secondary" onClick={() => advance(a)}>{STATUS_FLOW[a.status] === 'completed' ? 'Open POS & complete' : `Mark ${STATUS_FLOW[a.status]?.replace('-', ' ')}`}</Button>}
                 {!['completed', 'cancelled', 'no-show'].includes(a.status) && <Button size="sm" variant="ghost" onClick={() => setStatus(a, 'no-show')}>No-show</Button>}
                 {!['completed', 'cancelled'].includes(a.status) && <Button size="sm" variant="danger" onClick={() => setStatus(a, 'cancelled')}>Cancel</Button>}
+                {(role === 'owner' || role === 'admin') && <Button size="sm" variant="danger" onClick={() => removeAppointment(a)}><Trash2 size={14} aria-hidden="true" />Delete</Button>}
               </div>}
             </Card>
           ))}
@@ -357,6 +383,18 @@ function Appointments({ role }: { role: Role }) {
               </div>
             ))}
             <div className="flex justify-between text-sm font-semibold"><span>Total commission</span><span>{fmtKES(completionLines.reduce((sum, line) => sum + Math.max(0, line.commissionBase - line.assistantPayment) * (line.commissionPct / 100), 0))}</span></div>
+          </div>
+        </Modal>
+      )}
+
+      {completionSummary && (
+        <Modal title="Completed deal summary" onClose={() => setCompletionSummary(null)} footer={<Button onClick={() => setCompletionSummary(null)}>Done</Button>}>
+          <div className="space-y-4 text-sm">
+            <div><p className="font-semibold">{completionSummary.appointment.customerName}</p><p className="text-[#6E6E73]">{completionSummary.order.paymentMethod || 'Payment method not recorded'} · {new Date(Number(completionSummary.order.createdAt || Date.now())).toLocaleString()}</p></div>
+            <div className="space-y-2 border-y border-black/5 py-3">{(completionSummary.order.items || []).map((item: any, index: number) => <div key={`${item.refId}-${index}`}><div className="flex justify-between gap-4"><span>{item.name} × {item.qty || 1}</span><span>{fmtMoney(Number(item.lineTotalAfterDiscount ?? Number(item.price || 0) * Number(item.qty || 1)), item.currency || 'KES')}</span></div>{item.type === 'service' && <p className="text-xs text-[#6E6E73]">Completed by {item.staffName || 'Unassigned'}{item.coStaffName ? ` with ${item.coStaffName}` : ''}{item.helperStaffName ? ` · Assistant: ${item.helperStaffName}` : ''}</p>}{(item.consumedProducts || []).length > 0 && <p className="text-xs text-[#6E6E73]">Products used: {item.consumedProducts.map((product: any) => `${product.name} × ${product.qty}`).join(', ')}</p>}</div>)}</div>
+            {Object.entries(completionSummary.order.subtotalByCurrency || {}).map(([currency, amount]) => <div key={`subtotal-${currency}`} className="flex justify-between"><span>Subtotal ({currency})</span><span>{fmtMoney(Number(amount), currency)}</span></div>)}
+            {Object.entries(completionSummary.order.discountByCurrency || {}).some(([, amount]) => Number(amount) > 0) && <div className="flex justify-between"><span>Discount</span><span>{completionSummary.order.discountPct || 0}%</span></div>}
+            {Object.entries(completionSummary.order.totalByCurrency || {}).map(([currency, amount]) => <div key={`total-${currency}`} className="flex justify-between font-semibold"><span>Total ({currency})</span><span>{fmtMoney(Number(amount), currency)}</span></div>)}
           </div>
         </Modal>
       )}
