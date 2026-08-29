@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "buildCommand": "npm run vercel-build",
+  "buildCommand": "echo Using committed deployment artifacts",
   "outputDirectory": "dist",
   "rewrites": [
     {
