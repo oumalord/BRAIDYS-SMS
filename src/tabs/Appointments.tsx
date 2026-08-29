@@ -200,8 +200,8 @@ function Appointments({ role }: { role: Role }) {
 
   const orderByBookingTime = ['owner', 'admin', 'receptionist'].includes(role);
   const sorted = [...appts].sort((a, b) => {
-    const bookingDifference = Number(a.createdAt || 0) - Number(b.createdAt || 0);
-    return orderByBookingTime && bookingDifference !== 0 ? bookingDifference : a.time.localeCompare(b.time);
+    const bookingDifference = Number(b.createdAt || 0) - Number(a.createdAt || 0);
+    return orderByBookingTime && bookingDifference !== 0 ? bookingDifference : b.time.localeCompare(a.time);
   });
   let account: { staffId?: string } | null = null;
   try { account = JSON.parse(window.localStorage.getItem('safigroom_account') || 'null'); } catch { account = null; }
@@ -211,7 +211,7 @@ function Appointments({ role }: { role: Role }) {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Appointments</h1>
-          <p className="text-sm text-[#6E6E73]">Calendar for {date}{orderByBookingTime ? ' · ordered by booking time' : ''}</p>
+          <p className="text-sm text-[#6E6E73]">Calendar for {date}{orderByBookingTime ? ' · newest bookings first' : ''}</p>
         </div>
         <div className="flex items-center gap-2">
           <Field label="Date" htmlFor="date-picker"><Input id="date-picker" type="date" value={date} onChange={e => setDate(e.target.value)} aria-label="Select date" /></Field>

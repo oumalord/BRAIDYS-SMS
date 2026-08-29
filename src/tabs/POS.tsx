@@ -9,6 +9,22 @@ interface ConsumedProductLine { productId: string; name: string; qty: number; co
 interface CartLine { key: string; type: 'service' | 'product'; refId: string; name: string; price: number; currency: Currency; qty: number; staffCount?: 1 | 2; commissionPct?: 30 | 33.33 | 40 | 50; staffId?: string; staffName?: string; coStaffId?: string; coStaffName?: string; helperStaffId?: string; helperStaffName?: string; consumedProducts?: ConsumedProductLine[]; }
 
 function todayStr() { return new Date().toISOString().slice(0, 10); }
+function assistantPayment(amount: number): number {
+  if (amount <= 1800) return 200;
+  if (amount <= 2400) return 300;
+  return 400;
+}
+
+function draftStorageKey(appointmentId?: string) {
+  try {
+    const account = JSON.parse(window.localStorage.getItem('safigroom_account') || 'null');
+    const accountId = String(account?.id || account?.email || 'anonymous');
+    const branchId = window.localStorage.getItem('safigroom_selected_branch') || 'all';
+    return `safigroom_pos_draft:${accountId}:${branchId}:${appointmentId || 'new'}`;
+  } catch {
+    return `safigroom_pos_draft:anonymous:all:${appointmentId || 'new'}`;
+  }
+}
 
 function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: () => void; appointment?: Appointment; currentStaffId?: string }) {
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -30,9 +46,12 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
   const [tab, setTab] = useState<'services' | 'products'>('services');
   const [usagePickerByLine, setUsagePickerByLine] = useState<Record<string, string>>({});
   const staffAutoSelectedClientRef = useRef(false);
-  const draftKey = `safigroom_pos_draft:${window.localStorage.getItem('safigroom_account') || 'anonymous'}:${window.localStorage.getItem('safigroom_selected_branch') || 'all'}:${appointment?.id || 'new'}`;
+  const draftKey = draftStorageKey(appointment?.id);
 
-  useEffect(() => { setHasDraft(Boolean(window.localStorage.getItem(draftKey))); }, [draftKey]);
+  useEffect(() => {
+    try { setHasDraft(Boolean(window.localStorage.getItem(draftKey))); }
+    catch { setHasDraft(false); }
+  }, [draftKey]);
 
   useEffect(() => {
     Promise.all([CustomersApi.list(), ServicesApi.list(), ProductsApi.list(), StaffApi.list()]).then(([c, s, p, st]) => { setCustomers(c); setServices(s); setProducts(p); setStaff(st); });
@@ -162,14 +181,18 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
   const productQuantityInCart = (productId: string) => cart.find(line => line.type === 'product' && line.refId === productId)?.qty || 0;
   const saveDraft = () => {
     if (!cart.length) { toast('Add a service or product before saving a draft.', 'error'); return; }
-    window.localStorage.setItem(draftKey, JSON.stringify({ cart, customerId, discountPct, tipAmount, promoCode, redeemPoints, paymentMethod }));
-    setHasDraft(true);
-    toast('POS draft saved.', 'success');
+    try {
+      window.localStorage.setItem(draftKey, JSON.stringify({ cart, customerId, discountPct, tipAmount, promoCode, redeemPoints, paymentMethod }));
+      setHasDraft(true);
+      toast('POS draft saved.', 'success');
+    } catch {
+      toast('This device could not save the POS draft.', 'error');
+    }
   };
   const restoreDraft = () => {
     try {
       const draft = JSON.parse(window.localStorage.getItem(draftKey) || 'null');
-      if (!draft?.cart?.length) { toast('No saved draft was found.', 'error'); return; }
+      if (!Array.isArray(draft?.cart) || !draft.cart.length) { toast('No saved draft was found.', 'error'); return; }
       setCart(draft.cart); setCustomerId(draft.customerId || ''); setDiscountPct(Number(draft.discountPct || 0)); setTipAmount(Number(draft.tipAmount || 0)); setPromoCode(draft.promoCode || ''); setRedeemPoints(Number(draft.redeemPoints || 0)); setPaymentMethod(draft.paymentMethod || 'M-Pesa');
       toast('POS draft restored.', 'success');
     } catch { toast('The saved POS draft could not be restored.', 'error'); }
