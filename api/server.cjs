@@ -6,7 +6,11 @@ var __getOwnPropNames = Object.getOwnPropertyNames;
 var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
 var __commonJS = (cb, mod) => function __require() {
-  return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
+  try {
+    return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
+  } catch (e) {
+    throw mod = 0, e;
+  }
 };
 var __export = (target, all) => {
   for (var name in all)
@@ -15703,7 +15707,7 @@ var require_shams = __commonJS({
         return true;
       }
       var obj = {};
-      var sym = Symbol("test");
+      var sym = /* @__PURE__ */ Symbol("test");
       var symObj = Object(sym);
       if (typeof sym === "string") {
         return false;
@@ -15762,7 +15766,7 @@ var require_has_symbols = __commonJS({
       if (typeof origSymbol("foo") !== "symbol") {
         return false;
       }
-      if (typeof Symbol("bar") !== "symbol") {
+      if (typeof /* @__PURE__ */ Symbol("bar") !== "symbol") {
         return false;
       }
       return hasSymbolSham();
@@ -15795,13 +15799,13 @@ var require_implementation = __commonJS({
     var toStr = Object.prototype.toString;
     var max = Math.max;
     var funcType = "[object Function]";
-    var concatty = function concatty2(a2, b2) {
+    var concatty = function concatty2(a2, b3) {
       var arr = [];
       for (var i = 0; i < a2.length; i += 1) {
         arr[i] = a2[i];
       }
-      for (var j = 0; j < b2.length; j += 1) {
-        arr[j + a2.length] = b2[j];
+      for (var j = 0; j < b3.length; j += 1) {
+        arr[j + a2.length] = b3[j];
       }
       return arr;
     };
@@ -16792,17 +16796,17 @@ var require_utils = __commonJS({
       }
       return !!(obj.constructor && obj.constructor.isBuffer && obj.constructor.isBuffer(obj));
     };
-    var combine = function combine2(a2, b2, arrayLimit, plainObjects, throwOnLimitExceeded) {
+    var combine = function combine2(a2, b3, arrayLimit, plainObjects, throwOnLimitExceeded) {
       if (isOverflow(a2)) {
         if (throwOnLimitExceeded) {
           throw new RangeError("Array limit exceeded. Only " + arrayLimit + " element" + (arrayLimit === 1 ? "" : "s") + " allowed in an array.");
         }
         var newIndex = getMaxIndex(a2) + 1;
-        a2[newIndex] = b2;
+        a2[newIndex] = b3;
         setMaxIndex(a2, newIndex);
         return a2;
       }
-      var result = [].concat(a2, b2);
+      var result = [].concat(a2, b3);
       if (result.length > arrayLimit) {
         if (throwOnLimitExceeded) {
           throw new RangeError("Array limit exceeded. Only " + arrayLimit + " element" + (arrayLimit === 1 ? "" : "s") + " allowed in an array.");
@@ -19293,10 +19297,10 @@ var require_route = __commonJS({
 // node_modules/utils-merge/index.js
 var require_utils_merge = __commonJS({
   "node_modules/utils-merge/index.js"(exports2, module2) {
-    exports2 = module2.exports = function(a2, b2) {
-      if (a2 && b2) {
-        for (var key in b2) {
-          a2[key] = b2[key];
+    exports2 = module2.exports = function(a2, b3) {
+      if (a2 && b3) {
+        for (var key in b3) {
+          a2[key] = b3[key];
         }
       }
       return a2;
@@ -20824,11 +20828,11 @@ var require_range_parser = __commonJS({
         end: range.end
       };
     }
-    function sortByRangeIndex(a2, b2) {
-      return a2.index - b2.index;
+    function sortByRangeIndex(a2, b3) {
+      return a2.index - b3.index;
     }
-    function sortByRangeStart(a2, b2) {
-      return a2.start - b2.start;
+    function sortByRangeStart(a2, b3) {
+      return a2.start - b3.start;
     }
   }
 });
@@ -22695,8 +22699,8 @@ var require_charset = __commonJS({
         return provided[priorities.indexOf(priority)];
       });
     }
-    function compareSpecs(a2, b2) {
-      return b2.q - a2.q || b2.s - a2.s || a2.o - b2.o || a2.i - b2.i || 0;
+    function compareSpecs(a2, b3) {
+      return b3.q - a2.q || b3.s - a2.s || a2.o - b3.o || a2.i - b3.i || 0;
     }
     function getFullCharset(spec) {
       return spec.charset;
@@ -22793,8 +22797,8 @@ var require_encoding = __commonJS({
         return provided[priorities.indexOf(priority)];
       });
     }
-    function compareSpecs(a2, b2) {
-      return b2.q - a2.q || b2.s - a2.s || a2.o - b2.o || a2.i - b2.i || 0;
+    function compareSpecs(a2, b3) {
+      return b3.q - a2.q || b3.s - a2.s || a2.o - b3.o || a2.i - b3.i || 0;
     }
     function getFullEncoding(spec) {
       return spec.encoding;
@@ -22888,8 +22892,8 @@ var require_language = __commonJS({
         return provided[priorities.indexOf(priority)];
       });
     }
-    function compareSpecs(a2, b2) {
-      return b2.q - a2.q || b2.s - a2.s || a2.o - b2.o || a2.i - b2.i || 0;
+    function compareSpecs(a2, b3) {
+      return b3.q - a2.q || b3.s - a2.s || a2.o - b3.o || a2.i - b3.i || 0;
     }
     function getFullLanguage(spec) {
       return spec.full;
@@ -23002,8 +23006,8 @@ var require_mediaType = __commonJS({
         return provided[priorities.indexOf(priority)];
       });
     }
-    function compareSpecs(a2, b2) {
-      return b2.q - a2.q || b2.s - a2.s || a2.o - b2.o || a2.i - b2.i || 0;
+    function compareSpecs(a2, b3) {
+      return b3.q - a2.q || b3.s - a2.s || a2.o - b3.o || a2.i - b3.i || 0;
     }
     function getFullType(spec) {
       return spec.type + "/" + spec.subtype;
@@ -24470,7 +24474,7 @@ var Nn = T((Qt) => {
 var ii = T((Be) => {
   "use strict";
   p();
-  var Nt = Qn(), Pe = Nn(), Wn = typeof Symbol == "function" && typeof Symbol.for == "function" ? Symbol.for("nodejs.util.inspect.custom") : null;
+  var Nt = Qn(), Pe = Nn(), Wn = typeof Symbol == "function" && typeof Symbol.for == "function" ? /* @__PURE__ */ Symbol.for("nodejs.util.inspect.custom") : null;
   Be.Buffer = h;
   Be.SlowBuffer = Qo;
   Be.INSPECT_MAX_BYTES = 50;
@@ -25517,14 +25521,14 @@ var ii = T((Be) => {
   }
   a(sa, "BufferBigIntNotDefined");
 });
-var b;
+var b2;
 var v;
 var x;
 var d;
 var m;
 var p = G(() => {
   "use strict";
-  b = globalThis, v = globalThis.setImmediate ?? ((r) => setTimeout(r, 0)), x = globalThis.clearImmediate ?? ((r) => clearTimeout(r)), d = typeof globalThis.Buffer == "function" && typeof globalThis.Buffer.allocUnsafe == "function" ? globalThis.Buffer : ii().Buffer, m = globalThis.process ?? {};
+  b2 = globalThis, v = globalThis.setImmediate ?? ((r) => setTimeout(r, 0)), x = globalThis.clearImmediate ?? ((r) => clearTimeout(r)), d = typeof globalThis.Buffer == "function" && typeof globalThis.Buffer.allocUnsafe == "function" ? globalThis.Buffer : ii().Buffer, m = globalThis.process ?? {};
   m.env ?? (m.env = {});
   try {
     m.nextTick(() => {
@@ -27235,9 +27239,9 @@ var ms = G(() => {
 var vs = T((fh, bs) => {
   "use strict";
   p();
-  var { Transform: Gu } = (xr(), O(vr)), { StringDecoder: Vu } = (ms(), O(ys)), ve = Symbol(
+  var { Transform: Gu } = (xr(), O(vr)), { StringDecoder: Vu } = (ms(), O(ys)), ve = /* @__PURE__ */ Symbol(
     "last"
-  ), It = Symbol("decoder");
+  ), It = /* @__PURE__ */ Symbol("decoder");
   function zu(r, e, t) {
     let n;
     if (this.overflow) {
@@ -28391,7 +28395,7 @@ var eo = T((np, Xs) => {
         { configurable: true, enumerable: false, writable: true, value: this.connectionParameters.password }
       ), this.replication = this.connectionParameters.replication;
       var t = e || {};
-      this._Promise = t.Promise || b.Promise, this._types = new Xc(t.types), this._ending = false, this._connecting = false, this._connected = false, this._connectionError = false, this._queryable = true, this.connection = t.connection || new rl({ stream: t.stream, ssl: this.connectionParameters.ssl, keepAlive: t.keepAlive || false, keepAliveInitialDelayMillis: t.keepAliveInitialDelayMillis || 0, encoding: this.connectionParameters.client_encoding || "utf8" }), this.queryQueue = [], this.binary = t.binary || tl.binary, this.processID = null, this.secretKey = null, this.ssl = this.connectionParameters.ssl || false, this.ssl && this.ssl.key && Object.defineProperty(this.ssl, "key", { enumerable: false }), this._connectionTimeoutMillis = t.connectionTimeoutMillis || 0;
+      this._Promise = t.Promise || b2.Promise, this._types = new Xc(t.types), this._ending = false, this._connecting = false, this._connected = false, this._connectionError = false, this._queryable = true, this.connection = t.connection || new rl({ stream: t.stream, ssl: this.connectionParameters.ssl, keepAlive: t.keepAlive || false, keepAliveInitialDelayMillis: t.keepAliveInitialDelayMillis || 0, encoding: this.connectionParameters.client_encoding || "utf8" }), this.queryQueue = [], this.binary = t.binary || tl.binary, this.processID = null, this.secretKey = null, this.ssl = this.connectionParameters.ssl || false, this.ssl && this.ssl.key && Object.defineProperty(this.ssl, "key", { enumerable: false }), this._connectionTimeoutMillis = t.connectionTimeoutMillis || 0;
     }
     _errorAllQueries(e) {
       let t = a((n) => {
@@ -28700,7 +28704,7 @@ var io = T((op, no) => {
         writable: true,
         value: e.password
       }), e != null && e.ssl && e.ssl.key && Object.defineProperty(this.options.ssl, "key", { enumerable: false }), this.options.max = this.options.max || this.options.poolSize || 10, this.options.min = this.options.min || 0, this.options.maxUses = this.options.maxUses || 1 / 0, this.options.allowExitOnIdle = this.options.allowExitOnIdle || false, this.options.maxLifetimeSeconds = this.options.maxLifetimeSeconds || 0, this.log = this.options.log || function() {
-      }, this.Client = this.options.Client || t || ot().Client, this.Promise = this.options.Promise || b.Promise, typeof this.options.idleTimeoutMillis > "u" && (this.options.idleTimeoutMillis = 1e4), this._clients = [], this._idle = [], this._expired = /* @__PURE__ */ new WeakSet(), this._pendingQueue = [], this._endCallback = void 0, this.ending = false, this.ended = false;
+      }, this.Client = this.options.Client || t || ot().Client, this.Promise = this.options.Promise || b2.Promise, typeof this.options.idleTimeoutMillis > "u" && (this.options.idleTimeoutMillis = 1e4), this._clients = [], this._idle = [], this._expired = /* @__PURE__ */ new WeakSet(), this._pendingQueue = [], this._endCallback = void 0, this.ending = false, this.ended = false;
     }
     _isFull() {
       return this._clients.length >= this.options.max;
@@ -28981,7 +28985,7 @@ var yo = T((yp, po) => {
   "use strict";
   p();
   var ll = (oo(), O(so)), fl = At(), dp = ao(), fo = ge().EventEmitter, hl = (it(), O(nt)), pl = Rt(), ho = lo(), K = po.exports = function(r) {
-    fo.call(this), r = r || {}, this._Promise = r.Promise || b.Promise, this._types = new fl(r.types), this.native = new ll({ types: this._types }), this._queryQueue = [], this._ending = false, this._connecting = false, this._connected = false, this._queryable = true;
+    fo.call(this), r = r || {}, this._Promise = r.Promise || b2.Promise, this._types = new fl(r.types), this.native = new ll({ types: this._types }), this._queryQueue = [], this._ending = false, this._connecting = false, this._connected = false, this._queryable = true;
     var e = this.connectionParameters = new pl(r);
     this.user = e.user, Object.defineProperty(this, "password", { configurable: true, enumerable: false, writable: true, value: e.password }), this.database = e.database, this.host = e.host, this.port = e.port, this.namedQueries = {};
   };
@@ -29744,6 +29748,19 @@ function normalizeRole(role) {
   if (value.includes("manager")) return "manager";
   return "barber";
 }
+function serviceStaffCount(value) {
+  return Number(value) === 2 ? 2 : 1;
+}
+function commissionPct(value, staffCount) {
+  const rate = Number(value);
+  if (rate === 30 || rate === 33.33 || rate === 40 || rate === 50) return rate;
+  return serviceStaffCount(staffCount) === 2 ? 33.33 : 50;
+}
+function sameStaffIdentity(staffId, staffName, context) {
+  if (staffId && String(staffId) === String(context.staffId || "")) return true;
+  const normalize = (value) => String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
+  return Boolean(staffName && context.name && normalize(staffName) === normalize(context.name));
+}
 function sessionRecord(token, account) {
   return { id: (0, import_node_crypto2.createHash)("sha256").update(token).digest("hex"), accountId: account.id, tenantId: account.tenantId, expiresAt: Date.now() + 7 * DAY, createdAt: Date.now() };
 }
@@ -29991,6 +30008,8 @@ async function seedDemoData() {
       discountByCurrency[cur] = d3;
       totalByCurrency[cur] = subtotalByCurrency[cur] - d3;
     }
+    const tipAmount2 = Math.max(0, Number(b.tipAmount || 0));
+    if (tipAmount2 > 0) totalByCurrency.KES = (totalByCurrency.KES || 0) + tipAmount2;
     const d2 = new Date(now - daysAgo * DAY);
     d2.setHours(hour, Math.floor(Math.random() * 50), 0, 0);
     orderSeeds.push({ customerId, customerName, items: itemsWithCurrency, discountPct, subtotalByCurrency, discountByCurrency, totalByCurrency, paymentMethod, createdAt: d2.getTime() });
@@ -30155,11 +30174,76 @@ New temporary password: ${newPassword}`, account.id);
     await db.update("accounts", [{ id: account.id, record: { ...account, pinHash: passwordHash(pin), pinChangedAt: Date.now() } }]);
     return json({ ok: true });
   }],
+  "GET /api/staff/me/earnings": [async () => {
+    const context = currentContext();
+    if (!context?.staffId || !["barber", "receptionist"].includes(context.role)) return error("Only an employee can view this earnings summary", 403);
+    const now = Date.now();
+    const dayStart = /* @__PURE__ */ new Date();
+    dayStart.setHours(0, 0, 0, 0);
+    const todayFrom = dayStart.getTime();
+    const fortnightFrom = now - 14 * DAY;
+    const { items: orders } = await db.list("orders", { limit: 5e3 });
+    const linkedAppointmentIds = /* @__PURE__ */ new Set();
+    let todayCommission = 0;
+    let todayAssistant = 0;
+    let todayTips = 0;
+    let fortnightCommission = 0;
+    let fortnightAssistant = 0;
+    let fortnightTips = 0;
+    for (const order of orders) {
+      if (!order.createdAt) continue;
+      for (const item of order.items || []) {
+        if (item.type !== "service") continue;
+        const commission = Number(item.commission ?? Number(item.lineTotalAfterDiscount ?? item.price * item.qty) * 0.5) || 0;
+        const assistant = Number(item.assistantPayment ?? item.helperDeduction ?? 0) || 0;
+        if (sameStaffIdentity(item.staffId, item.staffName, context)) {
+          if (order.createdAt >= todayFrom) todayCommission += commission;
+          if (order.createdAt >= fortnightFrom) fortnightCommission += commission;
+          if (order.createdAt >= todayFrom) todayTips += Number(item.tipShare || 0);
+          if (order.createdAt >= fortnightFrom) fortnightTips += Number(item.tipShare || 0);
+          if (order.appointmentId) linkedAppointmentIds.add(String(order.appointmentId));
+        }
+        if (sameStaffIdentity(item.coStaffId, item.coStaffName, context)) {
+          if (order.createdAt >= todayFrom) todayCommission += commission;
+          if (order.createdAt >= fortnightFrom) fortnightCommission += commission;
+          if (order.createdAt >= todayFrom) todayTips += Number(item.tipShare || 0);
+          if (order.createdAt >= fortnightFrom) fortnightTips += Number(item.tipShare || 0);
+          if (order.appointmentId) linkedAppointmentIds.add(String(order.appointmentId));
+        }
+        if (sameStaffIdentity(item.helperStaffId, item.helperStaffName, context)) {
+          if (order.createdAt >= todayFrom) todayAssistant += assistant;
+          if (order.createdAt >= fortnightFrom) fortnightAssistant += assistant;
+          if (order.appointmentId) linkedAppointmentIds.add(String(order.appointmentId));
+        }
+      }
+    }
+    const { items: appointments } = await db.list("appointments", { limit: 2e3 });
+    for (const appointment of appointments) {
+      if (appointment.status !== "completed") continue;
+      if (linkedAppointmentIds.has(String(appointment.id || ""))) continue;
+      let serviceValue = 0;
+      if (Array.isArray(appointment.items) && appointment.items.length) {
+        serviceValue = appointment.items.filter((item) => sameStaffIdentity(item?.staffId, item?.staffName, context)).reduce((sum, item) => sum + Number(item.price || 0) * Number(item.qty || 1), 0);
+      } else if (sameStaffIdentity(appointment.staffId, appointment.staffName, context)) {
+        serviceValue = Number(appointment.price || 0);
+      }
+      if (serviceValue <= 0) continue;
+      const appointmentTs = (/* @__PURE__ */ new Date(`${appointment.date || ""}T00:00:00`)).getTime();
+      if (!Number.isFinite(appointmentTs)) continue;
+      const derivedCommission = serviceValue * 0.5;
+      if (appointmentTs >= todayFrom) todayCommission += derivedCommission;
+      if (appointmentTs >= fortnightFrom) fortnightCommission += derivedCommission;
+    }
+    return json({
+      today: { commission: todayCommission, assistant: todayAssistant, tips: todayTips, total: todayCommission + todayAssistant + todayTips },
+      fortnight: { commission: fortnightCommission, assistant: fortnightAssistant, tips: fortnightTips, total: fortnightCommission + fortnightAssistant + fortnightTips }
+    });
+  }],
   "GET /api/audit-logs": [async ({ query }) => {
     const { items } = await db.list("audit_logs", { limit: 5e3 });
     const collection = query.collection;
     const filtered = collection ? items.filter((log) => log.collection === collection) : items;
-    return json({ items: filtered.sort((a2, b2) => b2.createdAt - a2.createdAt) });
+    return json({ items: filtered.sort((a2, b3) => b3.createdAt - a2.createdAt) });
   }],
   "POST /api/seed": [async () => {
     return error("Demo data seeding is disabled. Create a real salon through owner signup.", 410);
@@ -30178,25 +30262,25 @@ New temporary password: ${newPassword}`, account.id);
     return json({ items });
   }],
   "POST /api/staff": [async ({ body }) => {
-    const b2 = body;
-    if (!b2.name) return error("Name is required", 400);
+    const b3 = body;
+    if (!b3.name) return error("Name is required", 400);
     const context = currentContext();
-    const branchId = String(b2.branchId || context?.branchId || "");
+    const branchId = String(b3.branchId || context?.branchId || "");
     const { items: branches } = await db.list("branches", { limit: 5e3 });
     const branch = branches.find((item) => item.id === branchId && (context?.role === "admin" || item.salonId === context?.tenantId) && item.status === "active");
     if (!branch) return error("Choose a valid branch for this staff member", 400);
-    if (!b2.phone) return error("Employee phone is required", 400);
-    const isReceptionist = String(b2.role || "").toLowerCase().includes("reception");
-    const credential = String(isReceptionist ? b2.password || "" : b2.pin || "");
+    if (!b3.phone) return error("Employee phone is required", 400);
+    const isReceptionist = String(b3.role || "").toLowerCase().includes("reception");
+    const credential = String(isReceptionist ? b3.password || "" : b3.pin || "");
     if (isReceptionist ? credential.length < 8 : !/^\d{4}$/.test(credential)) {
       return error(isReceptionist ? "Receptionist password must be at least 8 characters" : "Staff PIN must be exactly 4 digits", 400);
     }
-    const [id] = await db.add("staff", [{ tenantId: branch.salonId, salonName: branch.salonName || context?.salonName || "", name: b2.name, role: b2.role || "Staff", specialties: b2.specialties || [], branch: branch.name, branchId: branch.id, branchName: branch.name, chair: b2.chair || "", phone: b2.phone || "", accountEmail: b2.accountEmail || "", accountStatus: b2.accountStatus || "pending", employmentStatus: "active", commissionPct: 50, status: b2.status || "available" }]);
+    const [id] = await db.add("staff", [{ tenantId: branch.salonId, salonName: branch.salonName || context?.salonName || "", name: b3.name, role: b3.role || "Staff", specialties: b3.specialties || [], branch: branch.name, branchId: branch.id, branchName: branch.name, chair: b3.chair || "", phone: b3.phone || "", accountEmail: b3.accountEmail || "", accountStatus: b3.accountStatus || "pending", employmentStatus: "active", commissionPct: 50, status: b3.status || "available" }]);
     if (!id) return error("Failed to add staff", 500);
-    await audit("created", "staff", { id, name: b2.name, role: b2.role || "Staff", accountEmail: b2.accountEmail || "", commissionPct: 50 }, b2.actor || "owner");
+    await audit("created", "staff", { id, name: b3.name, role: b3.role || "Staff", accountEmail: b3.accountEmail || "", commissionPct: 50 }, b3.actor || "owner");
     if (currentContext()) {
       const context2 = currentContext();
-      await db.add("accounts", [{ id: `account-${(0, import_node_crypto2.randomBytes)(8).toString("hex")}`, tenantId: branch.salonId, salonName: branch.salonName || context2.salonName, branchId: branch.id, name: b2.name, email: "", phone: b2.phone, role: isReceptionist ? "receptionist" : "barber", status: "active", ...isReceptionist ? { passwordHash: passwordHash(credential) } : { pinHash: passwordHash(credential) }, staffId: id, createdAt: Date.now() }]);
+      await db.add("accounts", [{ id: `account-${(0, import_node_crypto2.randomBytes)(8).toString("hex")}`, tenantId: branch.salonId, salonName: branch.salonName || context2.salonName, branchId: branch.id, name: b3.name, email: "", phone: b3.phone, role: isReceptionist ? "receptionist" : "barber", status: "active", ...isReceptionist ? { passwordHash: passwordHash(credential) } : { pinHash: passwordHash(credential) }, staffId: id, createdAt: Date.now() }]);
     }
     return json({ id });
   }],
@@ -30230,23 +30314,90 @@ New temporary password: ${newPassword}`, account.id);
     return json({ items });
   }],
   "POST /api/services": [async ({ body }) => {
-    const b2 = body;
-    if (!b2.name || !b2.price) return error("Name and price are required", 400);
-    const [id] = await db.add("services", [{ name: b2.name, category: b2.category || "General", price: b2.price, currency: b2.currency === "USD" ? "USD" : "KES", durationMin: b2.durationMin || 30, description: b2.description || "" }]);
+    const b3 = body;
+    if (!b3.name || !b3.price) return error("Name and price are required", 400);
+    const staffCount = serviceStaffCount(b3.staffCount);
+    const [id] = await db.add("services", [{ name: b3.name, category: b3.category || "General", price: b3.price, currency: b3.currency === "USD" ? "USD" : "KES", durationMin: b3.durationMin || 30, description: b3.description || "", staffCount, commissionPct: commissionPct(b3.commissionPct, staffCount) }]);
     if (!id) return error("Failed to add service", 500);
-    await audit("created", "service", { id, name: b2.name, category: b2.category || "General", price: b2.price, currency: b2.currency === "USD" ? "USD" : "KES" }, b2.actor || "owner");
+    await audit("created", "service", { id, name: b3.name, category: b3.category || "General", price: b3.price, currency: b3.currency === "USD" ? "USD" : "KES" }, b3.actor || "owner");
     return json({ id });
+  }],
+  "PUT /api/services/:id": [async ({ params, body }) => {
+    requireOwner();
+    const [existing] = await db.get("services", [params.id]);
+    if (!existing) return error("Service not found", 404);
+    const patch = body || {};
+    if (patch.name !== void 0 && !String(patch.name).trim()) return error("Name is required", 400);
+    if (patch.price !== void 0 && Number(patch.price) <= 0) return error("Price must be greater than zero", 400);
+    const updated = {
+      ...existing,
+      name: patch.name !== void 0 ? String(patch.name).trim() : existing.name,
+      category: patch.category !== void 0 ? String(patch.category || "").trim() || "General" : existing.category,
+      price: patch.price !== void 0 ? Number(patch.price) : existing.price,
+      currency: patch.currency === "USD" ? "USD" : patch.currency === "KES" ? "KES" : existing.currency,
+      durationMin: patch.durationMin !== void 0 ? Math.max(5, Number(patch.durationMin) || 30) : existing.durationMin,
+      description: patch.description !== void 0 ? String(patch.description || "") : existing.description,
+      staffCount: patch.staffCount !== void 0 ? serviceStaffCount(patch.staffCount) : serviceStaffCount(existing.staffCount),
+      commissionPct: commissionPct(patch.commissionPct !== void 0 ? patch.commissionPct : existing.commissionPct, patch.staffCount !== void 0 ? patch.staffCount : existing.staffCount)
+    };
+    const [ok] = await db.update("services", [{ id: params.id, record: updated }]);
+    if (!ok) return error("Update failed", 500);
+    await audit("updated", "service", { id: params.id, name: updated.name, category: updated.category, price: updated.price, currency: updated.currency }, patch.actor || currentContext()?.name || "owner");
+    return json({ ok: true });
   }],
   "GET /api/customers": [async () => {
     const { items } = await db.list("customers", { limit: 1e3 });
-    return json({ items });
+    const customers = items;
+    const byId = new Map(customers.map((customer) => [String(customer.id), customer]));
+    const byEmail = new Map(customers.filter((customer) => customer.email).map((customer) => [String(customer.email).toLowerCase(), customer]));
+    const { items: appointments } = await db.list("appointments", { limit: 3e3 });
+    const toCreate = [];
+    const appointmentUpdates = [];
+    for (const appointment of appointments) {
+      if (!appointment?.customerName) continue;
+      const appointmentCustomerId = String(appointment.customerId || "");
+      const appointmentEmail = String(appointment.customerEmail || "").toLowerCase();
+      const existing = appointmentCustomerId && byId.get(appointmentCustomerId) || appointmentEmail && byEmail.get(appointmentEmail);
+      if (existing) {
+        if (!appointment.customerId) {
+          appointmentUpdates.push({ id: appointment.id, record: { ...appointment, customerId: existing.id } });
+        }
+        continue;
+      }
+      const newCustomerId = appointmentCustomerId || `customer-${(0, import_node_crypto2.randomBytes)(8).toString("hex")}`;
+      const record = {
+        id: newCustomerId,
+        name: appointment.customerName,
+        phone: "",
+        email: appointment.customerEmail || "",
+        notes: "Auto-created from appointment history",
+        loyaltyPoints: 0,
+        totalSpent: 0,
+        totalSpentUSD: 0,
+        visits: 0,
+        lastVisit: null,
+        createdAt: appointment.createdAt || Date.now(),
+        membershipTier: "none",
+        membershipExpiry: null
+      };
+      toCreate.push(record);
+      byId.set(String(record.id), record);
+      if (record.email) byEmail.set(String(record.email).toLowerCase(), record);
+      if (!appointment.customerId || appointment.customerId !== record.id) {
+        appointmentUpdates.push({ id: appointment.id, record: { ...appointment, customerId: record.id } });
+      }
+    }
+    if (toCreate.length) await db.add("customers", toCreate);
+    if (appointmentUpdates.length) await db.update("appointments", appointmentUpdates);
+    const { items: refreshed } = await db.list("customers", { limit: 3e3 });
+    return json({ items: refreshed });
   }],
   "POST /api/customers": [async ({ body }) => {
-    const b2 = body;
-    if (!b2.name) return error("Name is required", 400);
-    const [id] = await db.add("customers", [{ name: b2.name, phone: b2.phone || "", email: b2.email || "", notes: b2.notes || "", loyaltyPoints: 0, totalSpent: 0, totalSpentUSD: 0, visits: 0, lastVisit: null, createdAt: Date.now(), membershipTier: "none", membershipExpiry: null }]);
+    const b3 = body;
+    if (!b3.name) return error("Name is required", 400);
+    const [id] = await db.add("customers", [{ name: b3.name, phone: b3.phone || "", email: b3.email || "", notes: b3.notes || "", loyaltyPoints: 0, totalSpent: 0, totalSpentUSD: 0, visits: 0, lastVisit: null, createdAt: Date.now(), membershipTier: "none", membershipExpiry: null }]);
     if (!id) return error("Failed to add customer", 500);
-    await audit("created", "customer", { id, name: b2.name, phone: b2.phone || "", email: b2.email || "" }, b2.actor || "customer");
+    await audit("created", "customer", { id, name: b3.name, phone: b3.phone || "", email: b3.email || "" }, b3.actor || "customer");
     return json({ id });
   }],
   "PUT /api/customers/:id": [async ({ params, body }) => {
@@ -30310,8 +30461,8 @@ New temporary password: ${newPassword}`, account.id);
     const { items: purchases } = await db.list("membership_purchases", { limit: 2e3 });
     return json({
       customer,
-      appointments: appointments.filter((item) => item.customerId === customer.id).sort((a2, b2) => String(b2.date).localeCompare(String(a2.date))),
-      queue: queue.filter((item) => item.customerId === customer.id).sort((a2, b2) => b2.joinedAt - a2.joinedAt).slice(0, 10),
+      appointments: appointments.filter((item) => item.customerId === customer.id).sort((a2, b3) => String(b3.date).localeCompare(String(a2.date))),
+      queue: queue.filter((item) => item.customerId === customer.id).sort((a2, b3) => b3.joinedAt - a2.joinedAt).slice(0, 10),
       reviews: reviews.filter((item) => item.customerId === customer.id),
       membershipPurchases: purchases.filter((item) => item.customerId === customer.id)
     });
@@ -30324,17 +30475,17 @@ New temporary password: ${newPassword}`, account.id);
     return json({ items: date ? visible.filter((a2) => a2.date === date) : visible });
   }],
   "POST /api/appointments": [async ({ body }) => {
-    const b2 = body;
+    const b3 = body;
     const context = currentContext();
-    const requestedBranchId = String(b2.branchId || context?.branchId || "");
+    const requestedBranchId = String(b3.branchId || context?.branchId || "");
     const { items: branches } = await db.list("branches", { limit: 5e3 });
     const branch = branches.find((item) => item.id === requestedBranchId && item.salonId === context?.tenantId && item.status === "active");
     if (!branch) return error("Choose a valid branch for this appointment", 400);
-    const requestedCategories = Array.isArray(b2.serviceCategories) ? b2.serviceCategories.slice(0, 2).filter(Boolean) : [];
-    const items = Array.isArray(b2.items) && b2.items.length ? b2.items : b2.serviceId ? [{ serviceId: b2.serviceId, serviceName: b2.serviceName, price: b2.price || 0, currency: b2.currency || "KES", durationMin: b2.durationMin || 30, staffId: b2.staffId, staffName: b2.staffName }] : requestedCategories.length ? [{ serviceId: null, serviceName: `Requested: ${requestedCategories.join(" + ")}`, price: 0, currency: "KES", durationMin: 30, staffId: b2.staffId, staffName: b2.staffName }] : [];
-    const appointmentDate = b2.date || (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
-    const appointmentTime = b2.time || "00:00";
-    if (!b2.customerName || items.length === 0) return error("Missing required appointment fields", 400);
+    const requestedCategories = Array.isArray(b3.serviceCategories) ? b3.serviceCategories.slice(0, 2).filter(Boolean) : [];
+    const items = Array.isArray(b3.items) && b3.items.length ? b3.items : b3.serviceId ? [{ serviceId: b3.serviceId, serviceName: b3.serviceName, price: b3.price || 0, currency: b3.currency || "KES", durationMin: b3.durationMin || 30, staffId: b3.staffId, staffName: b3.staffName }] : requestedCategories.length ? [{ serviceId: null, serviceName: `Requested: ${requestedCategories.join(" + ")}`, price: 0, currency: "KES", durationMin: 30, staffId: b3.staffId, staffName: b3.staffName }] : [];
+    const appointmentDate = b3.date || (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+    const appointmentTime = b3.time || "00:00";
+    if (!b3.customerName || items.length === 0) return error("Missing required appointment fields", 400);
     for (const it2 of items) {
       if (!it2.serviceId && !requestedCategories.length) return error("Each service needs a service selected", 400);
     }
@@ -30365,21 +30516,31 @@ New temporary password: ${newPassword}`, account.id);
     const currency = items[0]?.currency || "KES";
     const serviceName = items.map((it2) => it2.serviceName).join(", ");
     const staffNames = Array.from(new Set(items.map((it2) => it2.staffName).filter(Boolean)));
-    let customerId = b2.customerId || null;
-    let customerEmail = b2.customerEmail || "";
+    let customerId = b3.customerId || null;
+    let customerEmail = b3.customerEmail || "";
+    const normalizedPhone = String(b3.customerPhone || "").replace(/\s+/g, "");
+    const { items: customers } = await db.list("customers", { limit: 2e3 });
+    const findExistingCustomer = () => customers.find((customer) => customerId && customer.id === customerId || customerEmail && String(customer.email || "").toLowerCase() === String(customerEmail).toLowerCase() || normalizedPhone && String(customer.phone || "").replace(/\s+/g, "") === normalizedPhone);
     if (customerId) {
       const [customer] = await db.get("customers", [customerId]);
-      customerEmail = customer?.email || customerEmail;
-    } else if (customerEmail || b2.customerPhone) {
-      const { items: customers } = await db.list("customers", { limit: 2e3 });
-      const normalizedPhone = String(b2.customerPhone || "").replace(/\s+/g, "");
-      const existingCustomer = customers.find((customer) => customerEmail && String(customer.email || "").toLowerCase() === String(customerEmail).toLowerCase() || normalizedPhone && String(customer.phone || "").replace(/\s+/g, "") === normalizedPhone);
-      if (existingCustomer) customerId = existingCustomer.id;
-      else [customerId] = await db.add("customers", [{ name: b2.customerName, phone: b2.customerPhone || "", email: customerEmail, notes: "", loyaltyPoints: 0, totalSpent: 0, totalSpentUSD: 0, visits: 0, lastVisit: null, createdAt: Date.now(), membershipTier: "none", membershipExpiry: null }]);
+      if (customer) {
+        customerEmail = customer?.email || customerEmail;
+      } else {
+        const existingCustomer = findExistingCustomer();
+        if (existingCustomer) customerId = existingCustomer.id;
+      }
+    }
+    if (!customerId) {
+      const existingCustomer = findExistingCustomer();
+      if (existingCustomer) {
+        customerId = existingCustomer.id;
+      } else {
+        [customerId] = await db.add("customers", [{ name: b3.customerName, phone: b3.customerPhone || "", email: customerEmail, notes: "", loyaltyPoints: 0, totalSpent: 0, totalSpentUSD: 0, visits: 0, lastVisit: null, createdAt: Date.now(), membershipTier: "none", membershipExpiry: null }]);
+      }
     }
     const [id] = await db.add("appointments", [{
       customerId,
-      customerName: b2.customerName,
+      customerName: b3.customerName,
       serviceId: items[0].serviceId,
       serviceName,
       customerEmail,
@@ -30401,9 +30562,9 @@ New temporary password: ${newPassword}`, account.id);
     const ticketNumber = createTicketNumber(appointmentDate);
     const [queueId] = await db.add("queue", [{
       appointmentId: id,
-      customerId: b2.customerId || null,
+      customerId: customerId || null,
       customerEmail,
-      customerName: b2.customerName,
+      customerName: b3.customerName,
       serviceName,
       staffId: items[0].staffId || null,
       staffName: staffNames.join(", ") || null,
@@ -30415,8 +30576,8 @@ New temporary password: ${newPassword}`, account.id);
       ticketNumber
     }]);
     await notifyCustomer(customerEmail, `Booking request received: ticket ${ticketNumber}`, `Your SafiGroom booking request was received. Reception will confirm the exact service and time. Ticket: ${ticketNumber}.`, id);
-    await audit("created", "appointment", { id, customerId: b2.customerId || null, customerName: b2.customerName, serviceName, staffId: items[0].staffId || null, staffName: staffNames.join(", ") || null, date: appointmentDate, time: appointmentTime, ticketNumber }, b2.actor || "customer");
-    return json({ id, queueId, ticketNumber, date: b2.date || null, time: b2.time || null });
+    await audit("created", "appointment", { id, customerId: b3.customerId || null, customerName: b3.customerName, serviceName, staffId: items[0].staffId || null, staffName: staffNames.join(", ") || null, date: appointmentDate, time: appointmentTime, ticketNumber }, b3.actor || "customer");
+    return json({ id, queueId, ticketNumber, date: b3.date || null, time: b3.time || null });
   }],
   "PUT /api/appointments/:id": [async ({ params, body }) => {
     const context = currentContext();
@@ -30466,21 +30627,28 @@ New temporary password: ${newPassword}`, account.id);
     await audit(patch.staffId ? "assigned" : `status:${patch.status || "updated"}`, "appointment", { ...existing, ...patch }, patch.actor || "receptionist");
     return json({ ok: true });
   }],
+  "GET /api/appointments/:id/completion": [async ({ params }) => {
+    requireOwner();
+    const { items } = await db.list("orders", { limit: 1e3 });
+    const order = items.find((item) => String(item.appointmentId || "") === params.id);
+    if (!order) return error("No completed work was found for this appointment", 404);
+    return json({ item: order });
+  }],
   "GET /api/queue": [async () => {
     const { items } = await db.list("queue", { limit: 200 });
     return json({ items });
   }],
   "POST /api/queue": [async ({ body }) => {
-    const b2 = body;
-    if (!b2.customerName) return error("Customer name is required", 400);
+    const b3 = body;
+    if (!b3.customerName) return error("Customer name is required", 400);
     const { items } = await db.list("queue", { limit: 200 });
     const active = items.filter((q) => q.status !== "completed");
     const position = active.length + 1;
-    const ticketNumber = b2.ticketNumber || createTicketNumber((/* @__PURE__ */ new Date()).toISOString().slice(0, 10));
-    const [id] = await db.add("queue", [{ customerId: b2.customerId || null, appointmentId: b2.appointmentId || null, customerEmail: b2.customerEmail || "", customerName: b2.customerName, serviceName: b2.serviceName || "", staffId: b2.staffId || null, staffName: b2.staffName || null, status: "waiting", joinedAt: Date.now(), position, ticketNumber }]);
+    const ticketNumber = b3.ticketNumber || createTicketNumber((/* @__PURE__ */ new Date()).toISOString().slice(0, 10));
+    const [id] = await db.add("queue", [{ customerId: b3.customerId || null, appointmentId: b3.appointmentId || null, customerEmail: b3.customerEmail || "", customerName: b3.customerName, serviceName: b3.serviceName || "", staffId: b3.staffId || null, staffName: b3.staffName || null, status: "waiting", joinedAt: Date.now(), position, ticketNumber }]);
     if (!id) return error("Failed to join queue", 500);
-    await notifyCustomer(b2.customerEmail, `Queue ticket ${ticketNumber}`, `You are now in the SafiGroom queue. Your ticket is ${ticketNumber}.`, id);
-    await audit("created", "queue", { id, customerName: b2.customerName, serviceName: b2.serviceName || "", staffName: b2.staffName || null, ticketNumber }, b2.actor || "receptionist");
+    await notifyCustomer(b3.customerEmail, `Queue ticket ${ticketNumber}`, `You are now in the SafiGroom queue. Your ticket is ${ticketNumber}.`, id);
+    await audit("created", "queue", { id, customerName: b3.customerName, serviceName: b3.serviceName || "", staffName: b3.staffName || null, ticketNumber }, b3.actor || "receptionist");
     return json({ id, position, ticketNumber });
   }],
   "PUT /api/queue/:id": [async ({ params, body }) => {
@@ -30504,14 +30672,14 @@ New temporary password: ${newPassword}`, account.id);
   }],
   "GET /api/products": [async () => {
     const { items } = await db.list("products", { limit: 500 });
-    return json({ items });
+    return json({ items: items.filter((product) => !product.archivedAt) });
   }],
   "POST /api/products": [async ({ body }) => {
-    const b2 = body;
-    if (!b2.name) return error("Product name is required", 400);
-    const [id] = await db.add("products", [{ name: b2.name, category: b2.category || "Other", color: b2.color || "", price: b2.price || 0, cost: b2.cost || 0, stock: b2.stock || 0, lowStockThreshold: b2.lowStockThreshold ?? 5, unit: b2.unit || "pcs" }]);
+    const b3 = body;
+    if (!b3.name) return error("Product name is required", 400);
+    const [id] = await db.add("products", [{ name: b3.name, category: b3.category || "Other", color: b3.color || "", price: b3.price || 0, cost: b3.cost || 0, stock: b3.stock || 0, lowStockThreshold: b3.lowStockThreshold ?? 5, unit: b3.unit || "pcs", archivedAt: null }]);
     if (!id) return error("Failed to add product", 500);
-    await audit("created", "product", { id, name: b2.name, stock: b2.stock || 0, unit: b2.unit || "pcs" }, b2.actor || "owner");
+    await audit("created", "product", { id, name: b3.name, stock: b3.stock || 0, unit: b3.unit || "pcs" }, b3.actor || "owner");
     return json({ id });
   }],
   "PUT /api/products/:id": [async ({ params, body }) => {
@@ -30528,20 +30696,58 @@ New temporary password: ${newPassword}`, account.id);
     await audit("updated", "product", { ...updated, productName: existing.name }, patch.actor || "owner");
     return json({ ok: true });
   }],
+  "DELETE /api/products/:id": [async ({ params, body }) => {
+    requireOwner();
+    const [existing] = await db.get("products", [params.id]);
+    if (!existing || existing.archivedAt) return error("Product not found", 404);
+    const archived = { ...existing, archivedAt: Date.now() };
+    const [ok] = await db.update("products", [{ id: params.id, record: archived }]);
+    if (!ok) return error("Archive failed", 500);
+    await audit("archived", "product", { id: params.id, productName: existing.name, name: existing.name }, body?.actor || currentContext()?.name || "owner");
+    return json({ ok: true });
+  }],
   "GET /api/orders": [async () => {
     const { items } = await db.list("orders", { limit: 1e3 });
     return json({ items });
   }],
+  "PUT /api/orders/:id/completion": [async ({ params, body }) => {
+    requireOwner();
+    const [existing] = await db.get("orders", [params.id]);
+    if (!existing) return error("Completed work record not found", 404);
+    const adjustments = Array.isArray(body?.items) ? body.items : [];
+    if (!adjustments.length) return error("Provide at least one completed service adjustment", 400);
+    const updatedItems = Array.isArray(existing.items) ? [...existing.items] : [];
+    const context = currentContext();
+    for (const adjustment of adjustments) {
+      const index = Number(adjustment?.index);
+      const item = updatedItems[index];
+      if (!Number.isInteger(index) || !item || item.type !== "service") return error("A completed service adjustment is invalid", 400);
+      const [staffMember] = await db.get("staff", [String(adjustment.staffId || "")]);
+      if (!staffMember) return error("Assigned staff member was not found", 404);
+      if (context?.branchId && staffMember.branchId && staffMember.branchId !== context.branchId) return error("Assigned staff must belong to the active branch", 400);
+      const rate = Number(adjustment.commissionPct);
+      const commissionPct2 = Number.isFinite(rate) && rate >= 0 && rate <= 100 ? rate : Number(item.commissionPct || item.commissionRate || 50);
+      const commissionBase = Math.max(0, Number(item.commissionBase || 0));
+      const enteredCommission = Number(adjustment.commission);
+      const commission = Number.isFinite(enteredCommission) && enteredCommission >= 0 ? enteredCommission : commissionBase * (commissionPct2 / 100);
+      updatedItems[index] = { ...item, staffId: staffMember.id, staffName: staffMember.name, commissionPct: commissionPct2, commissionRate: commissionPct2, commission };
+    }
+    const updated = { ...existing, items: updatedItems };
+    const [ok] = await db.update("orders", [{ id: params.id, record: updated }]);
+    if (!ok) return error("Completed work update failed", 500);
+    await audit("updated completion", "order", updated, body?.actor || context?.name || "owner");
+    return json({ item: updated });
+  }],
   "POST /api/orders": [async ({ body }) => {
-    const b2 = body;
-    const items = b2.items;
+    const b3 = body;
+    const items = b3.items;
     if (!items || !Array.isArray(items) || items.length === 0) return error("Cart is empty", 400);
-    let effectiveDiscountPct = b2.discountPct || 0;
+    let effectiveDiscountPct = b3.discountPct || 0;
     let discountSource = effectiveDiscountPct > 0 ? "manual" : "none";
     let promoUsed = null;
-    if (b2.promoCode) {
+    if (b3.promoCode) {
       const { items: promos } = await db.list("promotions", { limit: 200 });
-      const code = String(b2.promoCode).toUpperCase();
+      const code = String(b3.promoCode).toUpperCase();
       const today = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
       const match = promos.find((p2) => p2.code === code && p2.active && p2.approved && (!p2.startDate || p2.startDate <= today) && (!p2.endDate || p2.endDate >= today));
       if (!match) return error("That promo code is not valid or has expired", 400);
@@ -30551,8 +30757,8 @@ New temporary password: ${newPassword}`, account.id);
       }
       promoUsed = match;
     }
-    if (b2.customerId) {
-      const [custForMembership] = await db.get("customers", [b2.customerId]);
+    if (b3.customerId) {
+      const [custForMembership] = await db.get("customers", [b3.customerId]);
       if (custForMembership && custForMembership.membershipTier && custForMembership.membershipTier !== "none" && (!custForMembership.membershipExpiry || custForMembership.membershipExpiry >= Date.now())) {
         const { items: plans } = await db.list("membership_plans", { limit: 50 });
         const plan = plans.find((p2) => p2.name === custForMembership.membershipTier);
@@ -30563,7 +30769,7 @@ New temporary password: ${newPassword}`, account.id);
       }
     }
     const discountPct = effectiveDiscountPct;
-    const paymentMethod = b2.paymentMethod === "Card" || b2.paymentMethod === "M-Pesa" ? b2.paymentMethod : "Cash";
+    const paymentMethod = b3.paymentMethod === "Card" || b3.paymentMethod === "M-Pesa" ? b3.paymentMethod : "Cash";
     const orderItems = items.map((it2) => ({
       ...it2,
       type: it2.type || "service",
@@ -30572,17 +30778,62 @@ New temporary password: ${newPassword}`, account.id);
       currency: it2.currency || "KES",
       lineTotalAfterDiscount: Math.round(Number(it2.price || 0) * Number(it2.qty || 0) * (1 - discountPct / 100))
     }));
+    for (const item of orderItems) {
+      if (item.type !== "product") continue;
+      item.staffId = null;
+      item.staffName = null;
+      item.coStaffId = null;
+      item.coStaffName = null;
+      item.helperStaffId = null;
+      item.helperStaffName = null;
+      item.assistantPayment = 0;
+      item.helperDeduction = 0;
+      item.commissionPct = 0;
+      item.commissionRate = 0;
+      item.commissionBase = 0;
+      item.commission = 0;
+      item.consumedProducts = [];
+    }
     const context = currentContext();
-    if (context?.role === "barber" && orderItems.some((item) => item.type === "service" && item.staffId !== context.staffId)) {
-      return error("You can only record services assigned to you", 403);
+    const serviceItems = orderItems.filter((it2) => it2.type === "service");
+    for (const item of serviceItems) {
+      item.staffCount = serviceStaffCount(item.staffCount);
+      if (item.staffCount === 1) {
+        item.coStaffId = null;
+        item.coStaffName = null;
+      } else if (!item.coStaffId) {
+        return error("Assign co-staff to services configured for two staff", 400);
+      }
+    }
+    const serviceStaffIds = Array.from(new Set(serviceItems.map((item) => String(item.staffId || "")).filter(Boolean)));
+    if (serviceItems.some((item) => !item.staffId)) return error("Each service must be assigned to a staff member", 400);
+    if (context?.role === "barber" && !serviceItems.some((item) => item.staffId === context.staffId)) {
+      return error("Include at least one service under your own account when recording this sale", 403);
+    }
+    if (serviceStaffIds.length) {
+      const serviceStaff = await db.get("staff", serviceStaffIds);
+      for (let i = 0; i < serviceStaff.length; i++) {
+        const member = serviceStaff[i];
+        const id = serviceStaffIds[i];
+        if (!member) return error("One or more assigned staff records could not be found", 404);
+        if (context?.branchId && member.branchId && member.branchId !== context.branchId) return error("Assigned service staff must belong to the active branch", 400);
+        if (member.employmentStatus === "laid-off") return error(`Assigned staff ${member.name} is not active`, 409);
+        for (const item of serviceItems) {
+          if (item.staffId === id) item.staffName = member.name;
+        }
+      }
     }
     if (context?.role === "barber") {
       const today = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
       const { items: appointments } = await db.list("appointments", { limit: 2e3 });
-      const servingAppointment = appointments.find((item) => item.id === b2.appointmentId);
-      const servingClient = appointments.some((item) => item.date === today && item.staffId === context.staffId && item.customerId === b2.customerId && ["checked-in", "in-service"].includes(item.status));
-      if (!b2.customerId || !servingClient && !(servingAppointment?.staffId === context.staffId && ["checked-in", "in-service"].includes(servingAppointment.status))) {
-        return error("Choose a client you have checked in before recording the service", 403);
+      const servingAppointment = appointments.find((item) => item.id === b3.appointmentId);
+      const activeStatuses = ["pending", "confirmed", "checked-in", "in-service"];
+      const servingClient = Boolean(b3.customerId) && appointments.some((item) => item.date === today && item.staffId === context.staffId && item.customerId === b3.customerId && activeStatuses.includes(item.status));
+      const servingAssignedAppointment = Boolean(servingAppointment?.staffId === context.staffId && activeStatuses.includes(servingAppointment.status));
+      const { items: queue } = await db.list("queue", { limit: 2e3 });
+      const queueHandoff = queue.some((item) => item.staffId === context.staffId && ["waiting", "in-service"].includes(item.status) && (b3.appointmentId && item.appointmentId === b3.appointmentId || b3.customerId && item.customerId === b3.customerId));
+      if (!servingClient && !servingAssignedAppointment && !queueHandoff) {
+        return error("Choose a client currently assigned to you before recording the service", 403);
       }
     }
     const subtotalByCurrency = {};
@@ -30598,116 +30849,194 @@ New temporary password: ${newPassword}`, account.id);
       totalByCurrency[cur] = subtotalByCurrency[cur] - d2;
     }
     let pointsRedeemed = 0;
-    if (b2.redeemPoints && b2.customerId) {
-      const [custForPoints] = await db.get("customers", [b2.customerId]);
+    if (b3.redeemPoints && b3.customerId) {
+      const [custForPoints] = await db.get("customers", [b3.customerId]);
       if (custForPoints) {
         const available = custForPoints.loyaltyPoints || 0;
-        pointsRedeemed = Math.max(0, Math.min(Number(b2.redeemPoints) || 0, available, totalByCurrency.KES || 0));
+        pointsRedeemed = Math.max(0, Math.min(Number(b3.redeemPoints) || 0, available, totalByCurrency.KES || 0));
         if (pointsRedeemed > 0) totalByCurrency.KES = (totalByCurrency.KES || 0) - pointsRedeemed;
       }
     }
-    const productItems = orderItems.filter((it2) => it2.type === "product");
-    if (productItems.length) {
-      const quantities = /* @__PURE__ */ new Map();
-      for (const item of productItems) quantities.set(item.refId, (quantities.get(item.refId) || 0) + Number(item.qty || 0));
-      const ids = Array.from(quantities.keys());
-      const products = await db.get("products", ids);
-      const updates = [];
-      for (let i = 0; i < products.length; i++) {
-        const p2 = products[i];
-        const quantity = quantities.get(ids[i]) || 0;
-        if (!p2) return error("One or more products could not be found", 404);
-        if (Number(p2.stock || 0) < quantity) return error(`${p2.name} has only ${p2.stock} ${p2.unit} in stock`, 409);
-        updates.push({ id: ids[i], record: { ...p2, stock: Number(p2.stock || 0) - quantity } });
-        for (const item of productItems) if (item.refId === ids[i]) item.cost = Number(p2.cost || 0);
-      }
-      if (updates.length) await db.update("products", updates);
-      await db.add("stock_movements", productItems.map((item) => ({ productId: item.refId, productName: item.name, change: -Number(item.qty || 0), reason: "POS sale", orderCustomerName: b2.customerName || "Walk-in Customer", createdAt: Date.now(), actor: b2.actor || "receptionist" })));
-    }
-    const serviceItems = orderItems.filter((it2) => it2.type === "service");
     for (const item of serviceItems) {
+      const coStaffId = item.staffCount === 2 ? String(item.coStaffId || "") : "";
       const helperId = String(item.helperStaffId || "");
+      if (coStaffId) {
+        const [coStaff] = await db.get("staff", [coStaffId]);
+        if (!coStaff || coStaff.branchId !== context?.branchId) return error("Co-staff must be an employee from the active branch", 400);
+        if (coStaff.id === item.staffId) return error("Co-staff must be different from the primary staff member", 400);
+        item.coStaffName = coStaff.name;
+      }
       if (helperId) {
         const [helper] = await db.get("staff", [helperId]);
         if (!helper || helper.branchId !== context?.branchId) return error("Helper must be an employee from the active branch", 400);
+        if (helper.id === item.staffId || helper.id === coStaffId) return error("Assistant must be different from the service staff", 400);
         item.helperStaffName = helper.name;
       }
+      const consumedProducts = Array.isArray(item.consumedProducts) ? item.consumedProducts : [];
+      item.consumedProducts = consumedProducts.map((entry) => ({
+        productId: String(entry?.productId || entry?.refId || ""),
+        name: String(entry?.name || ""),
+        qty: Math.max(0, Number(entry?.qty || 0)),
+        cost: Math.max(0, Number(entry?.cost || 0)),
+        unit: String(entry?.unit || "")
+      })).filter((entry) => entry.productId && entry.qty > 0);
       item.assistantPayment = helperId ? assistantPayment(Number(item.lineTotalAfterDiscount || 0)) : 0;
       item.helperDeduction = item.assistantPayment;
     }
-    const helperDeductions = serviceItems.reduce((sum, item) => sum + Number(item.assistantPayment || 0), 0);
-    const productCostTotal = productItems.reduce((sum, item) => sum + Math.max(0, Number(item.cost || 0)) * Number(item.qty || 0), 0);
-    const serviceRevenueTotal = serviceItems.reduce((sum, item) => sum + Math.max(0, Number(item.lineTotalAfterDiscount || 0)), 0);
-    for (const item of serviceItems) {
-      const productShare = serviceRevenueTotal > 0 ? productCostTotal * (Number(item.lineTotalAfterDiscount || 0) / serviceRevenueTotal) : 0;
-      item.productCost = Math.round(productShare);
-      item.commissionBase = Math.max(0, Number(item.lineTotalAfterDiscount || 0) - Number(item.helperDeduction || 0));
-      item.commissionRate = 50;
-      item.commission = item.commissionBase * 0.5;
+    const productItems = orderItems.filter((it2) => it2.type === "product");
+    const productQuantities = /* @__PURE__ */ new Map();
+    for (const item of productItems) {
+      productQuantities.set(item.refId, (productQuantities.get(item.refId) || 0) + Number(item.qty || 0));
     }
-    let customerName = b2.customerName || "Walk-in Customer";
-    if (b2.customerId) {
-      const [cust] = await db.get("customers", [b2.customerId]);
+    for (const item of serviceItems) {
+      for (const used of item.consumedProducts || []) {
+        productQuantities.set(used.productId, (productQuantities.get(used.productId) || 0) + Number(used.qty || 0));
+      }
+    }
+    const productIds = Array.from(productQuantities.keys());
+    if (productIds.length) {
+      const products = await db.get("products", productIds);
+      const updates = [];
+      const byId = /* @__PURE__ */ new Map();
+      for (let i = 0; i < products.length; i++) {
+        const p2 = products[i];
+        const id = productIds[i];
+        const quantity = productQuantities.get(id) || 0;
+        if (!p2) return error("One or more products could not be found", 404);
+        if (Number(p2.stock || 0) < quantity) return error(`${p2.name} has only ${p2.stock} ${p2.unit} in stock`, 409);
+        byId.set(id, p2);
+        updates.push({ id, record: { ...p2, stock: Number(p2.stock || 0) - quantity } });
+      }
+      for (const item of productItems) {
+        const product = byId.get(item.refId);
+        if (product) item.cost = Number(product.cost || 0);
+      }
+      for (const item of serviceItems) {
+        item.consumedProducts = (item.consumedProducts || []).map((used) => {
+          const product = byId.get(used.productId);
+          return {
+            ...used,
+            name: product?.name || used.name,
+            cost: Number(product?.cost || used.cost || 0),
+            unit: product?.unit || used.unit || ""
+          };
+        });
+      }
+      if (updates.length) await db.update("products", updates);
+      const productMoves = productItems.map((item) => ({
+        productId: item.refId,
+        productName: item.name,
+        change: -Number(item.qty || 0),
+        reason: "POS sale",
+        orderCustomerName: b3.customerName || "Walk-in Customer",
+        createdAt: Date.now(),
+        actor: b3.actor || "receptionist"
+      }));
+      const usedMoves = serviceItems.flatMap((item) => (item.consumedProducts || []).map((used) => ({
+        productId: used.productId,
+        productName: used.name,
+        change: -Number(used.qty || 0),
+        reason: `Service usage: ${item.name}`,
+        orderCustomerName: b3.customerName || "Walk-in Customer",
+        createdAt: Date.now(),
+        actor: b3.actor || item.staffName || "staff"
+      })));
+      const movementEntries = [...productMoves, ...usedMoves].filter((move) => Number(move.change) !== 0);
+      if (movementEntries.length) await db.add("stock_movements", movementEntries);
+    }
+    const helperDeductions = serviceItems.reduce((sum, item) => sum + Number(item.assistantPayment || 0), 0);
+    const productSalesCostTotal = productItems.reduce((sum, item) => sum + Math.max(0, Number(item.cost || 0)) * Number(item.qty || 0), 0);
+    const serviceProductCostTotal = serviceItems.reduce((sum, item) => sum + (item.consumedProducts || []).reduce((inner, used) => inner + Math.max(0, Number(used.cost || 0)) * Math.max(0, Number(used.qty || 0)), 0), 0);
+    const productCostTotal = productSalesCostTotal + serviceProductCostTotal;
+    const serviceRevenueTotal = serviceItems.reduce((sum, item) => sum + Math.max(0, Number(item.lineTotalAfterDiscount || 0)), 0);
+    let remainingTip = tipAmount;
+    for (let i = 0; i < serviceItems.length; i++) {
+      const item = serviceItems[i];
+      const isLast = i === serviceItems.length - 1;
+      const share = serviceRevenueTotal > 0 && !isLast ? Math.round(Number(item.lineTotalAfterDiscount || 0) / serviceRevenueTotal * tipAmount) : remainingTip;
+      item.tipShare = Math.max(0, share);
+      remainingTip = Math.max(0, remainingTip - item.tipShare);
+    }
+    for (const item of serviceItems) {
+      item.productCost = (item.consumedProducts || []).reduce((sum, used) => sum + Math.max(0, Number(used.cost || 0)) * Math.max(0, Number(used.qty || 0)), 0);
+      item.commissionBase = Math.max(0, Number(item.lineTotalAfterDiscount || 0) - Number(item.productCost || 0));
+      item.commissionBase = Math.max(0, item.commissionBase - Number(item.helperDeduction || 0));
+      item.commissionRate = commissionPct(item.commissionPct, item.staffCount);
+      item.commissionPct = item.commissionRate;
+      item.commission = item.commissionBase * (item.commissionRate / 100);
+      item.commissionParticipants = item.staffCount;
+      item.commissionSplit = item.staffCount === 2 ? "two-staff" : "one-staff";
+    }
+    let customerName = b3.customerName || "Walk-in Customer";
+    if (b3.customerId) {
+      const [cust] = await db.get("customers", [b3.customerId]);
       if (cust) {
         customerName = cust.name;
         const kesTotal = totalByCurrency.KES || 0;
         const usdTotal = totalByCurrency.USD || 0;
         const points = Math.floor(kesTotal / 100);
-        await db.update("customers", [{ id: b2.customerId, record: { ...cust, totalSpent: (cust.totalSpent || 0) + kesTotal, totalSpentUSD: (cust.totalSpentUSD || 0) + usdTotal, visits: (cust.visits || 0) + 1, loyaltyPoints: (cust.loyaltyPoints || 0) + points - pointsRedeemed, lastVisit: Date.now() } }]);
+        await db.update("customers", [{ id: b3.customerId, record: { ...cust, totalSpent: (cust.totalSpent || 0) + kesTotal, totalSpentUSD: (cust.totalSpentUSD || 0) + usdTotal, visits: (cust.visits || 0) + 1, loyaltyPoints: (cust.loyaltyPoints || 0) + points - pointsRedeemed, lastVisit: Date.now() } }]);
       }
     }
-    const [orderId] = await db.add("orders", [{ customerId: b2.customerId || null, customerName, items: orderItems, helperDeductions, productCostTotal, commissionRate: 50, branchId: context?.branchId || null, branchName: context?.branchId || null, discountPct, discountSource, promoCode: promoUsed ? promoUsed.code : null, pointsRedeemed, mpesaReceiptNumber: b2.mpesaReceiptNumber || null, subtotalByCurrency, discountByCurrency, totalByCurrency, paymentMethod, createdAt: Date.now() }]);
+    const [orderId] = await db.add("orders", [{ customerId: b3.customerId || null, customerName, appointmentId: b3.appointmentId || null, items: orderItems, helperDeductions, productCostTotal, tipAmount, commissionRate: 50, branchId: context?.branchId || null, branchName: context?.branchId || null, discountPct, discountSource, promoCode: promoUsed ? promoUsed.code : null, pointsRedeemed, mpesaReceiptNumber: b3.mpesaReceiptNumber || null, subtotalByCurrency, discountByCurrency, totalByCurrency, paymentMethod, createdAt: Date.now() }]);
     if (!orderId) return error("Failed to create order", 500);
-    await audit("created", "order", { id: orderId, customerName, items: orderItems.map((item) => ({ ...item, productName: item.type === "product" ? item.name : void 0, serviceName: item.type === "service" ? item.name : void 0 })), totalByCurrency, paymentMethod }, b2.actor || "receptionist");
-    if (b2.appointmentId) {
-      const [appt] = await db.get("appointments", [b2.appointmentId]);
+    await audit("created", "order", { id: orderId, customerName, items: orderItems.map((item) => ({ ...item, productName: item.type === "product" ? item.name : void 0, serviceName: item.type === "service" ? item.name : void 0 })), totalByCurrency, paymentMethod }, b3.actor || "receptionist");
+    if (b3.appointmentId) {
+      const [appt] = await db.get("appointments", [b3.appointmentId]);
       if (context?.role === "barber" && appt?.staffId !== context.staffId) return error("You can only complete clients assigned to you", 403);
-      if (appt) await db.update("appointments", [{ id: b2.appointmentId, record: { ...appt, status: "completed" } }]);
+      if (appt) await db.update("appointments", [{ id: b3.appointmentId, record: { ...appt, status: "completed" } }]);
     }
-    return json({ id: orderId, subtotalByCurrency, discountByCurrency, totalByCurrency, discountSource, pointsRedeemed });
+    return json({ id: orderId, subtotalByCurrency, discountByCurrency, totalByCurrency, tipAmount, discountSource, pointsRedeemed });
   }],
   "GET /api/expenses": [async () => {
     const { items } = await db.list("expenses", { limit: 500 });
     return json({ items });
   }],
   "POST /api/expenses": [async ({ body }) => {
-    const b2 = body;
-    if (!b2.category || !b2.amount) return error("Category and amount are required", 400);
-    const [id] = await db.add("expenses", [{ category: b2.category, amount: b2.amount, note: b2.note || "", date: b2.date || (/* @__PURE__ */ new Date()).toISOString().slice(0, 10) }]);
+    const b3 = body;
+    if (!b3.category || !b3.amount) return error("Category and amount are required", 400);
+    const [id] = await db.add("expenses", [{ category: b3.category, amount: b3.amount, note: b3.note || "", date: b3.date || (/* @__PURE__ */ new Date()).toISOString().slice(0, 10) }]);
     if (!id) return error("Failed to record expense", 500);
-    await audit("created", "expense", { id, category: b2.category, amount: b2.amount, note: b2.note || "", date: b2.date || (/* @__PURE__ */ new Date()).toISOString().slice(0, 10) }, b2.actor || "receptionist");
+    await audit("created", "expense", { id, category: b3.category, amount: b3.amount, note: b3.note || "", date: b3.date || (/* @__PURE__ */ new Date()).toISOString().slice(0, 10) }, b3.actor || "receptionist");
     return json({ id });
   }],
   "GET /api/payouts": [async () => {
     if (!["owner", "admin"].includes(currentContext()?.role || "")) return error("Only the owner or administrator can view payouts", 403);
     const { items } = await db.list("payout_batches", { limit: 100 });
-    return json({ items: items.sort((a2, b2) => b2.createdAt - a2.createdAt) });
+    return json({ items: items.sort((a2, b3) => b3.createdAt - a2.createdAt) });
   }],
   "GET /api/payroll/staff": [async () => {
     const context = currentContext();
     if (!context || !["owner", "admin"].includes(context.role)) return error("Only the owner or administrator can view payroll staff", 403);
-    const { items } = context.role === "admin" ? await db.list("staff", { limit: 2e3 }) : await db.listAllTenant("staff", context.tenantId, { limit: 2e3 });
+    const { items } = await db.list("staff", { limit: 2e3 });
     const from = Date.now() - 14 * DAY;
-    const { items: orders } = context.role === "admin" ? await db.list("orders", { limit: 5e3 }) : await db.listAllTenant("orders", context.tenantId, { limit: 5e3 });
+    const { items: orders } = await db.list("orders", { limit: 5e3 });
     const totals = /* @__PURE__ */ new Map();
     for (const order of orders) {
       if (!order.createdAt || order.createdAt < from) continue;
       for (const item of order.items || []) {
         if (item.type !== "service") continue;
         const commission = Number(item.commission ?? Number(item.lineTotalAfterDiscount ?? item.price * item.qty) * 0.5) || 0;
+        const tipShare = Number(item.tipShare || 0) || 0;
         if (item.staffId) {
-          const total = totals.get(item.staffId) || { commission: 0, assistant: 0 };
+          const total = totals.get(item.staffId) || { commission: 0, assistant: 0, tips: 0 };
           total.commission += commission;
+          total.tips += tipShare;
           totals.set(item.staffId, total);
         }
+        if (item.coStaffId) {
+          const total = totals.get(item.coStaffId) || { commission: 0, assistant: 0, tips: 0 };
+          total.commission += commission;
+          totals.set(item.coStaffId, total);
+        }
         if (item.helperStaffId) {
-          const total = totals.get(item.helperStaffId) || { commission: 0, assistant: 0 };
+          const total = totals.get(item.helperStaffId) || { commission: 0, assistant: 0, tips: 0 };
           total.assistant += Number(item.assistantPayment ?? item.helperDeduction ?? 0);
           totals.set(item.helperStaffId, total);
         }
       }
     }
-    return json({ items: items.map((member) => ({ ...member, commissionEarned14Days: totals.get(member.id)?.commission || 0, assistantEarned14Days: totals.get(member.id)?.assistant || 0 })) });
+    return json({ items: items.map((member) => ({ ...member, commissionEarned14Days: totals.get(member.id)?.commission || 0, assistantEarned14Days: totals.get(member.id)?.assistant || 0, tipEarned14Days: totals.get(member.id)?.tips || 0 })) });
   }],
   "POST /api/payouts": [async ({ body }) => {
     const context = currentContext();
@@ -30724,9 +31053,9 @@ New temporary password: ${newPassword}`, account.id);
     if (range === "fortnight") from = now - 14 * DAY;
     if (range === "month") from = now - 30 * DAY;
     const [{ items: orders }, { items: staff }, { items: paidItems }] = await Promise.all([
-      context.role === "admin" ? db.list("orders", { limit: 5e3 }) : db.listAllTenant("orders", context.tenantId, { limit: 5e3 }),
-      context.role === "admin" ? db.list("staff", { limit: 2e3 }) : db.listAllTenant("staff", context.tenantId, { limit: 2e3 }),
-      context.role === "admin" ? db.list("payout_items", { limit: 1e4 }) : db.listAllTenant("payout_items", context.tenantId, { limit: 1e4 })
+      db.list("orders", { limit: 5e3 }),
+      db.list("staff", { limit: 2e3 }),
+      db.list("payout_items", { limit: 1e4 })
     ]);
     const staffById = new Map(staff.map((member) => [member.id, member]));
     const alreadyPaid = new Set(paidItems.map((item) => item.itemKey));
@@ -30738,11 +31067,16 @@ New temporary password: ${newPassword}`, account.id);
         const member = staffById.get(item.staffId);
         if (!member) return;
         const revenue = Number(item.lineTotalAfterDiscount ?? item.price * item.qty) || 0;
-        const commissionBase = Number(item.commissionBase ?? revenue * 0.5) || 0;
-        if (!alreadyPaid.has(`${order.id}:${index}`)) lines.push({ itemKey: `${order.id}:${index}`, orderId: order.id, staffId: item.staffId, staffName: item.staffName || member.name, revenue, commissionBase, helperDeduction: Number(item.helperDeduction || 0), productCost: Number(item.productCost || 0), commission: commissionBase * 0.5, currency: item.currency || "KES", branchId: order.branchId || context.branchId || null, createdAt: now });
+        const commissionBase = Number(item.commissionBase ?? revenue - Number(item.productCost || 0)) || 0;
+        const commission = Number(item.commission ?? commissionBase * (commissionPct(item.commissionPct, item.staffCount) / 100)) || 0;
+        if (!alreadyPaid.has(`${order.id}:${index}`)) lines.push({ itemKey: `${order.id}:${index}`, orderId: order.id, staffId: item.staffId, staffName: item.staffName || member.name, revenue, commissionBase, helperDeduction: Number(item.helperDeduction || 0), productCost: Number(item.productCost || 0), commission, currency: item.currency || "KES", branchId: order.branchId || context.branchId || null, createdAt: now });
+        if (item.coStaffId && !alreadyPaid.has(`${order.id}:${index}:co-staff`)) {
+          const coStaff = staffById.get(item.coStaffId);
+          if (coStaff) lines.push({ itemKey: `${order.id}:${index}:co-staff`, orderId: order.id, staffId: item.coStaffId, staffName: item.coStaffName || coStaff.name, revenue, commissionBase, helperDeduction: Number(item.helperDeduction || 0), productCost: Number(item.productCost || 0), commission, currency: item.currency || "KES", branchId: order.branchId || context.branchId || null, createdAt: now, role: "co-staff" });
+        }
         if (item.helperStaffId && !alreadyPaid.has(`${order.id}:${index}:assistant`)) {
           const assistant = staffById.get(item.helperStaffId);
-          if (assistant) lines.push({ itemKey: `${order.id}:${index}:assistant`, orderId: order.id, staffId: item.helperStaffId, staffName: item.helperStaffName || assistant.name, revenue: 0, commissionBase: 0, helperDeduction: 0, productCost: 0, commission: Number(item.assistantPayment ?? item.helperDeduction ?? assistantPayment(revenue)), currency: item.currency || "KES", branchId: order.branchId || context.branchId || null, createdAt: now, role: "assistant" });
+          if (assistant) lines.push({ itemKey: `${order.id}:${index}:assistant`, orderId: order.id, staffId: item.helperStaffId, staffName: item.helperStaffName || assistant.name, revenue: 0, commissionBase: 0, helperDeduction: 0, productCost: 0, commission: Number(item.assistantPayment ?? item.helperDeduction ?? 0), currency: item.currency || "KES", branchId: order.branchId || context.branchId || null, createdAt: now, role: "assistant" });
         }
       });
     }
@@ -30815,7 +31149,7 @@ New temporary password: ${newPassword}`, account.id);
       db.list("products", { limit: 500 }),
       db.list("appointments", { limit: 1e3 }),
       db.list("queue", { limit: 200 }),
-      currentContext()?.role === "admin" ? db.list("customers", { limit: 5e3 }) : db.listAllTenant("customers", currentContext()?.tenantId || "", { limit: 5e3 })
+      db.list("customers", { limit: 5e3 })
     ]);
     const orders = ordersResult.items;
     const expensesAll = expensesResult.items;
@@ -30911,8 +31245,8 @@ New temporary password: ${newPassword}`, account.id);
       customersCount: customersAll.length,
       customers: customersAll.slice(0, 10),
       commissionByClient,
-      topStaff: Array.from(staffRevenue.values()).sort((a2, b2) => b2.revenue - a2.revenue).slice(0, 8),
-      topServices: Array.from(serviceRevenue.values()).sort((a2, b2) => b2.revenue - a2.revenue).slice(0, 8),
+      topStaff: Array.from(staffRevenue.values()).sort((a2, b3) => b3.revenue - a2.revenue).slice(0, 8),
+      topServices: Array.from(serviceRevenue.values()).sort((a2, b3) => b3.revenue - a2.revenue).slice(0, 8),
       trend
     });
   }],
@@ -30932,7 +31266,7 @@ New temporary password: ${newPassword}`, account.id);
     }
     const results = [];
     for (const c of customers) {
-      const dates = (byCustomer.get(c.id) || []).sort((a2, b2) => a2 - b2);
+      const dates = (byCustomer.get(c.id) || []).sort((a2, b3) => a2 - b3);
       if (dates.length < 2) continue;
       let gaps = 0;
       for (let i = 1; i < dates.length; i++) gaps += dates[i] - dates[i - 1];
@@ -30944,7 +31278,7 @@ New temporary password: ${newPassword}`, account.id);
         results.push({ customerId: c.id, customerName: c.name, avgIntervalDays: Math.round(avgGap / DAY), predictedDate: new Date(predicted).toISOString().slice(0, 10), daysUntil, lastVisit: new Date(last).toISOString().slice(0, 10) });
       }
     }
-    results.sort((a2, b2) => a2.daysUntil - b2.daysUntil);
+    results.sort((a2, b3) => a2.daysUntil - b3.daysUntil);
     return json({ items: results });
   }],
   "POST /api/ai/ask": [async ({ body }) => {
@@ -30992,8 +31326,8 @@ New temporary password: ${newPassword}`, account.id);
         const m2 = it2.currency === "USD" ? usdMap : kesMap;
         m2.set(it2.staffName, (m2.get(it2.staffName) || 0) + it2.price * it2.qty);
       }
-      const kesSorted = Array.from(kesMap.entries()).sort((a2, b2) => b2[1] - a2[1]);
-      const usdSorted = Array.from(usdMap.entries()).sort((a2, b2) => b2[1] - a2[1]);
+      const kesSorted = Array.from(kesMap.entries()).sort((a2, b3) => b3[1] - a2[1]);
+      const usdSorted = Array.from(usdMap.entries()).sort((a2, b3) => b3[1] - a2[1]);
       if (kesSorted.length === 0 && usdSorted.length === 0) return json({ answer: "No completed sales with staff assigned yet, so I cannot determine a top performer.", grounded: true });
       const bits = [];
       if (kesSorted.length) bits.push(`${kesSorted[0][0]} leads KES sales with KES ${Math.round(kesSorted[0][1]).toLocaleString()}`);
@@ -31034,8 +31368,8 @@ New temporary password: ${newPassword}`, account.id);
           m2.set(it2.staffName, (m2.get(it2.staffName) || 0) + it2.price * it2.qty * (pct / 100));
         }
       }
-      const kesLines = Array.from(kesMap.entries()).sort((a2, b2) => b2[1] - a2[1]).map(([n, c]) => `${n}: KES ${Math.round(c).toLocaleString()}`).join("; ");
-      const usdLines = Array.from(usdMap.entries()).sort((a2, b2) => b2[1] - a2[1]).map(([n, c]) => `${n}: $${c.toFixed(2)}`).join("; ");
+      const kesLines = Array.from(kesMap.entries()).sort((a2, b3) => b3[1] - a2[1]).map(([n, c]) => `${n}: KES ${Math.round(c).toLocaleString()}`).join("; ");
+      const usdLines = Array.from(usdMap.entries()).sort((a2, b3) => b3[1] - a2[1]).map(([n, c]) => `${n}: $${c.toFixed(2)}`).join("; ");
       const parts = [kesLines, usdLines].filter(Boolean);
       return json({ answer: parts.length ? `Commission earned by staff (all recorded orders) \u2014 ${parts.join(" | ")}.` : "No commission-generating sales recorded yet.", grounded: true });
     }
@@ -31047,7 +31381,7 @@ New temporary password: ${newPassword}`, account.id);
   "GET /api/messages": [async ({ query }) => {
     const channel = query.channel || "team";
     const { items } = await db.list("messages", { limit: 500 });
-    const filtered = items.filter((m2) => m2.channel === channel).sort((a2, b2) => a2.createdAt - b2.createdAt);
+    const filtered = items.filter((m2) => m2.channel === channel).sort((a2, b3) => a2.createdAt - b3.createdAt);
     return json({ items: filtered });
   }],
   "POST /api/messages": [async () => {
@@ -31058,22 +31392,22 @@ New temporary password: ${newPassword}`, account.id);
     return json({ items });
   }],
   "POST /api/memberships": [async ({ body }) => {
-    const b2 = body;
-    if (!b2.name) return error("Plan name is required", 400);
-    const [id] = await db.add("membership_plans", [{ name: b2.name, discountPct: b2.discountPct || 0, priceKES: b2.priceKES || 0, durationDays: b2.durationDays || 30, benefits: b2.benefits || [] }]);
+    const b3 = body;
+    if (!b3.name) return error("Plan name is required", 400);
+    const [id] = await db.add("membership_plans", [{ name: b3.name, discountPct: b3.discountPct || 0, priceKES: b3.priceKES || 0, durationDays: b3.durationDays || 30, benefits: b3.benefits || [] }]);
     if (!id) return error("Failed to add membership plan", 500);
-    await audit("created", "membership_plan", { id, name: b2.name, discountPct: b2.discountPct || 0 }, b2.actor || "owner");
+    await audit("created", "membership_plan", { id, name: b3.name, discountPct: b3.discountPct || 0 }, b3.actor || "owner");
     return json({ id });
   }],
   "POST /api/memberships/purchase": [async ({ body }) => {
-    const b2 = body;
-    const [customer] = await db.get("customers", [b2.customerId]);
-    const [plan] = await db.get("membership_plans", [b2.planId]);
+    const b3 = body;
+    const [customer] = await db.get("customers", [b3.customerId]);
+    const [plan] = await db.get("membership_plans", [b3.planId]);
     if (!customer || !plan) return error("Customer or membership plan not found", 404);
-    if (!b2.mpesaReceiptNumber) return error("Membership payment must be completed first", 402);
+    if (!b3.mpesaReceiptNumber) return error("Membership payment must be completed first", 402);
     const now = Date.now();
     const expiry = now + Number(plan.durationDays || 30) * DAY;
-    const [purchaseId] = await db.add("membership_purchases", [{ customerId: customer.id, customerName: customer.name, planId: plan.id, planName: plan.name, amountKES: plan.priceKES, mpesaReceiptNumber: b2.mpesaReceiptNumber, purchasedAt: now, expiresAt: expiry }]);
+    const [purchaseId] = await db.add("membership_purchases", [{ customerId: customer.id, customerName: customer.name, planId: plan.id, planName: plan.name, amountKES: plan.priceKES, mpesaReceiptNumber: b3.mpesaReceiptNumber, purchasedAt: now, expiresAt: expiry }]);
     await db.update("customers", [{ id: customer.id, record: { ...customer, membershipTier: plan.name, membershipPlanId: plan.id, membershipExpiry: expiry } }]);
     await audit("purchased", "membership", { id: purchaseId, customerId: customer.id, customerName: customer.name, planName: plan.name, amountKES: plan.priceKES }, "customer");
     return json({ purchaseId, membershipTier: plan.name, membershipExpiry: expiry });
@@ -31083,12 +31417,12 @@ New temporary password: ${newPassword}`, account.id);
     return json({ items });
   }],
   "POST /api/promotions": [async ({ body }) => {
-    const b2 = body;
-    if (!b2.title || !b2.code) return error("Title and code are required", 400);
-    const requiresApproval = !!b2.requiresApproval;
-    const [id] = await db.add("promotions", [{ title: b2.title, description: b2.description || "", discountPct: b2.discountPct || 0, code: String(b2.code).toUpperCase(), startDate: b2.startDate || "", endDate: b2.endDate || "", requiresApproval, approved: !requiresApproval, active: true, createdBy: b2.createdBy || "owner", createdAt: Date.now() }]);
+    const b3 = body;
+    if (!b3.title || !b3.code) return error("Title and code are required", 400);
+    const requiresApproval = !!b3.requiresApproval;
+    const [id] = await db.add("promotions", [{ title: b3.title, description: b3.description || "", discountPct: b3.discountPct || 0, code: String(b3.code).toUpperCase(), startDate: b3.startDate || "", endDate: b3.endDate || "", requiresApproval, approved: !requiresApproval, active: true, createdBy: b3.createdBy || "owner", createdAt: Date.now() }]);
     if (!id) return error("Failed to create promotion", 500);
-    await audit("created", "promotion", { id, title: b2.title, code: String(b2.code).toUpperCase(), discountPct: b2.discountPct || 0 }, b2.createdBy || "owner");
+    await audit("created", "promotion", { id, title: b3.title, code: String(b3.code).toUpperCase(), discountPct: b3.discountPct || 0 }, b3.createdBy || "owner");
     return json({ id });
   }],
   "PUT /api/promotions/:id": [async ({ params, body }) => {
@@ -31125,28 +31459,28 @@ ${promotion.endDate ? `Offer ends: ${promotion.endDate}` : ""}`;
     return json({ items: staffId ? items.filter((r) => r.staffId === staffId) : items });
   }],
   "POST /api/reviews": [async ({ body }) => {
-    const b2 = body;
-    const rating = Number(b2.rating);
+    const b3 = body;
+    const rating = Number(b3.rating);
     if (!rating || rating < 1 || rating > 5) return error("Rating must be between 1 and 5", 400);
-    if (!b2.customerId || !b2.appointmentId) return error("A completed appointment is required for a review", 400);
-    const [appointment] = await db.get("appointments", [b2.appointmentId]);
-    if (!appointment || appointment.customerId !== b2.customerId || appointment.status !== "completed") return error("Reviews are available after a completed service", 409);
+    if (!b3.customerId || !b3.appointmentId) return error("A completed appointment is required for a review", 400);
+    const [appointment] = await db.get("appointments", [b3.appointmentId]);
+    if (!appointment || appointment.customerId !== b3.customerId || appointment.status !== "completed") return error("Reviews are available after a completed service", 409);
     const { items: existingReviews } = await db.list("reviews", { limit: 2e3 });
-    if (existingReviews.some((item) => item.appointmentId === b2.appointmentId && item.customerId === b2.customerId)) return error("This appointment already has a review", 409);
-    const [id] = await db.add("reviews", [{ appointmentId: b2.appointmentId || null, customerId: b2.customerId || null, customerName: b2.customerName || "Customer", staffId: b2.staffId || null, staffName: b2.staffName || "", serviceName: b2.serviceName || "", rating, comment: b2.comment || "", survey: b2.survey || {}, createdAt: Date.now() }]);
+    if (existingReviews.some((item) => item.appointmentId === b3.appointmentId && item.customerId === b3.customerId)) return error("This appointment already has a review", 409);
+    const [id] = await db.add("reviews", [{ appointmentId: b3.appointmentId || null, customerId: b3.customerId || null, customerName: b3.customerName || "Customer", staffId: b3.staffId || null, staffName: b3.staffName || "", serviceName: b3.serviceName || "", rating, comment: b3.comment || "", survey: b3.survey || {}, createdAt: Date.now() }]);
     if (!id) return error("Failed to submit review", 500);
-    await audit("created", "review", { id, customerName: b2.customerName || "Customer", staffName: b2.staffName || "", serviceName: b2.serviceName || "", rating }, b2.actor || "customer");
+    await audit("created", "review", { id, customerName: b3.customerName || "Customer", staffName: b3.staffName || "", serviceName: b3.serviceName || "", rating }, b3.actor || "customer");
     return json({ id });
   }],
   "POST /api/mpesa/stkpush": [async ({ body }) => {
-    const b2 = body;
-    const phone = String(b2.phone || "").replace(/\s+/g, "");
+    const b3 = body;
+    const phone = String(b3.phone || "").replace(/\s+/g, "");
     if (!/^(?:\+254|0)(7\d{8}|1\d{8})$/.test(phone)) return error("Enter a valid Kenyan M-Pesa phone number", 400);
-    const amountKES = Number(b2.amountKES);
+    const amountKES = Number(b3.amountKES);
     if (!amountKES || amountKES <= 0) return error("A valid amount is required", 400);
-    const [id] = await db.add("mpesa_transactions", [{ phone, amountKES, purpose: b2.purpose || "payment", referenceId: b2.referenceId || null, status: "pending", mpesaReceiptNumber: null, createdAt: Date.now(), completedAt: null }]);
+    const [id] = await db.add("mpesa_transactions", [{ phone, amountKES, purpose: b3.purpose || "payment", referenceId: b3.referenceId || null, status: "pending", mpesaReceiptNumber: null, createdAt: Date.now(), completedAt: null }]);
     if (!id) return error("Failed to initiate STK push", 500);
-    await audit("created", "mpesa_transaction", { id, phone, amountKES, purpose: b2.purpose || "payment", referenceId: b2.referenceId || null }, b2.actor || "receptionist");
+    await audit("created", "mpesa_transaction", { id, phone, amountKES, purpose: b3.purpose || "payment", referenceId: b3.referenceId || null }, b3.actor || "receptionist");
     const consumerKey = process.env.MPESA_CONSUMER_KEY;
     const consumerSecret = process.env.MPESA_CONSUMER_SECRET;
     const shortcode = process.env.MPESA_SHORTCODE;
@@ -31163,7 +31497,7 @@ ${promotion.endDate ? `Offer ends: ${promotion.endDate}` : ""}`;
       const pushResponse = await fetch(`${baseUrl}/mpesa/stkpush/v1/processrequest`, {
         method: "POST",
         headers: { Authorization: `Bearer ${tokenBody.access_token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ BusinessShortCode: shortcode, Password: password, Timestamp: timestamp, TransactionType: "CustomerPayBillOnline", Amount: Math.round(amountKES), PartyA: phone.replace(/^0/, "254").replace(/^\+/, ""), PartyB: shortcode, PhoneNumber: phone.replace(/^0/, "254").replace(/^\+/, ""), CallBackURL: callbackUrl, AccountReference: `SG-${id.slice(0, 8)}`, TransactionDesc: b2.purpose || "SafiGroom payment" })
+        body: JSON.stringify({ BusinessShortCode: shortcode, Password: password, Timestamp: timestamp, TransactionType: "CustomerPayBillOnline", Amount: Math.round(amountKES), PartyA: phone.replace(/^0/, "254").replace(/^\+/, ""), PartyB: shortcode, PhoneNumber: phone.replace(/^0/, "254").replace(/^\+/, ""), CallBackURL: callbackUrl, AccountReference: `SG-${id.slice(0, 8)}`, TransactionDesc: b3.purpose || "SafiGroom payment" })
       });
       const pushBody = await pushResponse.json();
       if (!pushResponse.ok || !pushBody.CheckoutRequestID) throw new Error(pushBody.errorMessage || pushBody.ResponseDescription || "Safaricom rejected the STK push");
