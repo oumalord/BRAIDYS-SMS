@@ -29791,10 +29791,15 @@ function apptSlots(appt) {
   const end = start + (appt.durationMin || 30);
   return [{ staffId: appt.staffId, start, end }];
 }
-function assistantPayment(amount) {
-  if (amount <= 1800) return 200;
-  if (amount <= 2400) return 300;
-  return 400;
+function serviceCommission(item) {
+  const recorded = Number(item.commission);
+  if (Number.isFinite(recorded)) return Math.max(0, recorded);
+  const revenue = Number(item.lineTotalAfterDiscount ?? Number(item.price || 0) * Number(item.qty || 1)) || 0;
+  const productCost = Math.max(0, Number(item.productCost || 0));
+  const assistantCompensation = Math.max(0, Number(item.assistantPayment ?? item.helperDeduction ?? 0));
+  const commissionBase = Math.max(0, Number(item.commissionBase ?? revenue - productCost - assistantCompensation) || 0);
+  const rate = Number(item.commissionPct ?? item.commissionRate ?? 50);
+  return commissionBase * (Number.isFinite(rate) ? rate / 100 : 0.5);
 }
 function createTicketNumber(date) {
   const datePart = date.replace(/[^0-9]/g, "").slice(-4);
@@ -30191,7 +30196,7 @@ New temporary password: ${newPassword}`, account.id);
       if (!order.createdAt) continue;
       for (const item of order.items || []) {
         if (item.type !== "service") continue;
-        const commission = Number(item.commission ?? Number(item.lineTotalAfterDiscount ?? item.price * item.qty) * 0.5) || 0;
+        const commission = serviceCommission(item);
         const assistant = Number(item.assistantPayment ?? item.helperDeduction ?? 0) || 0;
         if (sameStaffIdentity(item.staffId, item.staffName, context)) {
           if (order.createdAt >= todayFrom) todayCommission += commission;
@@ -31041,7 +31046,7 @@ New temporary password: ${newPassword}`, account.id);
       if (!order.createdAt || order.createdAt < from) continue;
       for (const item of order.items || []) {
         if (item.type !== "service") continue;
-        const commission = Number(item.commission ?? Number(item.lineTotalAfterDiscount ?? item.price * item.qty) * 0.5) || 0;
+        const commission = serviceCommission(item);
         if (item.staffId) {
           const total = totals.get(item.staffId) || { commission: 0, assistant: 0 };
           total.commission += commission;
@@ -31090,8 +31095,8 @@ New temporary password: ${newPassword}`, account.id);
         const member = staffById.get(item.staffId);
         if (!member) return;
         const revenue = Number(item.lineTotalAfterDiscount ?? item.price * item.qty) || 0;
-        const commissionBase = Number(item.commissionBase ?? revenue - Number(item.productCost || 0)) || 0;
-        const commission = Number(item.commission ?? commissionBase * (commissionPct(item.commissionPct, item.staffCount) / 100)) || 0;
+        const commissionBase = Math.max(0, Number(item.commissionBase ?? revenue - Number(item.productCost || 0) - Number(item.assistantPayment ?? item.helperDeduction ?? 0)) || 0);
+        const commission = serviceCommission(item);
         if (!alreadyPaid.has(`${order.id}:${index}`)) lines.push({ itemKey: `${order.id}:${index}`, orderId: order.id, staffId: item.staffId, staffName: item.staffName || member.name, revenue, commissionBase, helperDeduction: Number(item.helperDeduction || 0), productCost: Number(item.productCost || 0), commission, currency: item.currency || "KES", branchId: order.branchId || context.branchId || null, createdAt: now });
         if (item.coStaffId && !alreadyPaid.has(`${order.id}:${index}:co-staff`)) {
           const coStaff = staffById.get(item.coStaffId);
@@ -31205,10 +31210,9 @@ New temporary password: ${newPassword}`, account.id);
           if (p2) productCost += (p2.cost || 0) * it2.qty;
         } else if (it2.type === "service") {
           const staff = it2.staffId ? staffById.get(it2.staffId) : null;
-          const pct = staff ? 50 : 0;
           const serviceRevenueAfterDiscount = it2.lineTotalAfterDiscount ?? it2.price * it2.qty;
-          const comm = Number(it2.commission ?? serviceRevenueAfterDiscount * (pct / 100));
-          const assistantAmount = Number(it2.assistantPayment ?? (it2.helperStaffId ? assistantPayment(serviceRevenueAfterDiscount) : 0));
+          const comm = serviceCommission(it2);
+          const assistantAmount = Number(it2.assistantPayment ?? it2.helperDeduction ?? 0);
           commissionsByCurrency[cur] = (commissionsByCurrency[cur] || 0) + comm;
           if (it2.staffId) {
             const key = `${it2.staffId}|${cur}`;
