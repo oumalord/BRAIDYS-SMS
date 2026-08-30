@@ -19,13 +19,15 @@ interface CompletionLine {
   index: number;
   name: string;
   staffId: string;
+  coStaffId: string;
   serviceFee: number;
   hasSpecialBraid: boolean;
   helperStaffId: string;
   assistantPayment: number;
   commissionBase: number;
   commissionPct: number;
-  commission: number;
+  primaryCommission: number;
+  coStaffCommission: number;
 }
 
 function assistantCompensation(serviceFee: number, hasSpecialBraid = false): number {
@@ -191,7 +193,7 @@ function Appointments({ role }: { role: Role }) {
       const lines = (Array.isArray(order.items) ? order.items : [])
         .map((item: any, index: number) => ({ item, index }))
         .filter(({ item }: { item: any }) => item.type === 'service')
-        .map(({ item, index }: { item: any; index: number }) => { const serviceFee = Number(item.price || 0) * Number(item.qty || 1); const hasSpecialBraid = (item.consumedProducts || []).some((product: any) => ['amara', 'diani'].includes(String(product?.name || '').trim().toLowerCase())); const assistantPayment = item.helperStaffId ? assistantCompensation(serviceFee, hasSpecialBraid) : 0; return { index, name: item.name || appointment.serviceName, staffId: item.staffId || '', serviceFee, hasSpecialBraid, helperStaffId: item.helperStaffId || '', assistantPayment, commissionBase: Math.max(0, Number(item.lineTotalAfterDiscount ?? serviceFee) - Number(item.productCost || 0) - assistantPayment), commissionPct: Number(item.commissionPct ?? item.commissionRate ?? 50), commission: Number(item.commission || 0) }; });
+        .map(({ item, index }: { item: any; index: number }) => { const serviceFee = Number(item.price || 0) * Number(item.qty || 1); const hasSpecialBraid = (item.consumedProducts || []).some((product: any) => ['amara', 'diani'].includes(String(product?.name || '').trim().toLowerCase())); const assistantPayment = Number(item.assistantPayment ?? item.helperDeduction ?? 0); const commissionBase = Math.max(0, Number(item.lineTotalAfterDiscount ?? serviceFee) - Number(item.productCost || 0) - assistantPayment); const defaultCommission = commissionBase * (Number(item.commissionPct ?? item.commissionRate ?? 50) / 100); return { index, name: item.name || appointment.serviceName, staffId: item.staffId || '', coStaffId: item.coStaffId || '', serviceFee, hasSpecialBraid, helperStaffId: item.helperStaffId || '', assistantPayment, commissionBase, commissionPct: Number(item.commissionPct ?? item.commissionRate ?? 50), primaryCommission: Number(item.primaryCommission ?? item.commission ?? defaultCommission), coStaffCommission: Number(item.coStaffCommission ?? (item.coStaffId ? item.commission ?? defaultCommission : 0)) }; });
       if (!lines.length) { toast('This appointment has no completed service work to adjust.', 'error'); return; }
       setCompletionLines(lines);
       setCompletionEdit({ orderId: order.id, appointment });
@@ -239,7 +241,7 @@ function Appointments({ role }: { role: Role }) {
 
   const saveCompletionEdit = async () => {
     if (!completionEdit) return;
-    if (completionLines.some(line => !line.staffId || line.commissionPct < 0 || line.commissionPct > 100)) { toast('Assign staff and a valid commission rate.', 'error'); return; }
+    if (completionLines.some(line => !line.staffId || line.assistantPayment < 0 || line.primaryCommission < 0 || line.coStaffCommission < 0 || line.primaryCommission + line.coStaffCommission > line.commissionBase)) { toast('Assign staff and keep combined commissions within the service balance.', 'error'); return; }
     setSaving(true);
     try {
       await OrdersApi.updateCompletion(completionEdit.orderId, { items: completionLines });
@@ -389,15 +391,17 @@ function Appointments({ role }: { role: Role }) {
               <div key={line.index} className="border-b border-black/5 pb-4 space-y-3">
                 <p className="text-sm font-medium">{line.name}</p>
                 <Field label="Completed by" htmlFor={`completion-staff-${line.index}`}><Select id={`completion-staff-${line.index}`} value={line.staffId} onChange={event => setCompletionLines(current => current.map((item, index) => index === lineIndex ? { ...item, staffId: event.target.value } : item))}><option value="">Assign employee</option>{assignableStaff.map(member => <option key={member.id} value={member.id}>{member.name}</option>)}</Select></Field>
-                <Field label="Assistant (optional)" htmlFor={`completion-assistant-${line.index}`}><Select id={`completion-assistant-${line.index}`} value={line.helperStaffId} onChange={event => setCompletionLines(current => current.map((item, index) => index === lineIndex ? { ...item, helperStaffId: event.target.value, assistantPayment: event.target.value ? assistantCompensation(item.serviceFee, item.hasSpecialBraid) : 0, commissionBase: Math.max(0, item.serviceFee - (event.target.value ? assistantCompensation(item.serviceFee, item.hasSpecialBraid) : 0)) } : item))}><option value="">No assistant</option>{assignableStaff.filter(member => member.id !== line.staffId).map(member => <option key={member.id} value={member.id}>{member.name}</option>)}</Select></Field>
-                <div className="grid sm:grid-cols-2 gap-4">
-                  <Field label="Commission rate (%)" htmlFor={`completion-rate-${line.index}`}><Input id={`completion-rate-${line.index}`} type="number" min={0} max={100} value={line.commissionPct} onChange={event => setCompletionLines(current => current.map((item, index) => index === lineIndex ? { ...item, commissionPct: Number(event.target.value) } : item))} /></Field>
-                  {line.helperStaffId ? <Field label="Assistant compensation (KES)" htmlFor={`completion-assistant-payment-${line.index}`}><Input id={`completion-assistant-payment-${line.index}`} type="number" value={line.assistantPayment} readOnly className="py-1.5 text-xs bg-black/[0.03]" /></Field> : <div />}
+                <Field label="Co-staff (optional)" htmlFor={`completion-co-staff-${line.index}`}><Select id={`completion-co-staff-${line.index}`} value={line.coStaffId} onChange={event => setCompletionLines(current => current.map((item, index) => index === lineIndex ? { ...item, coStaffId: event.target.value, coStaffCommission: event.target.value ? item.coStaffCommission : 0 } : item))}><option value="">No co-staff</option>{assignableStaff.filter(member => member.id !== line.staffId && member.id !== line.helperStaffId).map(member => <option key={member.id} value={member.id}>{member.name}</option>)}</Select></Field>
+                <Field label="Assistant (optional)" htmlFor={`completion-assistant-${line.index}`}><Select id={`completion-assistant-${line.index}`} value={line.helperStaffId} onChange={event => setCompletionLines(current => current.map((item, index) => index === lineIndex ? { ...item, helperStaffId: event.target.value, assistantPayment: event.target.value ? item.assistantPayment || assistantCompensation(item.serviceFee, item.hasSpecialBraid) : 0 } : item))}><option value="">No assistant</option>{assignableStaff.filter(member => member.id !== line.staffId && member.id !== line.coStaffId).map(member => <option key={member.id} value={member.id}>{member.name}</option>)}</Select></Field>
+                <div className="grid sm:grid-cols-3 gap-4">
+                  <Field label="Primary commission (KES)" htmlFor={`completion-primary-${line.index}`}><Input id={`completion-primary-${line.index}`} type="number" min={0} value={line.primaryCommission} onChange={event => setCompletionLines(current => current.map((item, index) => index === lineIndex ? { ...item, primaryCommission: Number(event.target.value) } : item))} /></Field>
+                  {line.coStaffId ? <Field label="Co-staff commission (KES)" htmlFor={`completion-co-commission-${line.index}`}><Input id={`completion-co-commission-${line.index}`} type="number" min={0} value={line.coStaffCommission} onChange={event => setCompletionLines(current => current.map((item, index) => index === lineIndex ? { ...item, coStaffCommission: Number(event.target.value) } : item))} /></Field> : <div />}
+                  {line.helperStaffId ? <Field label="Assistant fee (KES)" htmlFor={`completion-assistant-payment-${line.index}`}><Input id={`completion-assistant-payment-${line.index}`} type="number" min={0} value={line.assistantPayment} onChange={event => setCompletionLines(current => current.map((item, index) => index === lineIndex ? { ...item, assistantPayment: Number(event.target.value) } : item))} /></Field> : <div />}
                 </div>
-                <p className="text-sm text-[#6E6E73]">Calculated commission: {fmtKES(Math.max(0, line.commissionBase - line.assistantPayment) * (line.commissionPct / 100))}</p>
+                <p className="text-sm text-[#6E6E73]">Service fee {fmtKES(line.serviceFee)} · costs and assistant fee {fmtKES(line.serviceFee - line.commissionBase)} · available for staff {fmtKES(line.commissionBase)} · allocated {fmtKES(line.primaryCommission + line.coStaffCommission)}</p>
               </div>
             ))}
-            <div className="flex justify-between text-sm font-semibold"><span>Total commission</span><span>{fmtKES(completionLines.reduce((sum, line) => sum + Math.max(0, line.commissionBase - line.assistantPayment) * (line.commissionPct / 100), 0))}</span></div>
+            <div className="flex justify-between text-sm font-semibold"><span>Total staff commissions</span><span>{fmtKES(completionLines.reduce((sum, line) => sum + line.primaryCommission + line.coStaffCommission, 0))}</span></div>
           </div>
         </Modal>
       )}
@@ -406,7 +410,7 @@ function Appointments({ role }: { role: Role }) {
         <Modal title="Completed deal summary" onClose={() => setCompletionSummary(null)} footer={<Button onClick={() => setCompletionSummary(null)}>Done</Button>}>
           <div className="space-y-4 text-sm">
             <div><p className="font-semibold">{completionSummary.appointment.customerName}</p><p className="text-[#6E6E73]">{completionSummary.order.paymentMethod || 'Payment method not recorded'} · {new Date(Number(completionSummary.order.createdAt || Date.now())).toLocaleString()}</p></div>
-            <div className="space-y-2 border-y border-black/5 py-3">{(completionSummary.order.items || []).map((item: any, index: number) => <div key={`${item.refId}-${index}`}><div className="flex justify-between gap-4"><span>{item.name} × {item.qty || 1}</span><span>{fmtMoney(Number(item.lineTotalAfterDiscount ?? Number(item.price || 0) * Number(item.qty || 1)), item.currency || 'KES')}</span></div>{item.type === 'service' && <p className="text-xs text-[#6E6E73]">Completed by {item.staffName || 'Unassigned'}{item.coStaffName ? ` with ${item.coStaffName}` : ''}{item.helperStaffName ? ` · Assistant: ${item.helperStaffName}` : ''}</p>}{(item.consumedProducts || []).length > 0 && <p className="text-xs text-[#6E6E73]">Products used: {item.consumedProducts.map((product: any) => `${product.name} × ${product.qty}`).join(', ')}</p>}</div>)}</div>
+            <div className="space-y-2 border-y border-black/5 py-3">{(completionSummary.order.items || []).map((item: any, index: number) => { const fee = Number(item.lineTotalAfterDiscount ?? Number(item.price || 0) * Number(item.qty || 1)); const assistantFee = Number(item.assistantPayment ?? item.helperDeduction ?? 0); const available = Math.max(0, fee - Number(item.productCost || 0) - assistantFee); const primaryCommission = Number(item.primaryCommission ?? item.commission ?? 0); const coStaffCommission = Number(item.coStaffCommission ?? (item.coStaffId ? item.commission ?? 0 : 0)); return <div key={`${item.refId}-${index}`}><div className="flex justify-between gap-4"><span>{item.name} × {item.qty || 1}</span><span>{fmtMoney(fee, item.currency || 'KES')}</span></div>{item.type === 'service' && <div className="text-xs text-[#6E6E73]"><p>Available after product and assistant costs: {fmtMoney(available, item.currency || 'KES')}</p><p>{item.staffName || 'Unassigned'}: {fmtMoney(primaryCommission, item.currency || 'KES')}{item.coStaffName ? ` · ${item.coStaffName}: ${fmtMoney(coStaffCommission, item.currency || 'KES')}` : ''}{item.helperStaffName ? ` · Assistant ${item.helperStaffName}: ${fmtMoney(assistantFee, item.currency || 'KES')}` : ''}</p></div>}{(item.consumedProducts || []).length > 0 && <p className="text-xs text-[#6E6E73]">Products used: {item.consumedProducts.map((product: any) => `${product.name} × ${product.qty}`).join(', ')}</p>}</div>})}</div>
             {Object.entries(completionSummary.order.subtotalByCurrency || {}).map(([currency, amount]) => <div key={`subtotal-${currency}`} className="flex justify-between"><span>Subtotal ({currency})</span><span>{fmtMoney(Number(amount), currency)}</span></div>)}
             {Object.entries(completionSummary.order.discountByCurrency || {}).some(([, amount]) => Number(amount) > 0) && <div className="flex justify-between"><span>Discount</span><span>{completionSummary.order.discountPct || 0}%</span></div>}
             {Object.entries(completionSummary.order.totalByCurrency || {}).map(([currency, amount]) => <div key={`total-${currency}`} className="flex justify-between font-semibold"><span>Total ({currency})</span><span>{fmtMoney(Number(amount), currency)}</span></div>)}

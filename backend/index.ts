@@ -102,9 +102,9 @@ function serviceCommission(item: any): number {
 
 function staffCommission(item: any, staffId: unknown): number {
   if (!staffId) return 0;
-  return String(item.staffId || '') === String(staffId) || String(item.coStaffId || '') === String(staffId)
-    ? serviceCommission(item)
-    : 0;
+  if (String(item.staffId || '') === String(staffId)) return Number(item.primaryCommission ?? serviceCommission(item)) || 0;
+  if (String(item.coStaffId || '') === String(staffId)) return Number(item.coStaffCommission ?? serviceCommission(item)) || 0;
+  return 0;
 }
 
 function createTicketNumber(date: string): string {
@@ -1180,21 +1180,33 @@ export const handler = router({
       if (!staffMember) return error('Assigned staff member was not found', 404);
       if (context?.branchId && staffMember.branchId && staffMember.branchId !== context.branchId) return error('Assigned staff must belong to the active branch', 400);
       const helperId = String(adjustment.helperStaffId || '');
+      const coStaffId = String(adjustment.coStaffId || '');
       let helper: any = null;
+      let coStaff: any = null;
+      if (coStaffId) {
+        [coStaff] = await db.get('staff', [coStaffId]);
+        if (!coStaff) return error('Co-staff member was not found', 404);
+        if (context?.branchId && coStaff.branchId && coStaff.branchId !== context.branchId) return error('Co-staff must belong to the active branch', 400);
+        if (coStaff.id === staffMember.id) return error('Co-staff must be different from the primary staff member', 400);
+      }
       if (helperId) {
         [helper] = await db.get('staff', [helperId]);
         if (!helper) return error('Assistant staff member was not found', 404);
         if (context?.branchId && helper.branchId && helper.branchId !== context.branchId) return error('Assistant must belong to the active branch', 400);
-        if (helper.id === staffMember.id) return error('Assistant must be different from the staff member who completed the service', 400);
+        if (helper.id === staffMember.id || helper.id === coStaff?.id) return error('Assistant must be different from the service staff', 400);
       }
       const rate = Number(adjustment.commissionPct);
       const commissionPct = Number.isFinite(rate) && rate >= 0 && rate <= 100 ? rate : Number(item.commissionPct || item.commissionRate || 50);
       const serviceRevenue = Number(item.lineTotalAfterDiscount ?? item.price * item.qty) || 0;
-      const assistantPayment = helper ? assistantCompensation(Number(item.price || 0) * Number(item.qty || 1), hasSpecialAssistantBraid(item)) : 0;
+      const requestedAssistantPayment = Math.max(0, Number(adjustment.assistantPayment || 0));
+      const assistantPayment = helper ? requestedAssistantPayment : 0;
       const productCost = Math.max(0, Number(item.productCost || 0));
       const commissionBase = Math.max(0, serviceRevenue - productCost - assistantPayment);
-      const commission = commissionBase * (commissionPct / 100);
-      updatedItems[index] = { ...item, staffId: staffMember.id, staffName: staffMember.name, helperStaffId: helper?.id || null, helperStaffName: helper?.name || null, assistantPayment, helperDeduction: assistantPayment, commissionBase, commissionPct, commissionRate: commissionPct, commission };
+      const defaultCommission = commissionBase * (commissionPct / 100);
+      const primaryCommission = Math.max(0, Number(adjustment.primaryCommission ?? defaultCommission));
+      const coStaffCommission = coStaff ? Math.max(0, Number(adjustment.coStaffCommission ?? defaultCommission)) : 0;
+      if (primaryCommission + coStaffCommission > commissionBase) return error('Combined staff commissions cannot exceed the service amount after product and assistant costs', 400);
+      updatedItems[index] = { ...item, staffId: staffMember.id, staffName: staffMember.name, coStaffId: coStaff?.id || null, coStaffName: coStaff?.name || null, helperStaffId: helper?.id || null, helperStaffName: helper?.name || null, assistantPayment, helperDeduction: assistantPayment, commissionBase, commissionPct, commissionRate: commissionPct, commission: primaryCommission, primaryCommission, coStaffCommission, commissionParticipants: coStaff ? 2 : 1, commissionSplit: coStaff ? 'manual-two-staff' : 'manual-one-staff' };
     }
     const updated = { ...existing, items: updatedItems, helperDeductions: updatedItems.reduce((sum: number, item: any) => sum + (item.type === 'service' ? Number(item.assistantPayment || 0) : 0), 0) };
     const [ok] = await db.update('orders', [{ id: params.id, record: updated }]);
@@ -1424,9 +1436,13 @@ export const handler = router({
       item.commissionBase = Math.max(0, item.commissionBase - Number(item.helperDeduction || 0));
       item.commissionRate = commissionPct(item.commissionPct, item.staffCount);
       item.commissionPct = item.commissionRate;
-      item.commission = item.commissionBase * (item.commissionRate / 100);
+      const defaultCommission = item.commissionBase * (item.commissionRate / 100);
+      item.primaryCommission = Math.max(0, Number(item.primaryCommission ?? defaultCommission));
+      item.coStaffCommission = item.coStaffId ? Math.max(0, Number(item.coStaffCommission ?? defaultCommission)) : 0;
+      if (item.primaryCommission + item.coStaffCommission > item.commissionBase) return error(`Staff commissions for ${item.name} cannot exceed the service balance after product and assistant costs`, 400);
+      item.commission = item.primaryCommission;
       item.commissionParticipants = item.staffCount;
-      item.commissionSplit = item.staffCount === 2 ? 'two-staff' : 'one-staff';
+      item.commissionSplit = item.coStaffId ? 'manual-two-staff' : 'manual-one-staff';
     }
 
     let customerName = b.customerName || 'Walk-in Customer';
