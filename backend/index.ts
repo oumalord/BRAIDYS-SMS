@@ -102,7 +102,8 @@ function serviceCommission(item: any): number {
 
 function staffCommission(item: any, staffId: unknown): number {
   if (!staffId) return 0;
-  if (String(item.staffId || '') === String(staffId)) return Number(item.primaryCommission ?? serviceCommission(item)) || 0;
+  const hasMultipleStaff = Boolean(item.coStaffId || item.helperStaffId);
+  if (String(item.staffId || '') === String(staffId)) return hasMultipleStaff ? Number(item.primaryCommission ?? serviceCommission(item)) || 0 : serviceCommission(item);
   if (String(item.coStaffId || '') === String(staffId)) return Number(item.coStaffCommission ?? serviceCommission(item)) || 0;
   return 0;
 }
@@ -1204,7 +1205,8 @@ export const handler = router({
       const productCost = Math.max(0, Number(item.productCost || 0));
       const commissionBase = Math.max(0, serviceRevenue - productCost - assistantPayment);
       const defaultCommission = commissionBase * (commissionPct / 100);
-      const primaryCommission = Math.max(0, Number(adjustment.primaryCommission ?? defaultCommission));
+      const hasMultipleStaff = Boolean(coStaff || helper);
+      const primaryCommission = hasMultipleStaff ? Math.max(0, Number(adjustment.primaryCommission ?? defaultCommission)) : defaultCommission;
       const coStaffCommission = coStaff ? Math.max(0, Number(adjustment.coStaffCommission ?? defaultCommission)) : 0;
       if (primaryCommission + coStaffCommission > commissionBase) return error('Combined staff commissions cannot exceed the service amount after product and assistant costs', 400);
       updatedItems[index] = { ...item, staffId: staffMember.id, staffName: staffMember.name, coStaffId: coStaff?.id || null, coStaffName: coStaff?.name || null, helperStaffId: helper?.id || null, helperStaffName: helper?.name || null, assistantPayment, helperDeduction: assistantPayment, commissionBase, commissionPct, commissionRate: commissionPct, commission: primaryCommission, primaryCommission, coStaffCommission, commissionParticipants: coStaff ? 2 : 1, commissionSplit: coStaff ? 'manual-two-staff' : 'manual-one-staff' };
@@ -1438,7 +1440,8 @@ export const handler = router({
       item.commissionRate = commissionPct(item.commissionPct, item.staffCount);
       item.commissionPct = item.commissionRate;
       const defaultCommission = item.commissionBase * (item.commissionRate / 100);
-      item.primaryCommission = Math.max(0, Number(item.primaryCommission ?? defaultCommission));
+      const hasMultipleStaff = Boolean(item.coStaffId || item.helperStaffId);
+      item.primaryCommission = hasMultipleStaff ? Math.max(0, Number(item.primaryCommission ?? defaultCommission)) : defaultCommission;
       item.coStaffCommission = item.coStaffId ? Math.max(0, Number(item.coStaffCommission ?? defaultCommission)) : 0;
       if (item.primaryCommission + item.coStaffCommission > item.commissionBase) return error(`Staff commissions for ${item.name} cannot exceed the service balance after product and assistant costs`, 400);
       item.commission = item.primaryCommission;

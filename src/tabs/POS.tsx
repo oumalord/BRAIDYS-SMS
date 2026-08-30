@@ -334,11 +334,11 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
                         <option value="">No assistant</option>
                         {assignableStaff.filter(s => s.id !== l.staffId).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                       </Select>
-                      <div className="grid grid-cols-2 gap-2">
+                      {(l.staffCount === 2 || l.helperStaffId) && <div className="grid grid-cols-2 gap-2">
                         <Field label="Primary earns (KES)" htmlFor={`primary-commission-${l.key}`}><Input id={`primary-commission-${l.key}`} type="number" min={0} value={l.primaryCommission ?? ''} onChange={e => setManualAmount(l.key, 'primaryCommission', Number(e.target.value))} className="py-1.5 text-xs" /></Field>
                         {l.staffCount === 2 && <Field label="Co-staff earns (KES)" htmlFor={`co-commission-${l.key}`}><Input id={`co-commission-${l.key}`} type="number" min={0} value={l.coStaffCommission ?? ''} onChange={e => setManualAmount(l.key, 'coStaffCommission', Number(e.target.value))} className="py-1.5 text-xs" /></Field>}
                         {l.helperStaffId && <Field label="Assistant fee (KES)" htmlFor={`assistant-fee-${l.key}`}><Input id={`assistant-fee-${l.key}`} type="number" min={0} value={l.assistantPayment ?? 0} onChange={e => setManualAmount(l.key, 'assistantPayment', Number(e.target.value))} className="py-1.5 text-xs" /></Field>}
-                      </div>
+                      </div>}
                       <div className="grid grid-cols-[1fr_auto] gap-2">
                         <Select aria-label={`Product used for ${l.name}`} className="text-xs py-1.5" value={usagePickerByLine[l.key] || ''} onChange={e => { const value = e.target.value; setUsagePickerByLine(prev => ({ ...prev, [l.key]: value })); if (value) addUsedProduct(l.key, value); }}>
                           <option value="">Add used product…</option>
