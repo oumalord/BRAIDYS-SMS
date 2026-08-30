@@ -325,7 +325,7 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
                         <option value="">Assign staff…</option>
                         {assignableStaff.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                       </Select>
-                      <Button size="sm" variant="secondary" onClick={() => setStaffCount(l.key, l.staffCount === 2 ? 1 : 2)}>{l.staffCount === 2 ? 'Single staff' : 'Add co-staff'}</Button>
+                      <Button size="sm" variant="secondary" onClick={() => setStaffCount(l.key, l.staffCount === 2 ? 1 : 2)}>{l.staffCount === 2 ? 'Use single staff' : 'Split with co-staff'}</Button>
                       {l.staffCount === 2 && <Select aria-label={`Assign co-staff for ${l.name}`} className="text-xs py-1.5" value={l.coStaffId || ''} onChange={e => setLineCoStaff(l.key, e.target.value)}>
                         <option value="">Assign co-staff...</option>
                         {assignableStaff.filter(s => s.id !== l.staffId).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
@@ -356,8 +356,8 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
                           </div>
                         ))}
                       </div>}
-                      {l.staffCount === 2 && l.coStaffId && <p className="text-xs text-[#6E6E73]">Co-staff earns {l.commissionPct || 33.33}% commission; the salon receives the balance.</p>}
-                      {l.helperStaffId && <p className="text-xs text-[#6E6E73]">Assistant compensation: {fmtMoney(assistantCompensation(l.price * l.qty, hasSpecialAssistantBraid(l)), 'KES')}</p>}
+                      {l.staffCount === 2 && <p className="text-xs text-[#6E6E73]">Choose both staff members, then enter each person's exact earnings.</p>}
+                      {l.helperStaffId && <p className="text-xs text-[#6E6E73]">Enter the assistant's exact fee above.</p>}
                     </div>
                   )}
                 </div>

@@ -518,14 +518,15 @@ export const handler = router({
       if (!order.createdAt) continue;
       for (const item of order.items || []) {
         if (item.type !== 'service') continue;
-        const commission = serviceCommission(item);
         const assistant = Number(item.assistantPayment ?? item.helperDeduction ?? 0) || 0;
         if (sameStaffIdentity(item.staffId, item.staffName, context)) {
+          const commission = staffCommission(item, item.staffId);
           if (order.createdAt >= todayFrom) todayCommission += commission;
           if (order.createdAt >= fortnightFrom) fortnightCommission += commission;
           if (order.appointmentId) linkedAppointmentIds.add(String(order.appointmentId));
         }
         if (sameStaffIdentity(item.coStaffId, item.coStaffName, context)) {
+          const commission = staffCommission(item, item.coStaffId);
           if (order.createdAt >= todayFrom) todayCommission += commission;
           if (order.createdAt >= fortnightFrom) fortnightCommission += commission;
           if (order.appointmentId) linkedAppointmentIds.add(String(order.appointmentId));
@@ -1496,15 +1497,14 @@ export const handler = router({
       if (!order.createdAt || order.createdAt < from) continue;
       for (const item of order.items || []) {
         if (item.type !== 'service') continue;
-        const commission = serviceCommission(item);
         if (item.staffId) {
           const total = totals.get(item.staffId) || { commission: 0, assistant: 0 };
-          total.commission += commission;
+          total.commission += staffCommission(item, item.staffId);
           totals.set(item.staffId, total);
         }
         if (item.coStaffId) {
           const total = totals.get(item.coStaffId) || { commission: 0, assistant: 0 };
-          total.commission += commission;
+          total.commission += staffCommission(item, item.coStaffId);
           totals.set(item.coStaffId, total);
         }
         if (item.helperStaffId) {
