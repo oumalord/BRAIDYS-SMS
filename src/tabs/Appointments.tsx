@@ -51,7 +51,7 @@ function Appointments({ role }: { role: Role }) {
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ customerId: '', customerName: '', customerPhone: '', customerEmail: '', serviceId: '', staffId: '', time: '10:00', cardNumber: '' });
+  const [form, setForm] = useState({ customerId: '', customerName: '', customerPhone: '', customerEmail: '', serviceId: '', staffId: '', date, time: '10:00', cardNumber: '' });
   const [editing, setEditing] = useState<Appointment | null>(null);
   const [editForm, setEditForm] = useState({ serviceId: '', date: '', time: '', staffId: '', cardNumber: '' });
   const [checkoutAppointment, setCheckoutAppointment] = useState<Appointment | null>(null);
@@ -90,11 +90,11 @@ function Appointments({ role }: { role: Role }) {
         customerEmail: customer?.email || form.customerEmail,
         serviceId: service.id, serviceName: service.name,
         staffId: staffMember?.id || null, staffName: staffMember?.name || null,
-        date, time: form.time, durationMin: service.durationMin, price: service.price, cardNumber: form.cardNumber,
+        date: form.date, time: form.time, durationMin: service.durationMin, price: service.price, cardNumber: form.cardNumber,
       });
       toast(`Appointment booked. Payment can be collected at the salon. Ticket ${data.ticketNumber} created.`, 'success');
       setOpen(false);
-      setForm({ customerId: '', customerName: '', customerPhone: '', customerEmail: '', serviceId: '', staffId: '', time: '10:00', cardNumber: '' });
+      setForm({ customerId: '', customerName: '', customerPhone: '', customerEmail: '', serviceId: '', staffId: '', date: form.date, time: '10:00', cardNumber: '' });
       reload();
     } catch (e: any) {
       toast(e?.response?.data?.error || 'That time slot is not available.', 'error');
@@ -275,12 +275,12 @@ function Appointments({ role }: { role: Role }) {
         <div className="flex items-center gap-2">
           <Field label="Date" htmlFor="date-picker"><Input id="date-picker" type="date" value={date} onChange={e => setDate(e.target.value)} aria-label="Select date" /></Field>
           {(role === 'owner' || role === 'admin') && appts.some(appointment => appointment.status === 'cancelled') && <Button variant="danger" onClick={deleteCancelled} disabled={saving}><Trash2 size={16} aria-hidden="true" />Delete canceled</Button>}
-          <Button onClick={() => setOpen(true)}><Plus size={16} aria-hidden="true" />New Appointment</Button>
+          <Button onClick={() => { setForm(current => ({ ...current, date })); setOpen(true); }}><Plus size={16} aria-hidden="true" />New Appointment</Button>
         </div>
       </div>
 
       {loading ? <LoadingState label="Loading appointments…" /> : sorted.length === 0 ? (
-        <EmptyState icon={Calendar} title="No appointments" description="There are no appointments scheduled for this date yet." action={<Button onClick={() => setOpen(true)}>Book an appointment</Button>} />
+        <EmptyState icon={Calendar} title="No appointments" description="There are no appointments scheduled for this date yet." action={<Button onClick={() => { setForm(current => ({ ...current, date })); setOpen(true); }}>Book an appointment</Button>} />
       ) : (
         <div className="space-y-3">
           {sorted.map(a => (
@@ -360,6 +360,7 @@ function Appointments({ role }: { role: Role }) {
                 {assignableStaff.map(s => <option key={s.id} value={s.id}>{s.name} — {s.role}</option>)}
               </Select>
             </Field>
+            <Field label="Date" htmlFor="appt-date"><Input id="appt-date" type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} min={new Date().toISOString().slice(0, 10)} /></Field>
             <Field label="Card number (optional)" htmlFor="appt-card-number"><Input id="appt-card-number" inputMode="numeric" pattern="[0-9]*" value={form.cardNumber} onChange={e => setForm(f => ({ ...f, cardNumber: e.target.value.replace(/\D/g, '') }))} placeholder="Unique for this day" /></Field>
             <Field label="Time" htmlFor="appt-time">
               <Input id="appt-time" type="time" value={form.time} onChange={e => setForm(f => ({ ...f, time: e.target.value }))} />
