@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Plus, Calendar, Clock, Pencil, Trash2 } from 'lucide-react';
 import { Card, Button, Badge, Modal, Field, Input, Select, EmptyState, LoadingState, toast } from '../components/ui';
-import { AppointmentsApi, StaffApi, ServicesApi, CustomersApi, OrdersApi, fmtKES, fmtMoney } from '../lib/api';
+import { AppointmentsApi, StaffApi, ServicesApi, OrdersApi, fmtKES, fmtMoney } from '../lib/api';
 import POS from './POS';
-import type { Appointment, Staff, ServiceItem, Customer, AppointmentStatus, Role } from '../types';
+import type { Appointment, Staff, ServiceItem, AppointmentStatus, Role } from '../types';
 
 function todayStr() { return new Date().toISOString().slice(0, 10); }
 
@@ -47,11 +47,10 @@ function Appointments({ role }: { role: Role }) {
   const [appts, setAppts] = useState<Appointment[]>([]);
   const [staff, setStaff] = useState<Staff[]>([]);
   const [services, setServices] = useState<ServiceItem[]>([]);
-  const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ customerId: '', customerName: '', customerPhone: '', customerEmail: '', serviceId: '', staffId: '', date, time: '10:00', cardNumber: '' });
+  const [form, setForm] = useState({ serviceId: '', staffId: '', date, time: '10:00', cardNumber: '' });
   const [editing, setEditing] = useState<Appointment | null>(null);
   const [editForm, setEditForm] = useState({ serviceId: '', date: '', time: '', staffId: '', cardNumber: '' });
   const [checkoutAppointment, setCheckoutAppointment] = useState<Appointment | null>(null);
@@ -60,7 +59,7 @@ function Appointments({ role }: { role: Role }) {
   const [completionSummary, setCompletionSummary] = useState<{ appointment: Appointment; order: any } | null>(null);
 
   useEffect(() => {
-    Promise.all([StaffApi.list(), ServicesApi.list(), CustomersApi.list()]).then(([s, sv, c]) => { setStaff(s); setServices(sv); setCustomers(c); });
+    Promise.all([StaffApi.list(), ServicesApi.list()]).then(([s, sv]) => { setStaff(s); setServices(sv); });
   }, []);
 
   useEffect(() => {
@@ -75,26 +74,19 @@ function Appointments({ role }: { role: Role }) {
   const doCreate = async () => {
     const service = services.find(s => s.id === form.serviceId);
     const staffMember = staff.find(s => s.id === form.staffId);
-    const customer = customers.find(c => c.id === form.customerId);
     if (!service) return;
     setSaving(true);
     try {
-      let customerId = customer?.id || null;
-      if (!customerId && form.customerName.trim()) {
-        const created = await CustomersApi.create({ name: form.customerName, phone: form.customerPhone, email: form.customerEmail, notes: '' });
-        customerId = created.data.id;
-      }
       const { data } = await AppointmentsApi.create({
-        customerId,
-        customerName: customer?.name || form.customerName,
-        customerEmail: customer?.email || form.customerEmail,
+        customerId: null,
+        customerName: 'Walk-in Customer',
         serviceId: service.id, serviceName: service.name,
         staffId: staffMember?.id || null, staffName: staffMember?.name || null,
         date: form.date, time: form.time, durationMin: service.durationMin, price: service.price, cardNumber: form.cardNumber,
       });
       toast(`Appointment booked. Payment can be collected at the salon. Ticket ${data.ticketNumber} created.`, 'success');
       setOpen(false);
-      setForm({ customerId: '', customerName: '', customerPhone: '', customerEmail: '', serviceId: '', staffId: '', date: form.date, time: '10:00', cardNumber: '' });
+      setForm({ serviceId: '', staffId: '', date: form.date, time: '10:00', cardNumber: '' });
       reload();
     } catch (e: any) {
       toast(e?.response?.data?.error || 'That time slot is not available.', 'error');
@@ -106,8 +98,7 @@ function Appointments({ role }: { role: Role }) {
   const handleCreate = async () => {
     const service = services.find(s => s.id === form.serviceId);
     const staffMember = staff.find(s => s.id === form.staffId);
-    const customer = customers.find(c => c.id === form.customerId);
-    if (!service || (!customer && !form.customerName)) { toast('Please complete the customer and service fields.', 'error'); return; }
+    if (!service || !staffMember || !form.date || !form.time || !form.cardNumber) { toast('Card number, staff, date, service, and time are required.', 'error'); return; }
 
     const toMin = (t: string) => { const parts = t.split(':').map(Number); return parts[0] * 60 + parts[1]; };
     const startMin = toMin(form.time);
@@ -321,47 +312,20 @@ function Appointments({ role }: { role: Role }) {
           <Button onClick={handleCreate} disabled={saving}>{saving ? 'Booking…' : 'Book Appointment'}</Button>
         </>}>
           <div className="space-y-4">
-            <Field label="Customer" htmlFor="appt-customer">
-              <Select id="appt-customer" value={form.customerId} onChange={e => setForm(f => ({ ...f, customerId: e.target.value }))}>
-                <option value="">— New / walk-in customer —</option>
-                {role === 'barber' ? (
-                  Array.from(new Map(
-                    appts
-                      .filter(a => a.staffId === account?.staffId && ['checked-in', 'in-service', 'pending', 'confirmed'].includes(a.status) && a.customerId)
-                      .map(a => [a.customerId, { id: a.customerId, name: a.customerName }])
-                  ).values()).map(c => <option key={c.id} value={c.id}>{c.name}</option>)
-                ) : (
-                  customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)
-                )}
-              </Select>
-            </Field>
-            {!form.customerId && (
-              <>
-                <Field label="Customer name" htmlFor="appt-customer-name">
-                  <Input id="appt-customer-name" value={form.customerName} onChange={e => setForm(f => ({ ...f, customerName: e.target.value }))} placeholder="Full name" />
-                </Field>
-                <Field label="Customer phone" htmlFor="appt-customer-phone">
-                  <Input id="appt-customer-phone" value={form.customerPhone} onChange={e => setForm(f => ({ ...f, customerPhone: e.target.value }))} placeholder="0712345678" />
-                </Field>
-                <Field label="Customer email (for ticket notification)" htmlFor="appt-customer-email">
-                  <Input id="appt-customer-email" type="email" value={form.customerEmail} onChange={e => setForm(f => ({ ...f, customerEmail: e.target.value }))} placeholder="customer@example.com" />
-                </Field>
-              </>
-            )}
+            <Field label="Card number" htmlFor="appt-card-number"><Input id="appt-card-number" inputMode="numeric" pattern="[0-9]*" value={form.cardNumber} onChange={e => setForm(f => ({ ...f, cardNumber: e.target.value.replace(/\D/g, '') }))} placeholder="Unique for this day" /></Field>
             <Field label="Service" htmlFor="appt-service">
               <Select id="appt-service" value={form.serviceId} onChange={e => setForm(f => ({ ...f, serviceId: e.target.value }))}>
                 <option value="">Select a service</option>
                 {services.map(s => <option key={s.id} value={s.id}>{s.name} — {fmtKES(s.price)} ({s.durationMin} min)</option>)}
               </Select>
             </Field>
-            <Field label="Employee (optional; receptionist can assign later)" htmlFor="appt-staff">
+            <Field label="Staff" htmlFor="appt-staff">
               <Select id="appt-staff" value={form.staffId} onChange={e => setForm(f => ({ ...f, staffId: e.target.value }))}>
-                <option value="">Assign later</option>
+                <option value="">Select staff</option>
                 {assignableStaff.map(s => <option key={s.id} value={s.id}>{s.name} — {s.role}</option>)}
               </Select>
             </Field>
             <Field label="Date" htmlFor="appt-date"><Input id="appt-date" type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} min={new Date().toISOString().slice(0, 10)} /></Field>
-            <Field label="Card number (optional)" htmlFor="appt-card-number"><Input id="appt-card-number" inputMode="numeric" pattern="[0-9]*" value={form.cardNumber} onChange={e => setForm(f => ({ ...f, cardNumber: e.target.value.replace(/\D/g, '') }))} placeholder="Unique for this day" /></Field>
             <Field label="Time" htmlFor="appt-time">
               <Input id="appt-time" type="time" value={form.time} onChange={e => setForm(f => ({ ...f, time: e.target.value }))} />
             </Field>
