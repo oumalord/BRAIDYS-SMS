@@ -69,26 +69,6 @@ function requireOwner() {
   if (!['owner', 'admin'].includes(currentContext()?.role || '')) throw new Error('Only the owner or administrator can edit records');
 }
 
-function toMinutes(t: string): number {
-  const parts = t.split(':').map(Number);
-  return parts[0] * 60 + parts[1];
-}
-
-function apptSlots(appt: any): { staffId: string; start: number; end: number }[] {
-  if (appt.items && Array.isArray(appt.items) && appt.items.length) {
-    let cursor = toMinutes(appt.time);
-    const slots: { staffId: string; start: number; end: number }[] = [];
-    for (const it of appt.items) {
-      const start = cursor; const end = start + (it.durationMin || 30);
-      slots.push({ staffId: it.staffId, start, end });
-      cursor = end;
-    }
-    return slots;
-  }
-  const start = toMinutes(appt.time); const end = start + (appt.durationMin || 30);
-  return [{ staffId: appt.staffId, start, end }];
-}
-
 function serviceCommission(item: any): number {
   if (item?.type !== 'service') return 0;
   const recorded = Number(item.commission);
@@ -880,29 +860,6 @@ export const handler = router({
 
     const { items: existing } = await db.list('appointments', { limit: 1000 });
     if (cardNumber && (existing as any[]).some(appointment => !appointment.deletedAt && appointment.date === appointmentDate && String(appointment.cardNumber || '') === cardNumber)) return error('This card number is already assigned on the selected date', 409);
-    let cursor = toMinutes(appointmentTime);
-    const newSlots: { staffId: string; start: number; end: number; name: string }[] = [];
-    for (const it of items) {
-      const start = cursor; const end = start + (it.durationMin || 30);
-      newSlots.push({ staffId: it.staffId, start, end, name: it.serviceName });
-      cursor = end;
-    }
-
-    for (const existingAppt of existing as any[]) {
-      if (existingAppt.deletedAt) continue;
-      if (existingAppt.date !== appointmentDate) continue;
-      if (['cancelled', 'no-show', 'completed'].includes(existingAppt.status)) continue;
-      const otherSlots = apptSlots(existingAppt);
-      for (const ns of newSlots) {
-        for (const os of otherSlots) {
-          if (!ns.staffId) continue;
-          if (os.staffId === ns.staffId && ns.start < os.end && ns.end > os.start) {
-            return error(`${ns.name}: this staff member already has an appointment at that time`, 409);
-          }
-        }
-      }
-    }
-
     const totalDurationMin = items.reduce((s: number, it: any) => s + (it.durationMin || 30), 0);
     const totalPrice = items.reduce((s: number, it: any) => s + (it.price || 0), 0);
     const currency = items[0]?.currency || 'KES';
@@ -997,16 +954,6 @@ export const handler = router({
     if (patch.serviceId) {
       const [service] = await db.get('services', [patch.serviceId]);
       if (!service) return error('Service not found', 404);
-    }
-    if (nextStaffId) {
-      const { items: appointments } = await db.list('appointments', { limit: 2000 });
-      const start = toMinutes(nextTime);
-      const end = start + nextDuration;
-      for (const appointment of appointments as any[]) {
-        if (appointment.deletedAt) continue;
-        if (appointment.id === existing.id || appointment.date !== nextDate || ['completed', 'cancelled', 'no-show'].includes(appointment.status)) continue;
-        for (const slot of apptSlots(appointment)) if (slot.staffId === nextStaffId && start < slot.end && end > slot.start) return error('That staff member already has an appointment at the selected time', 409);
-      }
     }
     const [ok] = await db.update('appointments', [{ id: params.id, record: { ...existing, ...patch } }]);
     if (patch.staffId) {

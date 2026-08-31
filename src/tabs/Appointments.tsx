@@ -100,19 +100,6 @@ function Appointments({ role }: { role: Role }) {
     const staffMember = staff.find(s => s.id === form.staffId);
     if (!service || !staffMember || !form.date || !form.time || !form.cardNumber) { toast('Card number, staff, date, service, and time are required.', 'error'); return; }
 
-    const toMin = (t: string) => { const parts = t.split(':').map(Number); return parts[0] * 60 + parts[1]; };
-    const startMin = toMin(form.time);
-    const endMin = startMin + service.durationMin;
-    const conflict = staffMember && appts.find(a => {
-      if (a.date !== form.date) return false;
-      if (a.staffId !== staffMember.id) return false;
-      if (a.status === 'cancelled' || a.status === 'no-show' || a.status === 'completed') return false;
-      const s = toMin(a.time);
-      const e = s + (a.durationMin || 30);
-      return startMin < e && endMin > s;
-    });
-    if (conflict) { toast(`${staffMember.name} already has an appointment at that time`, 'error'); return; }
-
     await doCreate();
   };
 
@@ -327,7 +314,7 @@ function Appointments({ role }: { role: Role }) {
                 {assignableStaff.map(s => <option key={s.id} value={s.id}>{s.name} — {s.role}</option>)}
               </Select>
             </Field>
-            <Field label="Date" htmlFor="appt-date"><Input id="appt-date" type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} min={new Date().toISOString().slice(0, 10)} /></Field>
+            <Field label="Date" htmlFor="appt-date"><Input id="appt-date" type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} /></Field>
             <Field label="Time" htmlFor="appt-time">
               <Input id="appt-time" type="time" value={form.time} onChange={e => setForm(f => ({ ...f, time: e.target.value }))} />
             </Field>
