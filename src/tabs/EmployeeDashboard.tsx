@@ -12,6 +12,7 @@ function EmployeeDashboard({ account, onAddService }: { account: { name?: string
   const [fortnightEarnings, setFortnightEarnings] = useState(0);
   const [dailyCommission, setDailyCommission] = useState(0);
   const [dailyAssistant, setDailyAssistant] = useState(0);
+  const [completedWork, setCompletedWork] = useState<{ serviceName: string; createdAt: number; role: 'commission' | 'assistant'; amount: number }[]>([]);
   const [waitingClients, setWaitingClients] = useState<Appointment[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -25,6 +26,7 @@ function EmployeeDashboard({ account, onAddService }: { account: { name?: string
       setFortnightEarnings(earnings.fortnight.total || 0);
       setDailyCommission(earnings.today.commission || 0);
       setDailyAssistant(earnings.today.assistant || 0);
+      setCompletedWork(earnings.completedWork || []);
       
       // Show waiting clients (those checked-in and waiting)
       const waiting = staffAppointments.filter(item => item.date === todayStr() && ['checked-in', 'pending'].includes(item.status));
@@ -59,6 +61,11 @@ function EmployeeDashboard({ account, onAddService }: { account: { name?: string
       <Card className="p-5">
         <p className="text-xs text-[#6E6E73]">My 14-day Earnings</p>
         <p className="text-xl font-semibold mt-1">{fmtKES(fortnightEarnings)}</p>
+      </Card>
+
+      <Card className="p-5">
+        <h2 className="font-semibold mb-3">Completed Services</h2>
+        {completedWork.length === 0 ? <p className="text-sm text-[#6E6E73]">Completed services and their earnings will appear here.</p> : <div className="space-y-2">{completedWork.map((work, index) => <div key={`${work.createdAt}-${work.serviceName}-${index}`} className="flex items-center justify-between gap-3 border-b border-black/5 pb-2 last:border-0"><div><p className="text-sm font-medium">{work.serviceName}</p><p className="text-xs text-[#6E6E73]">{new Date(work.createdAt).toLocaleString()} · {work.role === 'assistant' ? 'Assistant fee' : 'Commission'}</p></div><p className="shrink-0 text-sm font-semibold">{fmtKES(work.amount)}</p></div>)}</div>}
       </Card>
 
       {waitingClients.length > 0 && (

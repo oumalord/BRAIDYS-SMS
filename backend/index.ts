@@ -520,6 +520,7 @@ export const handler = router({
     let todayAssistant = 0;
     let fortnightCommission = 0;
     let fortnightAssistant = 0;
+    const completedWork: { serviceName: string; createdAt: number; role: 'commission' | 'assistant'; amount: number }[] = [];
 
     for (const order of orders as any[]) {
       if (order.deletedAt) continue;
@@ -531,23 +532,27 @@ export const handler = router({
           const commission = staffCommission(item, item.staffId);
           if (order.createdAt >= todayFrom) todayCommission += commission;
           if (order.createdAt >= fortnightFrom) fortnightCommission += commission;
+          completedWork.push({ serviceName: item.name || 'Service', createdAt: order.createdAt, role: 'commission', amount: commission });
           if (order.appointmentId) linkedAppointmentIds.add(String(order.appointmentId));
         }
         if (sameStaffIdentity(item.coStaffId, item.coStaffName, context)) {
           const commission = staffCommission(item, item.coStaffId);
           if (order.createdAt >= todayFrom) todayCommission += commission;
           if (order.createdAt >= fortnightFrom) fortnightCommission += commission;
+          completedWork.push({ serviceName: item.name || 'Service', createdAt: order.createdAt, role: 'commission', amount: commission });
           if (order.appointmentId) linkedAppointmentIds.add(String(order.appointmentId));
         }
         if (sameStaffIdentity(item.thirdStaffId, item.thirdStaffName, context)) {
           const commission = staffCommission(item, item.thirdStaffId);
           if (order.createdAt >= todayFrom) todayCommission += commission;
           if (order.createdAt >= fortnightFrom) fortnightCommission += commission;
+          completedWork.push({ serviceName: item.name || 'Service', createdAt: order.createdAt, role: 'commission', amount: commission });
           if (order.appointmentId) linkedAppointmentIds.add(String(order.appointmentId));
         }
         if (sameStaffIdentity(item.helperStaffId, item.helperStaffName, context)) {
           if (order.createdAt >= todayFrom) todayAssistant += assistant;
           if (order.createdAt >= fortnightFrom) fortnightAssistant += assistant;
+          completedWork.push({ serviceName: item.name || 'Service', createdAt: order.createdAt, role: 'assistant', amount: assistant });
           if (order.appointmentId) linkedAppointmentIds.add(String(order.appointmentId));
         }
       }
@@ -573,11 +578,13 @@ export const handler = router({
       const derivedCommission = serviceValue * 0.5;
       if (appointmentTs >= todayFrom) todayCommission += derivedCommission;
       if (appointmentTs >= fortnightFrom) fortnightCommission += derivedCommission;
+      completedWork.push({ serviceName: appointment.serviceName || 'Service', createdAt: appointmentTs, role: 'commission', amount: derivedCommission });
     }
 
     return json({
       today: { commission: todayCommission, assistant: todayAssistant, total: todayCommission + todayAssistant },
       fortnight: { commission: fortnightCommission, assistant: fortnightAssistant, total: fortnightCommission + fortnightAssistant },
+      completedWork: completedWork.sort((left, right) => right.createdAt - left.createdAt).slice(0, 30),
     });
   }],
   'GET /api/audit-logs': [async ({ query }) => {
