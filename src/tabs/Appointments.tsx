@@ -51,9 +51,9 @@ function Appointments({ role }: { role: Role }) {
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ customerId: '', customerName: '', customerPhone: '', customerEmail: '', serviceId: '', staffId: '', time: '10:00' });
+  const [form, setForm] = useState({ customerId: '', customerName: '', customerPhone: '', customerEmail: '', serviceId: '', staffId: '', time: '10:00', cardNumber: '' });
   const [editing, setEditing] = useState<Appointment | null>(null);
-  const [editForm, setEditForm] = useState({ serviceId: '', date: '', time: '', staffId: '' });
+  const [editForm, setEditForm] = useState({ serviceId: '', date: '', time: '', staffId: '', cardNumber: '' });
   const [checkoutAppointment, setCheckoutAppointment] = useState<Appointment | null>(null);
   const [completionEdit, setCompletionEdit] = useState<{ orderId: string; appointment: Appointment } | null>(null);
   const [completionLines, setCompletionLines] = useState<CompletionLine[]>([]);
@@ -90,11 +90,11 @@ function Appointments({ role }: { role: Role }) {
         customerEmail: customer?.email || form.customerEmail,
         serviceId: service.id, serviceName: service.name,
         staffId: staffMember?.id || null, staffName: staffMember?.name || null,
-        date, time: form.time, durationMin: service.durationMin, price: service.price,
+        date, time: form.time, durationMin: service.durationMin, price: service.price, cardNumber: form.cardNumber,
       });
       toast(`Appointment booked. Payment can be collected at the salon. Ticket ${data.ticketNumber} created.`, 'success');
       setOpen(false);
-      setForm({ customerId: '', customerName: '', customerPhone: '', customerEmail: '', serviceId: '', staffId: '', time: '10:00' });
+      setForm({ customerId: '', customerName: '', customerPhone: '', customerEmail: '', serviceId: '', staffId: '', time: '10:00', cardNumber: '' });
       reload();
     } catch (e: any) {
       toast(e?.response?.data?.error || 'That time slot is not available.', 'error');
@@ -156,7 +156,7 @@ function Appointments({ role }: { role: Role }) {
 
   const beginEdit = (appointment: Appointment) => {
     setEditing(appointment);
-    setEditForm({ serviceId: appointment.serviceId || '', date: appointment.date, time: appointment.time === '00:00' ? '' : appointment.time, staffId: appointment.staffId || '' });
+    setEditForm({ serviceId: appointment.serviceId || '', date: appointment.date, time: appointment.time === '00:00' ? '' : appointment.time, staffId: appointment.staffId || '', cardNumber: appointment.cardNumber || '' });
   };
 
   const saveEdit = async () => {
@@ -176,6 +176,7 @@ function Appointments({ role }: { role: Role }) {
         time: editForm.time,
         staffId: assigned?.id || null,
         staffName: assigned?.name || null,
+        cardNumber: editForm.cardNumber,
       });
       toast('Appointment updated.', 'success');
       setEditing(null);
@@ -287,7 +288,7 @@ function Appointments({ role }: { role: Role }) {
               <div className="flex items-center gap-2 text-sm font-medium w-24"><Clock size={14} aria-hidden="true" className="text-[#6E6E73]" />{a.time}</div>
               <div className="flex-1">
                 <p className="font-medium">{a.customerName}</p>
-                  <p className="text-sm text-[#6E6E73]">{a.serviceName} · {a.staffName || 'Awaiting employee assignment'} · {fmtKES(a.price)}</p>
+                  <p className="text-sm text-[#6E6E73]">{a.serviceName} · {a.staffName || 'Awaiting employee assignment'} · {fmtKES(a.price)}{a.cardNumber ? ` · Card ${a.cardNumber}` : ''}</p>
               </div>
               <Badge tone={STATUS_TONE[a.status]}>{a.status.replace('-', ' ')}</Badge>
               {(role === 'owner' || role === 'admin' || role === 'receptionist' || (role === 'barber' && a.staffId === account?.staffId)) && <div className="flex flex-wrap gap-2">
@@ -359,6 +360,7 @@ function Appointments({ role }: { role: Role }) {
                 {assignableStaff.map(s => <option key={s.id} value={s.id}>{s.name} — {s.role}</option>)}
               </Select>
             </Field>
+            <Field label="Card number (optional)" htmlFor="appt-card-number"><Input id="appt-card-number" inputMode="numeric" pattern="[0-9]*" value={form.cardNumber} onChange={e => setForm(f => ({ ...f, cardNumber: e.target.value.replace(/\D/g, '') }))} placeholder="Unique for this day" /></Field>
             <Field label="Time" htmlFor="appt-time">
               <Input id="appt-time" type="time" value={form.time} onChange={e => setForm(f => ({ ...f, time: e.target.value }))} />
             </Field>
@@ -375,6 +377,7 @@ function Appointments({ role }: { role: Role }) {
             <p className="text-sm text-[#6E6E73]">Editing {editing.customerName}'s appointment.</p>
             <Field label="Service" htmlFor="edit-appt-service"><Select id="edit-appt-service" value={editForm.serviceId} onChange={e => setEditForm(current => ({ ...current, serviceId: e.target.value }))}>{services.map(service => <option key={service.id} value={service.id}>{service.name} — {fmtKES(service.price)} ({service.durationMin} min)</option>)}</Select></Field>
             <Field label="Employee" htmlFor="edit-appt-staff"><Select id="edit-appt-staff" value={editForm.staffId} onChange={e => setEditForm(current => ({ ...current, staffId: e.target.value }))}><option value="">Assign later</option>{assignableStaff.map(member => <option key={member.id} value={member.id}>{member.name} — {member.role}</option>)}</Select></Field>
+            <Field label="Card number" htmlFor="edit-appt-card-number"><Input id="edit-appt-card-number" inputMode="numeric" pattern="[0-9]*" value={editForm.cardNumber} disabled={Boolean(editing.cardNumber)} onChange={e => setEditForm(current => ({ ...current, cardNumber: e.target.value.replace(/\D/g, '') }))} placeholder="Enter once; unique for this day" /></Field>
             <div className="grid sm:grid-cols-2 gap-4"><Field label="Date" htmlFor="edit-appt-date"><Input id="edit-appt-date" type="date" value={editForm.date} onChange={e => setEditForm(current => ({ ...current, date: e.target.value }))} /></Field><Field label="Time" htmlFor="edit-appt-time"><Input id="edit-appt-time" type="time" value={editForm.time} onChange={e => setEditForm(current => ({ ...current, time: e.target.value }))} /></Field></div>
           </div>
         </Modal>

@@ -9,7 +9,7 @@ function Services({ role }: { role: Role }) {
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
-  const [form, setForm] = useState({ name: '', category: '', price: 0, currency: 'KES' as Currency, durationMin: 30, description: '', staffCount: 1 as 1 | 2, commissionPct: 50 as 30 | 33.33 | 40 | 50 });
+  const [form, setForm] = useState({ name: '', category: '', price: 0, currency: 'KES' as Currency, durationMin: 30, description: '', staffCount: 1 as 1 | 2, commissionPct: 50 as 30 | 33.35 | 40 | 50 });
 
   const load = () => { ServicesApi.list().then(setServices).catch(() => toast('Could not load services.', 'error')).finally(() => setLoading(false)); };
   useEffect(load, []);
@@ -33,7 +33,7 @@ function Services({ role }: { role: Role }) {
       durationMin: service.durationMin,
       description: service.description || '',
       staffCount: service.staffCount || 1,
-      commissionPct: service.commissionPct || (service.staffCount === 2 ? 33.33 : 50),
+      commissionPct: service.commissionPct || (service.staffCount === 2 ? 33.35 : 50),
     });
     setOpen(true);
   };
@@ -68,9 +68,9 @@ function Services({ role }: { role: Role }) {
               <h2 className="text-xs font-semibold text-[#6E6E73] uppercase tracking-wide mb-2">{cat}</h2>
               <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
                 {services.filter(s => s.category === cat).map(s => (
-                  <Card key={s.id} className="p-4">
-                    <p className="font-medium text-sm">{s.name}</p>
-                    <p className="text-xs text-[#6E6E73] mt-1">{fmtMoney(s.price, s.currency)} · {s.durationMin} min · {s.staffCount || 1} staff · {s.commissionPct || (s.staffCount === 2 ? 33.33 : 50)}% commission per staff member</p>
+                  <Card key={s.id} className={`p-4 ${s.commissionPct === 40 ? 'border-amber-300 bg-amber-50/40' : ''}`}>
+                    <div className="flex items-center justify-between gap-2"><p className="font-medium text-sm">{s.name}</p>{s.commissionPct === 40 && <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800">40% commission</span>}</div>
+                    <p className="text-xs text-[#6E6E73] mt-1">{fmtMoney(s.price, s.currency)} · {s.durationMin} min · {s.staffCount || 1} staff · {s.commissionPct || (s.staffCount === 2 ? 33.35 : 50)}% commission per staff member</p>
                     {s.description && <p className="text-xs text-[#6E6E73] mt-2">{s.description}</p>}
                     {canEdit && <div className="mt-3">
                       <Button size="sm" variant="secondary" onClick={() => beginEdit(s)}><Pencil size={14} aria-hidden="true" />Edit</Button>
@@ -102,15 +102,15 @@ function Services({ role }: { role: Role }) {
             </div>
             <Field label="Duration (minutes)" htmlFor="sv-dur"><Input id="sv-dur" type="number" min={5} value={form.durationMin} onChange={e => setForm(f => ({ ...f, durationMin: Number(e.target.value) }))} /></Field>
             <Field label="Staff needed for this service" htmlFor="sv-staff-count">
-              <Select id="sv-staff-count" value={form.staffCount} onChange={e => { const staffCount = Number(e.target.value) as 1 | 2; setForm(f => ({ ...f, staffCount, commissionPct: staffCount === 2 && f.commissionPct === 50 ? 33.33 : f.commissionPct })); }}>
+              <Select id="sv-staff-count" value={form.staffCount} onChange={e => { const staffCount = Number(e.target.value) as 1 | 2; setForm(f => ({ ...f, staffCount, commissionPct: staffCount === 2 && f.commissionPct === 50 ? 33.35 : f.commissionPct })); }}>
                 <option value={1}>1 staff member</option>
                 <option value={2}>2 staff members</option>
               </Select>
             </Field>
             <Field label="Commission per staff member" htmlFor="sv-commission">
-              <Select id="sv-commission" value={form.commissionPct} onChange={e => setForm(f => ({ ...f, commissionPct: Number(e.target.value) as 30 | 33.33 | 40 | 50 }))}>
+              <Select id="sv-commission" value={form.commissionPct} onChange={e => setForm(f => ({ ...f, commissionPct: Number(e.target.value) as 30 | 33.35 | 40 | 50 }))}>
                 <option value={30}>30%</option>
-                <option value={33.33}>33.33%</option>
+                <option value={33.35}>33.35%</option>
                 <option value={40}>40%</option>
                 <option value={50}>50%</option>
               </Select>

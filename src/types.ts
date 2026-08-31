@@ -36,7 +36,7 @@ export interface ServiceItem {
   durationMin: number;
   description: string;
   staffCount: 1 | 2;
-  commissionPct: 30 | 33.33 | 40 | 50;
+  commissionPct: 30 | 33.35 | 40 | 50;
 }
 
 export interface Customer {
@@ -84,6 +84,7 @@ export interface Appointment {
   items?: AppointmentServiceLine[];
   status: AppointmentStatus;
   customerEmail?: string;
+  cardNumber?: string;
   createdAt?: number;
   ticketNumber?: string;
   branchId?: string;

@@ -36,10 +36,10 @@ function normalizeRole(role: unknown): string {
 function serviceStaffCount(value: unknown): 1 | 2 {
   return Number(value) === 2 ? 2 : 1;
 }
-function commissionPct(value: unknown, staffCount?: unknown): 30 | 33.33 | 40 | 50 {
+function commissionPct(value: unknown, staffCount?: unknown): 30 | 33.35 | 40 | 50 {
   const rate = Number(value);
-  if (rate === 30 || rate === 33.33 || rate === 40 || rate === 50) return rate;
-  return serviceStaffCount(staffCount) === 2 ? 33.33 : 50;
+  if (rate === 30 || rate === 33.35 || rate === 40 || rate === 50) return rate;
+  return serviceStaffCount(staffCount) === 2 ? 33.35 : 50;
 }
 function assistantCompensation(serviceFee: unknown, hasSpecialBraid = false): number {
   if (hasSpecialBraid) return 400;
@@ -90,6 +90,7 @@ function apptSlots(appt: any): { staffId: string; start: number; end: number }[]
 }
 
 function serviceCommission(item: any): number {
+  if (item?.type !== 'service') return 0;
   const recorded = Number(item.commission);
   if (Number.isFinite(recorded)) return Math.max(0, recorded);
   const revenue = Number(item.lineTotalAfterDiscount ?? Number(item.price || 0) * Number(item.qty || 1)) || 0;
@@ -102,9 +103,10 @@ function serviceCommission(item: any): number {
 
 function staffCommission(item: any, staffId: unknown): number {
   if (!staffId) return 0;
-  const hasMultipleStaff = Boolean(item.coStaffId || item.helperStaffId);
+  const hasMultipleStaff = Boolean(item.coStaffId || item.thirdStaffId || item.helperStaffId);
   if (String(item.staffId || '') === String(staffId)) return hasMultipleStaff ? Number(item.primaryCommission ?? serviceCommission(item)) || 0 : serviceCommission(item);
   if (String(item.coStaffId || '') === String(staffId)) return Number(item.coStaffCommission ?? serviceCommission(item)) || 0;
+  if (String(item.thirdStaffId || '') === String(staffId)) return Number(item.thirdStaffCommission ?? 0) || 0;
   return 0;
 }
 
@@ -112,6 +114,11 @@ function createTicketNumber(date: string): string {
   const datePart = date.replace(/[^0-9]/g, '').slice(-4);
   const randomPart = String(Math.floor(1000 + Math.random() * 9000));
   return `SG-${datePart}-${randomPart}`;
+}
+function appointmentCardNumber(value: unknown): string {
+  const cardNumber = String(value || '').trim();
+  if (cardNumber && !/^\d{1,30}$/.test(cardNumber)) throw new Error('Card number must contain digits only');
+  return cardNumber;
 }
 
 async function notifyCustomer(email: string | undefined, subject: string, message: string, referenceId: string) {
@@ -532,6 +539,12 @@ export const handler = router({
           if (order.createdAt >= fortnightFrom) fortnightCommission += commission;
           if (order.appointmentId) linkedAppointmentIds.add(String(order.appointmentId));
         }
+        if (sameStaffIdentity(item.thirdStaffId, item.thirdStaffName, context)) {
+          const commission = staffCommission(item, item.thirdStaffId);
+          if (order.createdAt >= todayFrom) todayCommission += commission;
+          if (order.createdAt >= fortnightFrom) fortnightCommission += commission;
+          if (order.appointmentId) linkedAppointmentIds.add(String(order.appointmentId));
+        }
         if (sameStaffIdentity(item.helperStaffId, item.helperStaffName, context)) {
           if (order.createdAt >= todayFrom) todayAssistant += assistant;
           if (order.createdAt >= fortnightFrom) fortnightAssistant += assistant;
@@ -852,10 +865,14 @@ export const handler = router({
     const items = Array.isArray(b.items) && b.items.length ? b.items : b.serviceId ? [{ serviceId: b.serviceId, serviceName: b.serviceName, price: b.price || 0, currency: b.currency || 'KES', durationMin: b.durationMin || 30, staffId: b.staffId, staffName: b.staffName }] : requestedCategories.length ? [{ serviceId: null, serviceName: `Requested: ${requestedCategories.join(' + ')}`, price: 0, currency: 'KES', durationMin: 30, staffId: b.staffId, staffName: b.staffName }] : [];
     const appointmentDate = b.date || new Date().toISOString().slice(0, 10);
     const appointmentTime = b.time || '00:00';
+    if (b.cardNumber && !['owner', 'admin', 'receptionist'].includes(context?.role || '')) return error('Only the owner, administrator or receptionist can add a card number', 403);
+    let cardNumber = '';
+    try { cardNumber = appointmentCardNumber(b.cardNumber); } catch (cause: any) { return error(cause.message, 400); }
     if (!b.customerName || items.length === 0) return error('Missing required appointment fields', 400);
     for (const it of items) { if (!it.serviceId && !requestedCategories.length) return error('Each service needs a service selected', 400); }
 
     const { items: existing } = await db.list('appointments', { limit: 1000 });
+    if (cardNumber && (existing as any[]).some(appointment => !appointment.deletedAt && appointment.date === appointmentDate && String(appointment.cardNumber || '') === cardNumber)) return error('This card number is already assigned on the selected date', 409);
     let cursor = toMinutes(appointmentTime);
     const newSlots: { staffId: string; start: number; end: number; name: string }[] = [];
     for (const it of items) {
@@ -914,6 +931,7 @@ export const handler = router({
       customerEmail, staffId: items[0].staffId || null, staffName: staffNames.join(', ') || null,
       branchId: branch.id, branchName: branch.name,
       date: appointmentDate, time: appointmentTime, durationMin: totalDurationMin, price: totalPrice, currency,
+      cardNumber,
       items, status: 'pending', createdAt: Date.now(),
     }]);
     if (!id) return error('Failed to create appointment', 500);
@@ -937,6 +955,12 @@ export const handler = router({
     const [existing] = await db.get('appointments', [params.id]);
     if (!existing) return error('Appointment not found', 404);
     const patch: any = body;
+    const canManageCardNumber = ['owner', 'admin', 'receptionist'].includes(context.role);
+    if ('cardNumber' in patch && !canManageCardNumber) return error('Only the owner, administrator or receptionist can add a card number', 403);
+    if (existing.cardNumber && 'cardNumber' in patch && String(patch.cardNumber || '') !== String(existing.cardNumber)) return error('A card number cannot be changed after it is entered', 409);
+    if ('cardNumber' in patch) {
+      try { patch.cardNumber = appointmentCardNumber(patch.cardNumber); } catch (cause: any) { return error(cause.message, 400); }
+    }
     const isOwner = context.role === 'owner';
     const isCancellation = patch.status === 'cancelled' || patch.status === 'no-show';
     const isStatusOnlyChange = Object.keys(patch).length === 1 && 'status' in patch;
@@ -949,6 +973,11 @@ export const handler = router({
     const nextTime = patch.time || existing.time;
     const nextStaffId = 'staffId' in patch ? patch.staffId : existing.staffId;
     const nextDuration = Number(patch.durationMin || existing.durationMin || 30);
+    const nextCardNumber = String(patch.cardNumber || existing.cardNumber || '');
+    if (nextCardNumber) {
+      const { items: appointments } = await db.list('appointments', { limit: 2000 });
+      if ((appointments as any[]).some(appointment => appointment.id !== existing.id && !appointment.deletedAt && appointment.date === nextDate && String(appointment.cardNumber || '') === nextCardNumber)) return error('This card number is already assigned on the selected date', 409);
+    }
     if (nextStaffId && nextStaffId !== existing.staffId) {
       const [assignedStaff] = await db.get('staff', [patch.staffId]);
       if (!assignedStaff) return error('Staff member not found', 404);
@@ -1258,6 +1287,9 @@ export const handler = router({
       item.staffName = null;
       item.coStaffId = null;
       item.coStaffName = null;
+      item.thirdStaffId = null;
+      item.thirdStaffName = null;
+      item.thirdStaffCommission = 0;
       item.helperStaffId = null;
       item.helperStaffName = null;
       item.assistantPayment = 0;
@@ -1338,6 +1370,7 @@ export const handler = router({
 
     for (const item of serviceItems) {
       const coStaffId = item.staffCount === 2 ? String(item.coStaffId || '') : '';
+      const thirdStaffId = String(item.thirdStaffId || '');
       const helperId = String(item.helperStaffId || '');
       if (coStaffId) {
         const [coStaff] = await db.get('staff', [coStaffId]);
@@ -1345,10 +1378,17 @@ export const handler = router({
         if (coStaff.id === item.staffId) return error('Co-staff must be different from the primary staff member', 400);
         item.coStaffName = coStaff.name;
       }
+      if (thirdStaffId) {
+        const [thirdStaff] = await db.get('staff', [thirdStaffId]);
+        if (!coStaffId) return error('Assign co-staff before adding a third staff member', 400);
+        if (!thirdStaff || thirdStaff.branchId !== context?.branchId) return error('Third staff must be an employee from the active branch', 400);
+        if (thirdStaff.id === item.staffId || thirdStaff.id === coStaffId) return error('Third staff must be different from the other service staff', 400);
+        item.thirdStaffName = thirdStaff.name;
+      }
       if (helperId) {
         const [helper] = await db.get('staff', [helperId]);
         if (!helper || helper.branchId !== context?.branchId) return error('Helper must be an employee from the active branch', 400);
-        if (helper.id === item.staffId || helper.id === coStaffId) return error('Assistant must be different from the service staff', 400);
+        if (helper.id === item.staffId || helper.id === coStaffId || helper.id === thirdStaffId) return error('Assistant must be different from the service staff', 400);
         item.helperStaffName = helper.name;
       }
       const consumedProducts = Array.isArray(item.consumedProducts) ? item.consumedProducts : [];
@@ -1440,13 +1480,14 @@ export const handler = router({
       item.commissionRate = commissionPct(item.commissionPct, item.staffCount);
       item.commissionPct = item.commissionRate;
       const defaultCommission = item.commissionBase * (item.commissionRate / 100);
-      const hasMultipleStaff = Boolean(item.coStaffId || item.helperStaffId);
+      const hasMultipleStaff = Boolean(item.coStaffId || item.thirdStaffId || item.helperStaffId);
       item.primaryCommission = hasMultipleStaff ? Math.max(0, Number(item.primaryCommission ?? defaultCommission)) : defaultCommission;
       item.coStaffCommission = item.coStaffId ? Math.max(0, Number(item.coStaffCommission ?? defaultCommission)) : 0;
-      if (item.primaryCommission + item.coStaffCommission > item.commissionBase) return error(`Staff commissions for ${item.name} cannot exceed the service balance after product and assistant costs`, 400);
+      item.thirdStaffCommission = item.thirdStaffId ? Math.max(0, Number(item.thirdStaffCommission ?? 0)) : 0;
+      if (item.primaryCommission + item.coStaffCommission + item.thirdStaffCommission > item.commissionBase) return error(`Staff commissions for ${item.name} cannot exceed the service balance after product and assistant costs`, 400);
       item.commission = item.primaryCommission;
-      item.commissionParticipants = item.staffCount;
-      item.commissionSplit = item.coStaffId ? 'manual-two-staff' : 'manual-one-staff';
+      item.commissionParticipants = item.thirdStaffId ? 3 : item.staffCount;
+      item.commissionSplit = item.thirdStaffId ? 'manual-three-staff' : item.coStaffId ? 'manual-two-staff' : 'manual-one-staff';
     }
 
     let customerName = b.customerName || 'Walk-in Customer';
@@ -1510,6 +1551,11 @@ export const handler = router({
           total.commission += staffCommission(item, item.coStaffId);
           totals.set(item.coStaffId, total);
         }
+        if (item.thirdStaffId) {
+          const total = totals.get(item.thirdStaffId) || { commission: 0, assistant: 0 };
+          total.commission += staffCommission(item, item.thirdStaffId);
+          totals.set(item.thirdStaffId, total);
+        }
         if (item.helperStaffId) {
           const total = totals.get(item.helperStaffId) || { commission: 0, assistant: 0 };
           total.assistant += Number(item.assistantPayment ?? item.helperDeduction ?? 0);
@@ -1552,6 +1598,11 @@ export const handler = router({
         if (item.coStaffId && !alreadyPaid.has(`${order.id}:${index}:co-staff`)) {
           const coStaff = staffById.get(item.coStaffId);
           if (coStaff) lines.push({ itemKey: `${order.id}:${index}:co-staff`, orderId: order.id, staffId: item.coStaffId, staffName: item.coStaffName || coStaff.name, revenue, commissionBase, helperDeduction: Number(item.helperDeduction || 0), productCost: Number(item.productCost || 0), commission, currency: item.currency || 'KES', branchId: order.branchId || context.branchId || null, createdAt: now, role: 'co-staff' });
+        }
+        if (item.thirdStaffId && !alreadyPaid.has(`${order.id}:${index}:third-staff`)) {
+          const thirdStaff = staffById.get(item.thirdStaffId);
+          const thirdStaffCommission = staffCommission(item, item.thirdStaffId);
+          if (thirdStaff) lines.push({ itemKey: `${order.id}:${index}:third-staff`, orderId: order.id, staffId: item.thirdStaffId, staffName: item.thirdStaffName || thirdStaff.name, revenue, commissionBase, helperDeduction: Number(item.helperDeduction || 0), productCost: Number(item.productCost || 0), commission: thirdStaffCommission, currency: item.currency || 'KES', branchId: order.branchId || context.branchId || null, createdAt: now, role: 'third-staff' });
         }
         if (item.helperStaffId && !alreadyPaid.has(`${order.id}:${index}:assistant`)) {
           const assistant = staffById.get(item.helperStaffId);
@@ -1677,6 +1728,16 @@ export const handler = router({
             entry.revenue += serviceRevenueAfterDiscount; entry.commission += coStaffCommission; entry.count += it.qty;
             staffRevenue.set(key, entry);
             commissionByClient.push({ clientId: o.customerId || null, clientName: o.customerName || 'Walk-in Customer', staffName: it.coStaffName || coStaff?.name || 'Unknown', serviceName: it.name, revenue: serviceRevenueAfterDiscount, assistantPayment: 0, commission: coStaffCommission, currency: cur, createdAt: o.createdAt });
+          }
+          if (it.thirdStaffId) {
+            const thirdStaff: any = staffById.get(it.thirdStaffId);
+            const thirdStaffCommission = staffCommission(it, it.thirdStaffId);
+            commissionsByCurrency[cur] = (commissionsByCurrency[cur] || 0) + thirdStaffCommission;
+            const key = `${it.thirdStaffId}|${cur}`;
+            const entry = staffRevenue.get(key) || { name: it.thirdStaffName || thirdStaff?.name || 'Unknown', currency: cur, revenue: 0, commission: 0, helperDeductions: 0, count: 0 };
+            entry.revenue += serviceRevenueAfterDiscount; entry.commission += thirdStaffCommission; entry.count += it.qty;
+            staffRevenue.set(key, entry);
+            commissionByClient.push({ clientId: o.customerId || null, clientName: o.customerName || 'Walk-in Customer', staffName: it.thirdStaffName || thirdStaff?.name || 'Unknown', serviceName: it.name, revenue: serviceRevenueAfterDiscount, assistantPayment: 0, commission: thirdStaffCommission, currency: cur, createdAt: o.createdAt });
           }
           const skey = `${it.name}|${cur}`;
           const s = serviceRevenue.get(skey) || { name: it.name, currency: cur, revenue: 0, count: 0 };

@@ -6,7 +6,7 @@ import { MpesaPayModal } from '../components/MpesaPay';
 import type { Appointment, Customer, ServiceItem, Product, Staff, Currency } from '../types';
 
 interface ConsumedProductLine { productId: string; name: string; qty: number; cost: number; unit?: string; }
-interface CartLine { key: string; type: 'service' | 'product'; refId: string; name: string; price: number; currency: Currency; qty: number; staffCount?: 1 | 2; commissionPct?: 30 | 33.33 | 40 | 50; staffId?: string; staffName?: string; coStaffId?: string; coStaffName?: string; helperStaffId?: string; helperStaffName?: string; assistantPayment?: number; primaryCommission?: number; coStaffCommission?: number; consumedProducts?: ConsumedProductLine[]; }
+interface CartLine { key: string; type: 'service' | 'product'; refId: string; name: string; price: number; currency: Currency; qty: number; staffCount?: 1 | 2; commissionPct?: 30 | 33.35 | 40 | 50; staffId?: string; staffName?: string; coStaffId?: string; coStaffName?: string; thirdStaffId?: string; thirdStaffName?: string; helperStaffId?: string; helperStaffName?: string; assistantPayment?: number; primaryCommission?: number; coStaffCommission?: number; thirdStaffCommission?: number; consumedProducts?: ConsumedProductLine[]; }
 
 function todayStr() { return new Date().toISOString().slice(0, 10); }
 function hasSpecialAssistantBraid(line: CartLine): boolean {
@@ -99,7 +99,7 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
   const addService = (s: ServiceItem, assignedStaffId = currentStaffId) => {
     const assignedStaff = staff.find(member => member.id === assignedStaffId);
     const staffCount = s.staffCount || 1;
-    return setCart(c => [...c, { key: `${s.id}-${Date.now()}`, type: 'service', refId: s.id, name: s.name, price: s.price, currency: s.currency, qty: 1, staffCount, commissionPct: s.commissionPct || (staffCount === 2 ? 33.33 : 50), staffId: assignedStaff?.id, staffName: assignedStaff?.name, consumedProducts: [] }]);
+    return setCart(c => [...c, { key: `${s.id}-${Date.now()}`, type: 'service', refId: s.id, name: s.name, price: s.price, currency: s.currency, qty: 1, staffCount, commissionPct: s.commissionPct || (staffCount === 2 ? 33.35 : 50), staffId: assignedStaff?.id, staffName: assignedStaff?.name, consumedProducts: [] }]);
   };
   const addProduct = (p: Product) => {
     setCart(c => {
@@ -123,8 +123,13 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
     const coStaff = staff.find(x => x.id === coStaffId);
     setCart(c => c.map(l => l.key === key ? { ...l, coStaffId: coStaff?.id, coStaffName: coStaff?.name } : l));
   };
-  const setStaffCount = (key: string, staffCount: 1 | 2) => setCart(current => current.map(line => line.key === key ? { ...line, staffCount, ...(staffCount === 1 ? { coStaffId: undefined, coStaffName: undefined, coStaffCommission: 0 } : {}) } : line));
-  const setManualAmount = (key: string, field: 'primaryCommission' | 'coStaffCommission' | 'assistantPayment', value: number) => setCart(current => current.map(line => line.key === key ? { ...line, [field]: Math.max(0, value) } : line));
+  const setLineThirdStaff = (key: string, thirdStaffId: string) => {
+    const thirdStaff = staff.find(x => x.id === thirdStaffId);
+    setCart(c => c.map(l => l.key === key ? { ...l, thirdStaffId: thirdStaff?.id, thirdStaffName: thirdStaff?.name } : l));
+  };
+  const setStaffCount = (key: string, staffCount: 1 | 2) => setCart(current => current.map(line => line.key === key ? { ...line, staffCount, ...(staffCount === 1 ? { coStaffId: undefined, coStaffName: undefined, coStaffCommission: 0, thirdStaffId: undefined, thirdStaffName: undefined, thirdStaffCommission: 0 } : {}) } : line));
+  const toggleThirdStaff = (key: string) => setCart(current => current.map(line => line.key === key ? line.thirdStaffId !== undefined ? { ...line, thirdStaffId: undefined, thirdStaffName: undefined, thirdStaffCommission: 0 } : { ...line, thirdStaffId: '' } : line));
+  const setManualAmount = (key: string, field: 'primaryCommission' | 'coStaffCommission' | 'thirdStaffCommission' | 'assistantPayment', value: number) => setCart(current => current.map(line => line.key === key ? { ...line, [field]: Math.max(0, value) } : line));
   const setLineHelper = (key: string, helperStaffId: string) => {
     const helper = staff.find(x => x.id === helperStaffId);
     setCart(c => c.map(l => l.key === key ? { ...l, helperStaffId: helper?.id, helperStaffName: helper?.name, assistantPayment: helper ? assistantCompensation(l.price * l.qty, hasSpecialAssistantBraid(l)) : 0 } : l));
@@ -224,7 +229,7 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
             price: l.price,
             currency: l.currency,
             qty: l.qty,
-            ...(l.type === 'service' ? { staffCount: l.staffCount || 1, commissionPct: l.commissionPct || 50, staffId: l.staffId || null, staffName: l.staffName || null, coStaffId: l.staffCount === 2 ? l.coStaffId || null : null, coStaffName: l.staffCount === 2 ? l.coStaffName || null : null, helperStaffId: l.helperStaffId || null, helperStaffName: l.helperStaffName || null, assistantPayment: Number(l.assistantPayment || 0), primaryCommission: l.primaryCommission, coStaffCommission: l.coStaffCommission, consumedProducts: (l.consumedProducts || []).map(item => ({ productId: item.productId, name: item.name, qty: Number(item.qty || 0), cost: Number(item.cost || 0), unit: item.unit || '' })) } : {}),
+            ...(l.type === 'service' ? { staffCount: l.staffCount || 1, commissionPct: l.commissionPct || 50, staffId: l.staffId || null, staffName: l.staffName || null, coStaffId: l.staffCount === 2 ? l.coStaffId || null : null, coStaffName: l.staffCount === 2 ? l.coStaffName || null : null, thirdStaffId: l.thirdStaffId || null, thirdStaffName: l.thirdStaffName || null, helperStaffId: l.helperStaffId || null, helperStaffName: l.helperStaffName || null, assistantPayment: Number(l.assistantPayment || 0), primaryCommission: l.primaryCommission, coStaffCommission: l.coStaffCommission, thirdStaffCommission: l.thirdStaffCommission, consumedProducts: (l.consumedProducts || []).map(item => ({ productId: item.productId, name: item.name, qty: Number(item.qty || 0), cost: Number(item.cost || 0), unit: item.unit || '' })) } : {}),
           })),
         discountPct, paymentMethod, promoCode: promoCode.trim() || undefined, redeemPoints: redeemPoints || undefined, mpesaReceiptNumber, appointmentId: appointment?.id,
       });
@@ -276,8 +281,8 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
                   <h3 className="text-xs font-semibold text-[#6E6E73] uppercase tracking-wide mb-2">{cat}</h3>
                   <div className="grid sm:grid-cols-2 gap-2">
                     {services.filter(s => s.category === cat).map(s => (
-                      <button key={s.id} onClick={() => addService(s)} className="text-left rounded-2xl border border-black/5 bg-white p-3 hover:border-[#0071e3]/40 hover:shadow-sm transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3]">
-                        <p className="font-medium text-sm">{s.name}</p>
+                      <button key={s.id} onClick={() => addService(s)} className={`text-left rounded-2xl border p-3 hover:border-[#0071e3]/40 hover:shadow-sm transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3] ${s.commissionPct === 40 ? 'border-amber-300 bg-amber-50/40' : 'border-black/5 bg-white'}`}>
+                        <div className="flex items-center justify-between gap-2"><p className="font-medium text-sm">{s.name}</p>{s.commissionPct === 40 && <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800">40%</span>}</div>
                         <p className="text-xs text-[#6E6E73]">{fmtMoney(s.price, s.currency)} · {s.durationMin} min</p>
                       </button>
                     ))}
@@ -325,18 +330,20 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
                         <option value="">Assign staff…</option>
                         {assignableStaff.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                       </Select>
-                      <Button size="sm" variant="secondary" onClick={() => setStaffCount(l.key, l.staffCount === 2 ? 1 : 2)}>{l.staffCount === 2 ? 'Use single staff' : 'Split with co-staff'}</Button>
+                      <div className="flex gap-2"><Button size="sm" variant="secondary" onClick={() => setStaffCount(l.key, l.staffCount === 2 ? 1 : 2)}>{l.staffCount === 2 ? 'Use single staff' : 'Split with co-staff'}</Button>{l.staffCount === 2 && <Button size="sm" variant="secondary" onClick={() => toggleThirdStaff(l.key)}>{l.thirdStaffId !== undefined ? 'Remove third staff' : 'Add third staff'}</Button>}</div>
                       {l.staffCount === 2 && <Select aria-label={`Assign co-staff for ${l.name}`} className="text-xs py-1.5" value={l.coStaffId || ''} onChange={e => setLineCoStaff(l.key, e.target.value)}>
                         <option value="">Assign co-staff...</option>
                         {assignableStaff.filter(s => s.id !== l.staffId).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                       </Select>}
+                      {l.thirdStaffId !== undefined && <Select aria-label={`Assign third staff for ${l.name}`} className="text-xs py-1.5" value={l.thirdStaffId} onChange={e => setLineThirdStaff(l.key, e.target.value)}><option value="">Assign third staff...</option>{assignableStaff.filter(s => s.id !== l.staffId && s.id !== l.coStaffId).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</Select>}
                       <Select aria-label={`Assign assistant for ${l.name}`} className="text-xs py-1.5" value={l.helperStaffId || ''} onChange={e => setLineHelper(l.key, e.target.value)}>
                         <option value="">No assistant</option>
                         {assignableStaff.filter(s => s.id !== l.staffId).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                       </Select>
-                      {(l.staffCount === 2 || l.helperStaffId) && <div className="grid grid-cols-2 gap-2">
+                      {(l.staffCount === 2 || l.thirdStaffId !== undefined || l.helperStaffId) && <div className="grid grid-cols-2 gap-2">
                         <Field label="Primary earns (KES)" htmlFor={`primary-commission-${l.key}`}><Input id={`primary-commission-${l.key}`} type="number" min={0} value={l.primaryCommission ?? ''} onChange={e => setManualAmount(l.key, 'primaryCommission', Number(e.target.value))} className="py-1.5 text-xs" /></Field>
                         {l.staffCount === 2 && <Field label="Co-staff earns (KES)" htmlFor={`co-commission-${l.key}`}><Input id={`co-commission-${l.key}`} type="number" min={0} value={l.coStaffCommission ?? ''} onChange={e => setManualAmount(l.key, 'coStaffCommission', Number(e.target.value))} className="py-1.5 text-xs" /></Field>}
+                        {l.thirdStaffId !== undefined && <Field label="Third staff earns (KES)" htmlFor={`third-commission-${l.key}`}><Input id={`third-commission-${l.key}`} type="number" min={0} value={l.thirdStaffCommission ?? ''} onChange={e => setManualAmount(l.key, 'thirdStaffCommission', Number(e.target.value))} className="py-1.5 text-xs" /></Field>}
                         {l.helperStaffId && <Field label="Assistant fee (KES)" htmlFor={`assistant-fee-${l.key}`}><Input id={`assistant-fee-${l.key}`} type="number" min={0} value={l.assistantPayment ?? 0} onChange={e => setManualAmount(l.key, 'assistantPayment', Number(e.target.value))} className="py-1.5 text-xs" /></Field>}
                       </div>}
                       <div className="grid grid-cols-[1fr_auto] gap-2">
