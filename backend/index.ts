@@ -882,6 +882,7 @@ export const handler = router({
     }
 
     for (const existingAppt of existing as any[]) {
+      if (existingAppt.deletedAt) continue;
       if (existingAppt.date !== appointmentDate) continue;
       if (['cancelled', 'no-show', 'completed'].includes(existingAppt.status)) continue;
       const otherSlots = apptSlots(existingAppt);
@@ -961,14 +962,14 @@ export const handler = router({
     if ('cardNumber' in patch) {
       try { patch.cardNumber = appointmentCardNumber(patch.cardNumber); } catch (cause: any) { return error(cause.message, 400); }
     }
-    const isOwner = context.role === 'owner';
+    const canManageClosedAppointments = ['owner', 'admin'].includes(context.role);
     const isCancellation = patch.status === 'cancelled' || patch.status === 'no-show';
     const isStatusOnlyChange = Object.keys(patch).length === 1 && 'status' in patch;
     if (context.role === 'barber' && existing.staffId !== context.staffId) return error('You can only update appointments assigned to you', 403);
     if (!isCancellation && !isStatusOnlyChange && !['owner', 'admin', 'receptionist'].includes(context.role)) return error('Only the owner, administrator or receptionist can edit appointment details', 403);
     const editsDetails = patch.date || patch.time || patch.serviceId || patch.durationMin || 'staffId' in patch;
     if (editsDetails && !['owner', 'admin', 'receptionist'].includes(currentContext()?.role || '')) return error('Only the owner, administrator or receptionist can edit appointment details', 403);
-    if (!isOwner && ['completed', 'cancelled', 'no-show'].includes(existing.status) && (patch.date || patch.time || patch.serviceId || 'staffId' in patch)) return error('Completed or closed appointments can only be edited by the owner', 409);
+    if (!canManageClosedAppointments && ['completed', 'cancelled', 'no-show'].includes(existing.status) && (patch.date || patch.time || patch.serviceId || 'staffId' in patch)) return error('Completed or closed appointments can only be edited by the owner or administrator', 409);
     const nextDate = patch.date || existing.date;
     const nextTime = patch.time || existing.time;
     const nextStaffId = 'staffId' in patch ? patch.staffId : existing.staffId;
@@ -995,6 +996,7 @@ export const handler = router({
       const start = toMinutes(nextTime);
       const end = start + nextDuration;
       for (const appointment of appointments as any[]) {
+        if (appointment.deletedAt) continue;
         if (appointment.id === existing.id || appointment.date !== nextDate || ['completed', 'cancelled', 'no-show'].includes(appointment.status)) continue;
         for (const slot of apptSlots(appointment)) if (slot.staffId === nextStaffId && start < slot.end && end > slot.start) return error('That staff member already has an appointment at the selected time', 409);
       }

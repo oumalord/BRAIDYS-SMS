@@ -43,7 +43,7 @@ const TABS: { key: TabKey; label: string; icon: any; roles: Role[] }[] = [
   { key: 'reports', label: 'Reports', icon: BarChart3, roles: ['owner', 'manager', 'admin'] },
   { key: 'ai', label: 'AI Assistant', icon: Sparkles, roles: ['owner', 'admin'] },
   { key: 'booking', label: 'Book Appointment', icon: Calendar, roles: ['customer'] },
-  { key: 'logs', label: 'Audit Logs', icon: ClipboardList, roles: ['owner'] },
+  { key: 'logs', label: 'Audit Logs', icon: ClipboardList, roles: ['owner', 'admin'] },
   { key: 'admin', label: 'Admin', icon: Building2, roles: ['admin'] },
 ];
 
@@ -177,7 +177,7 @@ function App() {
             <div className={`hidden items-center gap-3 sm:flex ${isOwner ? 'md:hidden' : ''}`}>
               <span className="truncate text-[10px] text-gray-300 sm:text-xs">{account?.salonName || 'All Salons'} · {account?.name}</span><button className="text-[10px] text-gray-300 underline sm:text-xs" onClick={() => { AuthApi.logout(); setAccount(null); }}>Log out</button>
             </div>
-            {effectiveRole === 'owner' && branches.length > 0 && <div className="shrink-0"><SelectBranch branches={branches} value={selectedBranchId} onChange={selectBranch} /></div>}
+            {isOwner && branches.length > 0 && <div className="shrink-0"><SelectBranch branches={branches} value={selectedBranchId} onChange={selectBranch} /></div>}
             <button className="rounded-lg p-2 text-white hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-[#4C82FF] sm:hidden" aria-label={menuOpen ? 'Close menu' : 'Open menu'} onClick={() => setMenuOpen(m => !m)}>
               {menuOpen ? <X size={20} /> : <Menu size={20} />}
             </button>

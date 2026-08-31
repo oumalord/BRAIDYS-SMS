@@ -89,7 +89,7 @@ function Appointments({ role }: { role: Role }) {
       setForm({ serviceId: '', staffId: '', date: form.date, time: '10:00', cardNumber: '' });
       reload();
     } catch (e: any) {
-      toast(e?.response?.data?.error || 'That time slot is not available.', 'error');
+      toast(e?.message || 'Could not book the appointment.', 'error');
     } finally {
       setSaving(false);
     }
@@ -104,6 +104,7 @@ function Appointments({ role }: { role: Role }) {
     const startMin = toMin(form.time);
     const endMin = startMin + service.durationMin;
     const conflict = staffMember && appts.find(a => {
+      if (a.date !== form.date) return false;
       if (a.staffId !== staffMember.id) return false;
       if (a.status === 'cancelled' || a.status === 'no-show' || a.status === 'completed') return false;
       const s = toMin(a.time);
@@ -255,6 +256,7 @@ function Appointments({ role }: { role: Role }) {
   let account: { staffId?: string } | null = null;
   try { account = JSON.parse(window.localStorage.getItem('safigroom_account') || 'null'); } catch { account = null; }
   const assignableStaff = staff.filter(canAssignStaff);
+  const canBookAppointments = ['owner', 'admin', 'receptionist'].includes(role);
 
   return (
     <div className="space-y-6">
@@ -266,12 +268,12 @@ function Appointments({ role }: { role: Role }) {
         <div className="flex items-center gap-2">
           <Field label="Date" htmlFor="date-picker"><Input id="date-picker" type="date" value={date} onChange={e => setDate(e.target.value)} aria-label="Select date" /></Field>
           {(role === 'owner' || role === 'admin') && appts.some(appointment => appointment.status === 'cancelled') && <Button variant="danger" onClick={deleteCancelled} disabled={saving}><Trash2 size={16} aria-hidden="true" />Delete canceled</Button>}
-          <Button onClick={() => { setForm(current => ({ ...current, date })); setOpen(true); }}><Plus size={16} aria-hidden="true" />New Appointment</Button>
+          {canBookAppointments && <Button onClick={() => { setForm(current => ({ ...current, date })); setOpen(true); }}><Plus size={16} aria-hidden="true" />New Appointment</Button>}
         </div>
       </div>
 
       {loading ? <LoadingState label="Loading appointments…" /> : sorted.length === 0 ? (
-        <EmptyState icon={Calendar} title="No appointments" description="There are no appointments scheduled for this date yet." action={<Button onClick={() => { setForm(current => ({ ...current, date })); setOpen(true); }}>Book an appointment</Button>} />
+        <EmptyState icon={Calendar} title="No appointments" description="There are no appointments scheduled for this date yet." action={canBookAppointments ? <Button onClick={() => { setForm(current => ({ ...current, date })); setOpen(true); }}>Book an appointment</Button> : undefined} />
       ) : (
         <div className="space-y-3">
           {sorted.map(a => (
@@ -283,10 +285,10 @@ function Appointments({ role }: { role: Role }) {
               </div>
               <Badge tone={STATUS_TONE[a.status]}>{a.status.replace('-', ' ')}</Badge>
               {(role === 'owner' || role === 'admin' || role === 'receptionist' || (role === 'barber' && a.staffId === account?.staffId)) && <div className="flex flex-wrap gap-2">
-                {(role === 'owner' || (role === 'admin' && !['completed', 'cancelled', 'no-show'].includes(a.status))) && <Button size="sm" variant="secondary" onClick={() => beginEdit(a)}><Pencil size={14} aria-hidden="true" />Edit</Button>}
+                {(role === 'owner' || role === 'admin') && <Button size="sm" variant="secondary" onClick={() => beginEdit(a)}><Pencil size={14} aria-hidden="true" />Edit</Button>}
                 {(role === 'owner' || role === 'admin') && a.status === 'completed' && <Button size="sm" variant="secondary" onClick={() => showCompletionSummary(a)}>Deal summary</Button>}
                 {(role === 'owner' || role === 'admin') && a.status === 'completed' && <Button size="sm" variant="secondary" onClick={() => beginCompletionEdit(a)}><Pencil size={14} aria-hidden="true" />Adjust completion</Button>}
-                {role === 'owner' && a.status === 'completed' && <Button size="sm" variant="danger" onClick={() => reopenCompletedDeal(a)} disabled={saving}>Undo completed deal</Button>}
+                {(role === 'owner' || role === 'admin') && a.status === 'completed' && <Button size="sm" variant="danger" onClick={() => reopenCompletedDeal(a)} disabled={saving}>Undo completed deal</Button>}
                 {(role === 'owner' || role === 'admin') && !['completed', 'cancelled', 'no-show'].includes(a.status) && (
                     <Select aria-label={`Assign employee for ${a.customerName}`} value={a.staffId || ''} onChange={e => {
                       const selected = staff.find(s => s.id === e.target.value);
