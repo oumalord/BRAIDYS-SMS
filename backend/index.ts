@@ -50,7 +50,7 @@ function assistantCompensation(serviceFee: unknown, hasSpecialBraid = false): nu
   return 500;
 }
 function hasSpecialAssistantBraid(item: any): boolean {
-  return (item.consumedProducts || []).some((product: any) => ['amara', 'diani'].includes(String(product?.name || '').trim().toLowerCase()));
+  return (item.consumedProducts || []).some((product: any) => ['amara', 'diani', 'marley imported', 'marley angel'].includes(String(product?.name || '').trim().toLowerCase()));
 }
 function sameStaffIdentity(staffId: unknown, staffName: unknown, context: { staffId?: string; name: string }): boolean {
   if (staffId && String(staffId) === String(context.staffId || '')) return true;
@@ -1070,12 +1070,42 @@ export const handler = router({
     if (!appointment || appointment.deletedAt) return error('Appointment not found', 404);
     const deletedAt = Date.now();
     const deletedBy = currentContext()?.name || 'owner';
+    const { items: orders } = await db.list('orders', { limit: 5000 });
+    const order = (orders as any[]).find(item => String(item.appointmentId || '') === appointment.id && !item.deletedAt);
+    if (order) {
+      const { items: payoutItems } = await db.list('payout_items', { limit: 10000 });
+      const recordedPayout = (payoutItems as any[]).some(item => !item.deletedAt && item.orderId === order.id);
+      const productQuantities = new Map<string, number>();
+      for (const item of order.items || []) {
+        if (item.type === 'product' && item.refId) productQuantities.set(item.refId, (productQuantities.get(item.refId) || 0) + Number(item.qty || 0));
+        for (const used of item.consumedProducts || []) if (used.productId) productQuantities.set(used.productId, (productQuantities.get(used.productId) || 0) + Number(used.qty || 0));
+      }
+      const productIds = [...productQuantities.keys()];
+      if (productIds.length) {
+        const products = await db.get('products', productIds);
+        const productUpdates = products.flatMap((product, index) => product ? [{ id: productIds[index], record: { ...product, stock: Number(product.stock || 0) + (productQuantities.get(productIds[index]) || 0) } }] : []);
+        if (productUpdates.length) await db.update('products', productUpdates);
+        await db.add('stock_movements', productUpdates.map(update => ({ productId: update.id, productName: update.record.name, change: productQuantities.get(update.id) || 0, reason: `Deleted appointment: ${appointment.customerName}`, createdAt: deletedAt, actor: deletedBy })));
+      }
+      await db.update('orders', [{ id: order.id, record: { ...order, deletedAt, deletedBy, voidReason: 'Owner deleted the linked appointment', payoutReversalRequired: recordedPayout } }]);
+      if (order.customerId) {
+        const [customer] = await db.get('customers', [order.customerId]);
+        if (customer) {
+          const remainingOrders = (orders as any[]).filter(item => !item.deletedAt && item.id !== order.id && item.customerId === customer.id);
+          const totalSpent = remainingOrders.reduce((sum, item) => sum + Number(item.totalByCurrency?.KES || 0), 0);
+          const totalSpentUSD = remainingOrders.reduce((sum, item) => sum + Number(item.totalByCurrency?.USD || 0), 0);
+          const loyaltyPoints = Math.max(0, remainingOrders.reduce((sum, item) => sum + Math.floor(Number(item.totalByCurrency?.KES || 0) / 100) - Number(item.pointsRedeemed || 0), 0));
+          const lastVisit = remainingOrders.reduce((latest, item) => Math.max(latest, Number(item.createdAt || 0)), 0) || null;
+          await db.update('customers', [{ id: customer.id, record: { ...customer, totalSpent, totalSpentUSD, visits: remainingOrders.length, loyaltyPoints, lastVisit } }]);
+        }
+      }
+    }
     await db.update('appointments', [{ id: appointment.id, record: { ...appointment, deletedAt, deletedBy } }]);
     const { items: queue } = await db.list('queue', { limit: 2000 });
     const queueEntry = (queue as any[]).find(item => item.appointmentId === appointment.id && !item.deletedAt);
     if (queueEntry) await db.update('queue', [{ id: queueEntry.id, record: { ...queueEntry, deletedAt, deletedBy } }]);
-    await audit('deleted appointment', 'appointment', { id: appointment.id, customerName: appointment.customerName, status: appointment.status, queueId: queueEntry?.id || null, completedDealRetained: appointment.status === 'completed' }, deletedBy);
-    return json({ ok: true, completedDealRetained: appointment.status === 'completed' });
+    await audit('deleted appointment', 'appointment', { id: appointment.id, customerName: appointment.customerName, status: appointment.status, queueId: queueEntry?.id || null, orderVoided: Boolean(order), payoutReversalRequired: Boolean(order?.payoutReversalRequired) }, deletedBy);
+    return json({ ok: true, orderVoided: Boolean(order) });
   }],
   'DELETE /api/appointments/cancelled': [async () => {
     requireOwner();

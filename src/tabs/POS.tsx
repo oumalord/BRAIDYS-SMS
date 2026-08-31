@@ -10,7 +10,7 @@ interface CartLine { key: string; type: 'service' | 'product'; refId: string; na
 
 function todayStr() { return new Date().toISOString().slice(0, 10); }
 function hasSpecialAssistantBraid(line: CartLine): boolean {
-  return (line.consumedProducts || []).some(product => ['amara', 'diani'].includes(product.name.trim().toLowerCase()));
+  return (line.consumedProducts || []).some(product => ['amara', 'diani', 'marley imported', 'marley angel'].includes(product.name.trim().toLowerCase()));
 }
 function assistantCompensation(serviceFee: number, hasSpecialBraid = false): number {
   if (hasSpecialBraid) return 400;

@@ -13,6 +13,9 @@
         "db:purge-demo": "tsx database/purge-demo.ts",
         "db:add-braidys-staff": "tsx database/add-braidys-staff.ts",
         "db:reconcile-last-week-commissions": "tsx database/reconcile-last-week-two-staff-commission-2026-08-31.ts",
+        "db:inspect-alice-card-1": "tsx database/inspect-alice-card-1-2026-08-29.ts",
+        "db:void-deleted-appointment-orders": "tsx database/void-orders-for-deleted-appointments-2026-08-31.ts",
+        "db:clear-operational-records": "tsx database/clear-operational-records-2026-08-31.ts",
         "build": "vite build",
            "vercel-build": "node node_modules/esbuild/bin/esbuild backend/server.ts --bundle --platform=node --format=cjs --outfile=api/server.cjs && node node_modules/vite/bin/vite.js build",
         "preview": "vite preview"
