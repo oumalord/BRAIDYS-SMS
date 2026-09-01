@@ -590,6 +590,7 @@ export const handler = router({
 
   'GET /api/staff': [async () => { const { items } = await db.list('staff', { limit: 200 }); return json({ items }); }],
   'POST /api/staff': [async ({ body }) => {
+    requireOwner();
     const b: any = body;
     if (!b.name) return error('Name is required', 400);
     const context = currentContext();
@@ -599,16 +600,14 @@ export const handler = router({
     if (!branch) return error('Choose a valid branch for this staff member', 400);
     if (!b.phone) return error('Employee phone is required', 400);
     const isReceptionist = String(b.role || '').toLowerCase().includes('reception');
-    const credential = String(isReceptionist ? b.password || '' : b.pin || '');
-    if (isReceptionist ? credential.length < 8 : !/^\d{4}$/.test(credential)) {
-      return error(isReceptionist ? 'Receptionist password must be at least 8 characters' : 'Staff PIN must be exactly 4 digits', 400);
-    }
+    const pin = String(b.pin || '');
+    if (!/^\d{4}$/.test(pin)) return error('Staff PIN must be exactly 4 digits', 400);
     const [id] = await db.add('staff', [{ tenantId: branch.salonId, salonName: branch.salonName || context?.salonName || '', name: b.name, role: b.role || 'Staff', specialties: b.specialties || [], branch: branch.name, branchId: branch.id, branchName: branch.name, chair: b.chair || '', phone: b.phone || '', accountEmail: b.accountEmail || '', accountStatus: b.accountStatus || 'pending', employmentStatus: 'active', commissionPct: 50, status: b.status || 'available' }]);
     if (!id) return error('Failed to add staff', 500);
-    await audit('created', 'staff', { id, name: b.name, role: b.role || 'Staff', accountEmail: b.accountEmail || '', commissionPct: 50 }, b.actor || 'owner');
+    await audit('created', 'staff', { id, name: b.name, responsibility: b.role || 'Staff', accountEmail: b.accountEmail || '', commissionPct: 50 }, b.actor || 'owner');
     if (currentContext()) {
       const context = currentContext()!;
-      await db.add('accounts', [{ id: `account-${randomBytes(8).toString('hex')}`, tenantId: branch.salonId, salonName: branch.salonName || context.salonName, branchId: branch.id, name: b.name, email: '', phone: b.phone, role: isReceptionist ? 'receptionist' : 'barber', status: 'active', ...(isReceptionist ? { passwordHash: passwordHash(credential) } : { pinHash: passwordHash(credential) }), staffId: id, createdAt: Date.now() }]);
+      await db.add('accounts', [{ id: `account-${randomBytes(8).toString('hex')}`, tenantId: branch.salonId, salonName: branch.salonName || context.salonName, branchId: branch.id, name: b.name, email: '', phone: b.phone, role: isReceptionist ? 'receptionist' : 'barber', status: 'active', pinHash: passwordHash(pin), staffId: id, createdAt: Date.now() }]);
     }
     return json({ id });
   }],
@@ -617,9 +616,10 @@ export const handler = router({
     const [existing] = await db.get('staff', [params.id]);
     if (!existing) return error('Staff not found', 404);
     const patch: any = body;
-    if (patch.password && String(patch.password).length < 8) return error('Password must be at least 8 characters', 400);
+    if (patch.pin && !/^\d{4}$/.test(String(patch.pin))) return error('Staff PIN must be exactly 4 digits', 400);
     const updated = { ...existing, ...patch };
     delete updated.password;
+    delete updated.pin;
     updated.commissionPct = 50;
     if (patch.employmentStatus === 'laid-off') updated.status = 'off';
     const [ok] = await db.update('staff', [{ id: params.id, record: updated }]);
@@ -630,8 +630,9 @@ export const handler = router({
     const account = (accounts as any[]).find(item => item.staffId === params.id);
     if (account) {
       const accountPatch = { ...account, name: updated.name, phone: updated.phone };
-      if (String(patch.password || '')) {
-        accountPatch.passwordHash = passwordHash(String(patch.password));
+      if (String(patch.pin || '')) {
+        accountPatch.pinHash = passwordHash(String(patch.pin));
+        delete accountPatch.passwordHash;
       }
       await db.update('accounts', [{ id: account.id, record: accountPatch }]);
     }

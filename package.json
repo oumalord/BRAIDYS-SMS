@@ -12,6 +12,7 @@
         "db:clone-branch": "tsx database/clone-branch-data.ts",
         "db:purge-demo": "tsx database/purge-demo.ts",
         "db:add-braidys-staff": "tsx database/add-braidys-staff.ts",
+        "db:add-duncan-receptionist": "tsx database/add-duncan-receptionist-2026-09-01.ts",
         "db:reconcile-last-week-commissions": "tsx database/reconcile-last-week-two-staff-commission-2026-08-31.ts",
         "db:inspect-alice-card-1": "tsx database/inspect-alice-card-1-2026-08-29.ts",
         "db:void-deleted-appointment-orders": "tsx database/void-orders-for-deleted-appointments-2026-08-31.ts",

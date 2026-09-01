@@ -9,7 +9,7 @@ function StaffTab({ role = 'owner' }: { role?: Role }) {
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Staff | null>(null);
-  const [editForm, setEditForm] = useState({ name: '', phone: '', chair: '', password: '' });
+  const [editForm, setEditForm] = useState({ name: '', phone: '', chair: '', pin: '' });
   const [savingEdit, setSavingEdit] = useState(false);
 
   const load = () => { StaffApi.list().then(setStaff).catch(() => toast('Could not load staff.', 'error')).finally(() => setLoading(false)); };
@@ -27,11 +27,10 @@ function StaffTab({ role = 'owner' }: { role?: Role }) {
   const addStaff = async () => {
     if (!form.name.trim()) { toast('Name is required.', 'error'); return; }
     if (!form.phone.trim()) { toast('Phone number is required.', 'error'); return; }
-    const isReceptionist = form.role === 'Receptionist';
-    if (isReceptionist ? form.credential.length < 8 : !/^\d{4}$/.test(form.credential)) { toast(isReceptionist ? 'Receptionist password must be at least 8 characters.' : 'Staff PIN must be exactly 4 digits.', 'error'); return; }
+    if (!/^\d{4}$/.test(form.credential)) { toast('Staff PIN must be exactly 4 digits.', 'error'); return; }
     if (!form.branchId) { toast('Choose a branch for this staff member.', 'error'); return; }
     try {
-      await StaffApi.create({ ...form, password: form.role === 'Receptionist' ? form.credential : undefined, pin: form.role === 'Receptionist' ? undefined : form.credential, accountStatus: 'active', specialties: [], status: 'available' });
+      await StaffApi.create({ ...form, pin: form.credential, accountStatus: 'active', specialties: [], status: 'available' });
       toast('Staff member and worker account created.', 'success');
       setOpen(false);
       setForm({ name: '', role: 'Barber', chair: '', phone: '', credential: '', branchId: branches[0]?.id || '' });
@@ -51,12 +50,12 @@ function StaffTab({ role = 'owner' }: { role?: Role }) {
 
   const editStaff = (member: Staff) => {
     setEditing(member);
-    setEditForm({ name: member.name, phone: member.phone, chair: member.chair, password: '' });
+    setEditForm({ name: member.name, phone: member.phone, chair: member.chair, pin: '' });
   };
 
   const saveStaff = async () => {
     if (!editing || !editForm.name.trim() || !editForm.phone.trim()) { toast('Name and phone are required.', 'error'); return; }
-    if (editForm.password && editForm.password.length < 8) { toast('Password must be at least 8 characters.', 'error'); return; }
+    if (editForm.pin && !/^\d{4}$/.test(editForm.pin)) { toast('Staff PIN must be exactly 4 digits.', 'error'); return; }
     setSavingEdit(true);
     try {
       await StaffApi.update(editing.id, editForm);
@@ -82,7 +81,7 @@ function StaffTab({ role = 'owner' }: { role?: Role }) {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div><h1 className="text-2xl font-semibold tracking-tight">Staff & Chairs</h1><p className="text-sm text-[#6E6E73]">Manage your team and station availability.</p></div>
-        <Button onClick={() => setOpen(true)}><Plus size={16} aria-hidden="true" />Add Staff</Button>
+        {(role === 'owner' || role === 'admin') && <Button onClick={() => setOpen(true)}><Plus size={16} aria-hidden="true" />Add Staff</Button>}
       </div>
 
       <div>
@@ -134,7 +133,7 @@ function StaffTab({ role = 'owner' }: { role?: Role }) {
         </>}>
           <div className="space-y-4">
             <Field label="Full name" htmlFor="s-name"><Input id="s-name" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></Field>
-            <Field label="Role" htmlFor="s-role">
+            <Field label="Responsibility" htmlFor="s-role">
               <Select id="s-role" value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value }))}>
                 <option>Barber</option><option>Hair Stylist</option><option>Nail Technician</option><option>Spa Therapist</option><option>Makeup Artist</option><option>Assistant</option><option>Receptionist</option>
               </Select>
@@ -142,7 +141,7 @@ function StaffTab({ role = 'owner' }: { role?: Role }) {
             <Field label="Chair / Station" htmlFor="s-chair"><Input id="s-chair" value={form.chair} onChange={e => setForm(f => ({ ...f, chair: e.target.value }))} placeholder="e.g. Chair 3" /></Field>
             <Field label="Branch" htmlFor="s-branch"><Select id="s-branch" value={form.branchId} onChange={e => setForm(f => ({ ...f, branchId: e.target.value }))}>{branches.map(branch => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</Select></Field>
             <Field label="Phone" htmlFor="s-phone"><Input id="s-phone" value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} placeholder="+254…" /></Field>
-            <Field label={form.role === 'Receptionist' ? 'Login password' : 'Login PIN'} htmlFor="s-account-credential"><Input id="s-account-credential" type="password" inputMode={form.role === 'Receptionist' ? 'text' : 'numeric'} maxLength={form.role === 'Receptionist' ? 128 : 4} minLength={form.role === 'Receptionist' ? 8 : 4} value={form.credential} onChange={e => setForm(f => ({ ...f, credential: form.role === 'Receptionist' ? e.target.value : e.target.value.replace(/\D/g, '').slice(0, 4) }))} placeholder={form.role === 'Receptionist' ? 'At least 8 characters' : 'Exactly 4 digits'} /></Field>
+            <Field label="Login PIN" htmlFor="s-account-credential"><Input id="s-account-credential" type="password" inputMode="numeric" maxLength={4} minLength={4} value={form.credential} onChange={e => setForm(f => ({ ...f, credential: e.target.value.replace(/\D/g, '').slice(0, 4) }))} placeholder="Exactly 4 digits" /></Field>
             <p className="text-sm rounded-xl bg-[#0071e3]/10 text-[#0058b0] px-3 py-2">Commission is fixed at 50% after product and helper deductions.</p>
           </div>
         </Modal>
@@ -153,7 +152,7 @@ function StaffTab({ role = 'owner' }: { role?: Role }) {
           <Field label="Full name" htmlFor="edit-s-name"><Input id="edit-s-name" name="staff-display-name" autoComplete="off" value={editForm.name} onChange={e => setEditForm(current => ({ ...current, name: e.target.value }))} /></Field>
           <Field label="Phone" htmlFor="edit-s-phone"><Input id="edit-s-phone" name="staff-phone-number" autoComplete="off" value={editForm.phone} onChange={e => setEditForm(current => ({ ...current, phone: e.target.value }))} /></Field>
           <Field label="Chair / Station" htmlFor="edit-s-chair"><Input id="edit-s-chair" name="staff-chair" autoComplete="off" value={editForm.chair} onChange={e => setEditForm(current => ({ ...current, chair: e.target.value }))} /></Field>
-          <Field label="New login password (optional)" htmlFor="edit-s-password"><Input id="edit-s-password" name="staff-new-password" autoComplete="new-password" type="password" minLength={8} value={editForm.password} onChange={e => setEditForm(current => ({ ...current, password: e.target.value }))} placeholder="Leave blank to keep current password" /></Field>
+          <Field label="New login PIN (optional)" htmlFor="edit-s-pin"><Input id="edit-s-pin" name="staff-new-pin" autoComplete="new-password" type="password" inputMode="numeric" maxLength={4} minLength={4} value={editForm.pin} onChange={e => setEditForm(current => ({ ...current, pin: e.target.value.replace(/\D/g, '').slice(0, 4) }))} placeholder="Leave blank to keep current PIN" /></Field>
         </form>
       </Modal>}
     </div>
