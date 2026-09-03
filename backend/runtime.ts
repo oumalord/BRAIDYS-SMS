@@ -103,6 +103,13 @@ export const db = {
     else await sql`DELETE FROM app_records WHERE collection = ${collection} AND (tenant_id = ${context?.tenantId || null} OR record->>'tenantId' = ${context?.tenantId || null}) AND id = ANY(${ids})`;
     return true;
   },
+  async deleteOlderThan(collection: string, timestamp: number) {
+    await init();
+    const context = currentContext();
+    if (context?.role === 'admin') await sql`DELETE FROM app_records WHERE collection = ${collection} AND COALESCE((record->>'createdAt')::bigint, 0) < ${timestamp}`;
+    else await sql`DELETE FROM app_records WHERE collection = ${collection} AND (tenant_id = ${context?.tenantId || null} OR record->>'tenantId' = ${context?.tenantId || null}) AND COALESCE((record->>'createdAt')::bigint, 0) < ${timestamp}`;
+    return true;
+  },
 };
 
 export function json(body: unknown, status = 200) {

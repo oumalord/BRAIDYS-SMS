@@ -128,6 +128,7 @@ async function notifyEmployee(staff: any, employmentStatus: 'active' | 'laid-off
 }
 
 async function audit(action: string, collection: string, record: any, actor = 'system') {
+  await db.deleteOlderThan('audit_logs', Date.now() - 14 * DAY);
   await db.add('audit_logs', [{
     action, collection, actor, recordId: record?.id || null,
     summary: `${action} ${collection}${record?.name ? `: ${record.name}` : record?.customerName ? `: ${record.customerName}` : ''}`,
@@ -568,6 +569,8 @@ export const handler = router({
     });
   }],
   'GET /api/audit-logs': [async ({ query }) => {
+    if (!['owner', 'admin'].includes(currentContext()?.role || '')) return error('Only the owner can view audit logs', 403);
+    await db.deleteOlderThan('audit_logs', Date.now() - 14 * DAY);
     const { items } = await db.list('audit_logs', { limit: 5000 });
     const collection = query.collection;
     const filtered = collection ? (items as any[]).filter(log => log.collection === collection) : items;
@@ -1430,8 +1433,6 @@ export const handler = router({
             unit: product?.unit || used.unit || '',
           };
         });
-        item.assistantPayment = item.helperStaffId ? assistantCompensation(Number(item.price || 0) * Number(item.qty || 1), hasSpecialAssistantBraid(item)) : 0;
-        item.helperDeduction = item.assistantPayment;
       }
       if (updates.length) await db.update('products', updates);
       const productMoves = productItems.map((item: any) => ({
@@ -1456,6 +1457,10 @@ export const handler = router({
       if (movementEntries.length) await db.add('stock_movements', movementEntries);
     }
 
+    for (const item of serviceItems) {
+      item.assistantPayment = item.helperStaffId ? assistantCompensation(Number(item.price || 0) * Number(item.qty || 1), hasSpecialAssistantBraid(item)) : 0;
+      item.helperDeduction = item.assistantPayment;
+    }
     const helperDeductions = serviceItems.reduce((sum: number, item: any) => sum + Number(item.assistantPayment || 0), 0);
     const productSalesCostTotal = productItems.reduce((sum: number, item: any) => sum + Math.max(0, Number(item.cost || 0)) * Number(item.qty || 0), 0);
     const serviceProductCostTotal = serviceItems.reduce((sum: number, item: any) => sum + (item.consumedProducts || []).reduce((inner: number, used: any) => inner + Math.max(0, Number(used.cost || 0)) * Math.max(0, Number(used.qty || 0)), 0), 0);

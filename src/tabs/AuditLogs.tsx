@@ -23,7 +23,7 @@ function AuditLogs() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-3">
-        <div><h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2"><ClipboardList size={21} aria-hidden="true" />Audit Logs</h1><p className="text-sm text-[#6E6E73]">Every committed booking, assignment, sale, expense, inventory change and employment action is preserved.</p></div>
+        <div><h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2"><ClipboardList size={21} aria-hidden="true" />Audit Logs</h1><p className="text-sm text-[#6E6E73]">Audit records are available for 14 days. Owners can download the current records.</p></div>
         <div className="flex gap-2"><Button size="sm" variant="secondary" onClick={load}><RefreshCw size={14} aria-hidden="true" />Refresh</Button><Button size="sm" variant="secondary" onClick={downloadLogs} disabled={!logs.length}>Download CSV</Button></div>
       </div>
       {logs.length === 0 ? <EmptyState icon={ClipboardList} title="No audit events yet" description="Committed business activity will appear here." /> : (

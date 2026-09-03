@@ -40,9 +40,7 @@ function EmployeeDashboard({ account, onAddService }: { account: { name?: string
   if (loading) return <LoadingState label="Loading your assigned clients..." />;
   if (!account.staffId) return <EmptyState icon={AlertTriangle} title="Employee profile is not linked" description="Ask the salon owner to link your employee account before using the dashboard." />;
 
-  const activeAppointments = appointments.filter(item => !['completed', 'cancelled', 'no-show'].includes(item.status));
-  const todayAppointments = activeAppointments.filter(item => item.date === todayStr()).sort((a, b) => a.time.localeCompare(b.time));
-  const otherAppointments = activeAppointments.filter(item => item.date !== todayStr()).sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`));
+  const sortedAppointments = [...appointments].sort((a, b) => `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`));
   const assignedClients = Array.from(new Map(appointments.filter(item => item.customerId).map(item => [item.customerId, item])).values());
 
   return (
@@ -80,18 +78,14 @@ function EmployeeDashboard({ account, onAddService }: { account: { name?: string
         </Card>
       )}
 
-      {activeAppointments.length === 0 ? <EmptyState icon={UserRound} title="No assigned clients" description="Clients assigned to you will appear here." /> : (
+      {sortedAppointments.length === 0 ? <EmptyState icon={UserRound} title="No assigned clients" description="Clients assigned to you will appear here." /> : (
         <div className="space-y-4">
-          {[['Today', todayAppointments], ['Upcoming', otherAppointments]].map(([label, items]) => {
-            const listed = items as Appointment[];
-            if (!listed.length) return null;
-            return <section key={label as string} className="space-y-3"><h2 className="font-semibold">{label as string}</h2>{listed.map(appointment => (
+          <section className="space-y-3"><h2 className="font-semibold">My appointments</h2>{sortedAppointments.map(appointment => (
               <Card key={appointment.id} className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-start gap-3"><div className="rounded-xl bg-[#0071e3]/10 p-2 text-[#0071e3]"><Scissors size={18} aria-hidden="true" /></div><div><p className="font-medium">{appointment.customerName}</p><p className="text-sm text-[#6E6E73]">{appointment.serviceName} · {appointment.date} at {appointment.time}</p><p className="text-sm font-medium mt-1">{fmtKES(appointment.price)}</p></div></div>
                 <div className="flex items-center gap-3"><Badge tone={appointment.status === 'in-service' ? 'warning' : 'info'}>{appointment.status.replace('-', ' ')}</Badge><Button size="sm" onClick={() => onAddService(appointment)}>Add service</Button></div>
               </Card>
-            ))}</section>;
-          })}
+            ))}</section>
         </div>
       )}
     </div>

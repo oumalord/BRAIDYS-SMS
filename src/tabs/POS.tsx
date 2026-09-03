@@ -143,14 +143,18 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
       const consumed = line.consumedProducts || [];
       const existing = consumed.find(item => item.productId === product.id);
       if (existing) {
+        const consumedProducts = consumed.map(item => item.productId === product.id ? { ...item, qty: item.qty + 1 } : item);
         return {
           ...line,
-          consumedProducts: consumed.map(item => item.productId === product.id ? { ...item, qty: item.qty + 1 } : item),
+          consumedProducts,
+          assistantPayment: line.helperStaffId ? assistantCompensation(line.price * line.qty, hasSpecialAssistantBraid({ ...line, consumedProducts })) : 0,
         };
       }
+      const consumedProducts = [...consumed, { productId: product.id, name: product.name, qty: 1, cost: Number(product.cost || 0), unit: product.unit }];
       return {
         ...line,
-        consumedProducts: [...consumed, { productId: product.id, name: product.name, qty: 1, cost: Number(product.cost || 0), unit: product.unit }],
+        consumedProducts,
+        assistantPayment: line.helperStaffId ? assistantCompensation(line.price * line.qty, hasSpecialAssistantBraid({ ...line, consumedProducts })) : 0,
       };
     }));
     setUsagePickerByLine(prev => ({ ...prev, [lineKey]: '' }));
@@ -159,17 +163,21 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
     setCart(current => current.map(line => {
       if (line.key !== lineKey || line.type !== 'service') return line;
       const consumed = line.consumedProducts || [];
-      if (qty <= 0) return { ...line, consumedProducts: consumed.filter(item => item.productId !== productId) };
+      const consumedProducts = qty <= 0
+        ? consumed.filter(item => item.productId !== productId)
+        : consumed.map(item => item.productId === productId ? { ...item, qty: Math.max(1, qty) } : item);
       return {
         ...line,
-        consumedProducts: consumed.map(item => item.productId === productId ? { ...item, qty: Math.max(1, qty) } : item),
+        consumedProducts,
+        assistantPayment: line.helperStaffId ? assistantCompensation(line.price * line.qty, hasSpecialAssistantBraid({ ...line, consumedProducts })) : 0,
       };
     }));
   };
   const removeUsedProduct = (lineKey: string, productId: string) => {
     setCart(current => current.map(line => {
       if (line.key !== lineKey || line.type !== 'service') return line;
-      return { ...line, consumedProducts: (line.consumedProducts || []).filter(item => item.productId !== productId) };
+      const consumedProducts = (line.consumedProducts || []).filter(item => item.productId !== productId);
+      return { ...line, consumedProducts, assistantPayment: line.helperStaffId ? assistantCompensation(line.price * line.qty, hasSpecialAssistantBraid({ ...line, consumedProducts })) : 0 };
     }));
   };
 

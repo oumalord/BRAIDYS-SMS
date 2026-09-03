@@ -29653,8 +29653,7 @@ var db = {
     const limit = Math.min(Math.max(Number(options?.limit || 100), 1), 5e3);
     const context = currentContext();
     const tenantId = context?.tenantId || null;
-    const branchId = context?.branchId || null;
-    const rows = globalCollections.has(collection) ? await sql`SELECT id, record FROM app_records WHERE collection = ${collection} ORDER BY created_at ASC LIMIT ${limit}` : context?.role === "admin" && branchId ? await sql`SELECT id, record FROM app_records WHERE collection = ${collection} AND record->>'branchId' = ${branchId} ORDER BY created_at ASC LIMIT ${limit}` : context?.role === "admin" ? await sql`SELECT id, record FROM app_records WHERE collection = ${collection} ORDER BY created_at ASC LIMIT ${limit}` : branchId ? await sql`SELECT id, record FROM app_records WHERE collection = ${collection} AND tenant_id = ${tenantId} AND record->>'branchId' = ${branchId} ORDER BY created_at ASC LIMIT ${limit}` : await sql`SELECT id, record FROM app_records WHERE collection = ${collection} AND tenant_id = ${tenantId} ORDER BY created_at ASC LIMIT ${limit}`;
+    const rows = globalCollections.has(collection) ? await sql`SELECT id, record FROM app_records WHERE collection = ${collection} ORDER BY created_at ASC LIMIT ${limit}` : context?.role === "admin" ? await sql`SELECT id, record FROM app_records WHERE collection = ${collection} ORDER BY created_at ASC LIMIT ${limit}` : await sql`SELECT id, record FROM app_records WHERE collection = ${collection} AND (tenant_id = ${tenantId} OR record->>'tenantId' = ${tenantId}) ORDER BY created_at ASC LIMIT ${limit}`;
     return { items: rows.map((row) => ({ ...row.record || {}, id: row.id })) };
   },
   async listAllTenant(collection, tenantId, options) {
@@ -29668,8 +29667,7 @@ var db = {
     if (!ids.length) return [];
     const context = currentContext();
     const tenantId = context?.tenantId || null;
-    const branchId = context?.branchId || null;
-    const rows = globalCollections.has(collection) || context?.role === "admin" ? await sql`SELECT id, record FROM app_records WHERE collection = ${collection} AND id = ANY(${ids})` : branchId ? await sql`SELECT id, record FROM app_records WHERE collection = ${collection} AND tenant_id = ${tenantId} AND record->>'branchId' = ${branchId} AND id = ANY(${ids})` : await sql`SELECT id, record FROM app_records WHERE collection = ${collection} AND tenant_id = ${tenantId} AND id = ANY(${ids})`;
+    const rows = globalCollections.has(collection) || context?.role === "admin" ? await sql`SELECT id, record FROM app_records WHERE collection = ${collection} AND id = ANY(${ids})` : await sql`SELECT id, record FROM app_records WHERE collection = ${collection} AND (tenant_id = ${tenantId} OR record->>'tenantId' = ${tenantId}) AND id = ANY(${ids})`;
     const byId = new Map(rows.map((row) => [row.id, { ...row.record || {}, id: row.id }]));
     return ids.map((id) => byId.get(id) || null);
   },
@@ -29680,7 +29678,7 @@ var db = {
     for (const update of updates) {
       if (globalCollections.has(collection)) await sql`UPDATE app_records SET record = ${JSON.stringify({ ...update.record, id: update.id })}::jsonb WHERE collection = ${collection} AND id = ${update.id}`;
       else if (context?.role === "admin") await sql`UPDATE app_records SET record = ${JSON.stringify({ ...update.record, id: update.id, tenantId: update.record.tenantId || tenantId })}::jsonb WHERE collection = ${collection} AND id = ${update.id}`;
-      else await sql`UPDATE app_records SET record = ${JSON.stringify({ ...update.record, id: update.id, tenantId })}::jsonb WHERE collection = ${collection} AND tenant_id = ${tenantId} AND id = ${update.id}`;
+      else await sql`UPDATE app_records SET record = ${JSON.stringify({ ...update.record, id: update.id, tenantId })}::jsonb WHERE collection = ${collection} AND (tenant_id = ${tenantId} OR record->>'tenantId' = ${tenantId}) AND id = ${update.id}`;
     }
     return updates.map(() => true);
   },
@@ -29689,7 +29687,14 @@ var db = {
     if (!ids.length) return true;
     const context = currentContext();
     if (context?.role === "admin") await sql`DELETE FROM app_records WHERE collection = ${collection} AND id = ANY(${ids})`;
-    else await sql`DELETE FROM app_records WHERE collection = ${collection} AND tenant_id = ${context?.tenantId || null} AND id = ANY(${ids})`;
+    else await sql`DELETE FROM app_records WHERE collection = ${collection} AND (tenant_id = ${context?.tenantId || null} OR record->>'tenantId' = ${context?.tenantId || null}) AND id = ANY(${ids})`;
+    return true;
+  },
+  async deleteOlderThan(collection, timestamp) {
+    await init();
+    const context = currentContext();
+    if (context?.role === "admin") await sql`DELETE FROM app_records WHERE collection = ${collection} AND COALESCE((record->>'createdAt')::bigint, 0) < ${timestamp}`;
+    else await sql`DELETE FROM app_records WHERE collection = ${collection} AND (tenant_id = ${context?.tenantId || null} OR record->>'tenantId' = ${context?.tenantId || null}) AND COALESCE((record->>'createdAt')::bigint, 0) < ${timestamp}`;
     return true;
   }
 };
@@ -29754,8 +29759,8 @@ function serviceStaffCount(value) {
 }
 function commissionPct(value, staffCount) {
   const rate = Number(value);
-  if (rate === 30 || rate === 33.33 || rate === 40 || rate === 50) return rate;
-  return serviceStaffCount(staffCount) === 2 ? 33.33 : 50;
+  if (rate === 30 || rate === 33.35 || rate === 40 || rate === 50) return rate;
+  return serviceStaffCount(staffCount) === 2 ? 33.35 : 50;
 }
 function assistantCompensation(serviceFee, hasSpecialBraid = false) {
   if (hasSpecialBraid) return 400;
@@ -29766,7 +29771,7 @@ function assistantCompensation(serviceFee, hasSpecialBraid = false) {
   return 500;
 }
 function hasSpecialAssistantBraid(item) {
-  return (item.consumedProducts || []).some((product) => ["amara", "diani"].includes(String(product?.name || "").trim().toLowerCase()));
+  return (item.consumedProducts || []).some((product) => ["amara", "diani", "marley imported", "marley angel"].includes(String(product?.name || "").trim().toLowerCase()));
 }
 function sameStaffIdentity(staffId, staffName, context) {
   if (staffId && String(staffId) === String(context.staffId || "")) return true;
@@ -29782,27 +29787,8 @@ function requireAdmin() {
 function requireOwner() {
   if (!["owner", "admin"].includes(currentContext()?.role || "")) throw new Error("Only the owner or administrator can edit records");
 }
-function toMinutes(t) {
-  const parts = t.split(":").map(Number);
-  return parts[0] * 60 + parts[1];
-}
-function apptSlots(appt) {
-  if (appt.items && Array.isArray(appt.items) && appt.items.length) {
-    let cursor = toMinutes(appt.time);
-    const slots = [];
-    for (const it2 of appt.items) {
-      const start2 = cursor;
-      const end2 = start2 + (it2.durationMin || 30);
-      slots.push({ staffId: it2.staffId, start: start2, end: end2 });
-      cursor = end2;
-    }
-    return slots;
-  }
-  const start = toMinutes(appt.time);
-  const end = start + (appt.durationMin || 30);
-  return [{ staffId: appt.staffId, start, end }];
-}
 function serviceCommission(item) {
+  if (item?.type !== "service") return 0;
   const recorded = Number(item.commission);
   if (Number.isFinite(recorded)) return Math.max(0, recorded);
   const revenue = Number(item.lineTotalAfterDiscount ?? Number(item.price || 0) * Number(item.qty || 1)) || 0;
@@ -29812,10 +29798,23 @@ function serviceCommission(item) {
   const rate = Number(item.commissionPct ?? item.commissionRate ?? 50);
   return commissionBase * (Number.isFinite(rate) ? rate / 100 : 0.5);
 }
+function staffCommission(item, staffId) {
+  if (!staffId) return 0;
+  const hasMultipleStaff = Boolean(item.coStaffId || item.thirdStaffId || item.helperStaffId);
+  if (String(item.staffId || "") === String(staffId)) return hasMultipleStaff ? Number(item.primaryCommission ?? serviceCommission(item)) || 0 : serviceCommission(item);
+  if (String(item.coStaffId || "") === String(staffId)) return Number(item.coStaffCommission ?? serviceCommission(item)) || 0;
+  if (String(item.thirdStaffId || "") === String(staffId)) return Number(item.thirdStaffCommission ?? 0) || 0;
+  return 0;
+}
 function createTicketNumber(date) {
   const datePart = date.replace(/[^0-9]/g, "").slice(-4);
   const randomPart = String(Math.floor(1e3 + Math.random() * 9e3));
   return `SG-${datePart}-${randomPart}`;
+}
+function appointmentCardNumber(value) {
+  const cardNumber = String(value || "").trim();
+  if (cardNumber && !/^\d{1,30}$/.test(cardNumber)) throw new Error("Card number must contain digits only");
+  return cardNumber;
 }
 async function notifyCustomer(email, subject, message, referenceId) {
   if (!email) return;
@@ -29848,6 +29847,7 @@ Please change this password after signing in.` : ""}`;
   await notifyCustomer(staff.accountEmail, subject, message, staff.id);
 }
 async function audit(action, collection, record, actor = "system") {
+  await db.deleteOlderThan("audit_logs", Date.now() - 14 * DAY);
   await db.add("audit_logs", [{
     action,
     collection,
@@ -30203,26 +30203,38 @@ New temporary password: ${newPassword}`, account.id);
     let todayAssistant = 0;
     let fortnightCommission = 0;
     let fortnightAssistant = 0;
+    const completedWork = [];
     for (const order of orders) {
       if (order.deletedAt) continue;
       if (!order.createdAt) continue;
       for (const item of order.items || []) {
         if (item.type !== "service") continue;
-        const commission = serviceCommission(item);
         const assistant = Number(item.assistantPayment ?? item.helperDeduction ?? 0) || 0;
         if (sameStaffIdentity(item.staffId, item.staffName, context)) {
+          const commission = staffCommission(item, item.staffId);
           if (order.createdAt >= todayFrom) todayCommission += commission;
           if (order.createdAt >= fortnightFrom) fortnightCommission += commission;
+          completedWork.push({ serviceName: item.name || "Service", createdAt: order.createdAt, role: "commission", amount: commission });
           if (order.appointmentId) linkedAppointmentIds.add(String(order.appointmentId));
         }
         if (sameStaffIdentity(item.coStaffId, item.coStaffName, context)) {
+          const commission = staffCommission(item, item.coStaffId);
           if (order.createdAt >= todayFrom) todayCommission += commission;
           if (order.createdAt >= fortnightFrom) fortnightCommission += commission;
+          completedWork.push({ serviceName: item.name || "Service", createdAt: order.createdAt, role: "commission", amount: commission });
+          if (order.appointmentId) linkedAppointmentIds.add(String(order.appointmentId));
+        }
+        if (sameStaffIdentity(item.thirdStaffId, item.thirdStaffName, context)) {
+          const commission = staffCommission(item, item.thirdStaffId);
+          if (order.createdAt >= todayFrom) todayCommission += commission;
+          if (order.createdAt >= fortnightFrom) fortnightCommission += commission;
+          completedWork.push({ serviceName: item.name || "Service", createdAt: order.createdAt, role: "commission", amount: commission });
           if (order.appointmentId) linkedAppointmentIds.add(String(order.appointmentId));
         }
         if (sameStaffIdentity(item.helperStaffId, item.helperStaffName, context)) {
           if (order.createdAt >= todayFrom) todayAssistant += assistant;
           if (order.createdAt >= fortnightFrom) fortnightAssistant += assistant;
+          completedWork.push({ serviceName: item.name || "Service", createdAt: order.createdAt, role: "assistant", amount: assistant });
           if (order.appointmentId) linkedAppointmentIds.add(String(order.appointmentId));
         }
       }
@@ -30243,13 +30255,17 @@ New temporary password: ${newPassword}`, account.id);
       const derivedCommission = serviceValue * 0.5;
       if (appointmentTs >= todayFrom) todayCommission += derivedCommission;
       if (appointmentTs >= fortnightFrom) fortnightCommission += derivedCommission;
+      completedWork.push({ serviceName: appointment.serviceName || "Service", createdAt: appointmentTs, role: "commission", amount: derivedCommission });
     }
     return json({
       today: { commission: todayCommission, assistant: todayAssistant, total: todayCommission + todayAssistant },
-      fortnight: { commission: fortnightCommission, assistant: fortnightAssistant, total: fortnightCommission + fortnightAssistant }
+      fortnight: { commission: fortnightCommission, assistant: fortnightAssistant, total: fortnightCommission + fortnightAssistant },
+      completedWork: completedWork.sort((left, right) => right.createdAt - left.createdAt).slice(0, 30)
     });
   }],
   "GET /api/audit-logs": [async ({ query }) => {
+    if (!["owner", "admin"].includes(currentContext()?.role || "")) return error("Only the owner can view audit logs", 403);
+    await db.deleteOlderThan("audit_logs", Date.now() - 14 * DAY);
     const { items } = await db.list("audit_logs", { limit: 5e3 });
     const collection = query.collection;
     const filtered = collection ? items.filter((log) => log.collection === collection) : items;
@@ -30272,6 +30288,7 @@ New temporary password: ${newPassword}`, account.id);
     return json({ items });
   }],
   "POST /api/staff": [async ({ body }) => {
+    requireOwner();
     const b2 = body;
     if (!b2.name) return error("Name is required", 400);
     const context = currentContext();
@@ -30281,16 +30298,14 @@ New temporary password: ${newPassword}`, account.id);
     if (!branch) return error("Choose a valid branch for this staff member", 400);
     if (!b2.phone) return error("Employee phone is required", 400);
     const isReceptionist = String(b2.role || "").toLowerCase().includes("reception");
-    const credential = String(isReceptionist ? b2.password || "" : b2.pin || "");
-    if (isReceptionist ? credential.length < 8 : !/^\d{4}$/.test(credential)) {
-      return error(isReceptionist ? "Receptionist password must be at least 8 characters" : "Staff PIN must be exactly 4 digits", 400);
-    }
+    const pin = String(b2.pin || "");
+    if (!/^\d{4}$/.test(pin)) return error("Staff PIN must be exactly 4 digits", 400);
     const [id] = await db.add("staff", [{ tenantId: branch.salonId, salonName: branch.salonName || context?.salonName || "", name: b2.name, role: b2.role || "Staff", specialties: b2.specialties || [], branch: branch.name, branchId: branch.id, branchName: branch.name, chair: b2.chair || "", phone: b2.phone || "", accountEmail: b2.accountEmail || "", accountStatus: b2.accountStatus || "pending", employmentStatus: "active", commissionPct: 50, status: b2.status || "available" }]);
     if (!id) return error("Failed to add staff", 500);
-    await audit("created", "staff", { id, name: b2.name, role: b2.role || "Staff", accountEmail: b2.accountEmail || "", commissionPct: 50 }, b2.actor || "owner");
+    await audit("created", "staff", { id, name: b2.name, responsibility: b2.role || "Staff", accountEmail: b2.accountEmail || "", commissionPct: 50 }, b2.actor || "owner");
     if (currentContext()) {
       const context2 = currentContext();
-      await db.add("accounts", [{ id: `account-${(0, import_node_crypto2.randomBytes)(8).toString("hex")}`, tenantId: branch.salonId, salonName: branch.salonName || context2.salonName, branchId: branch.id, name: b2.name, email: "", phone: b2.phone, role: isReceptionist ? "receptionist" : "barber", status: "active", ...isReceptionist ? { passwordHash: passwordHash(credential) } : { pinHash: passwordHash(credential) }, staffId: id, createdAt: Date.now() }]);
+      await db.add("accounts", [{ id: `account-${(0, import_node_crypto2.randomBytes)(8).toString("hex")}`, tenantId: branch.salonId, salonName: branch.salonName || context2.salonName, branchId: branch.id, name: b2.name, email: "", phone: b2.phone, role: isReceptionist ? "receptionist" : "barber", status: "active", pinHash: passwordHash(pin), staffId: id, createdAt: Date.now() }]);
     }
     return json({ id });
   }],
@@ -30299,9 +30314,10 @@ New temporary password: ${newPassword}`, account.id);
     const [existing] = await db.get("staff", [params.id]);
     if (!existing) return error("Staff not found", 404);
     const patch = body;
-    if (patch.password && String(patch.password).length < 8) return error("Password must be at least 8 characters", 400);
+    if (patch.pin && !/^\d{4}$/.test(String(patch.pin))) return error("Staff PIN must be exactly 4 digits", 400);
     const updated = { ...existing, ...patch };
     delete updated.password;
+    delete updated.pin;
     updated.commissionPct = 50;
     if (patch.employmentStatus === "laid-off") updated.status = "off";
     const [ok] = await db.update("staff", [{ id: params.id, record: updated }]);
@@ -30312,8 +30328,9 @@ New temporary password: ${newPassword}`, account.id);
     const account = accounts.find((item) => item.staffId === params.id);
     if (account) {
       const accountPatch = { ...account, name: updated.name, phone: updated.phone };
-      if (String(patch.password || "")) {
-        accountPatch.passwordHash = passwordHash(String(patch.password));
+      if (String(patch.pin || "")) {
+        accountPatch.pinHash = passwordHash(String(patch.pin));
+        delete accountPatch.passwordHash;
       }
       await db.update("accounts", [{ id: account.id, record: accountPatch }]);
     }
@@ -30357,11 +30374,14 @@ New temporary password: ${newPassword}`, account.id);
   }],
   "GET /api/customers": [async () => {
     const { items } = await db.list("customers", { limit: 1e3 });
-    const customers = items.filter((customer) => !customer.deletedAt);
+    const allCustomers = items;
+    const customers = allCustomers.filter((customer) => !customer.deletedAt);
     const byId = new Map(customers.map((customer) => [String(customer.id), customer]));
     const byEmail = new Map(customers.filter((customer) => customer.email).map((customer) => [String(customer.email).toLowerCase(), customer]));
+    const deletedById = new Map(allCustomers.filter((customer) => customer.deletedAt).map((customer) => [String(customer.id), customer]));
     const { items: appointments } = await db.list("appointments", { limit: 3e3 });
     const toCreate = [];
+    const customerRestores = [];
     const appointmentUpdates = [];
     for (const appointment of appointments) {
       if (!appointment?.customerName || appointment.deletedAt) continue;
@@ -30369,12 +30389,20 @@ New temporary password: ${newPassword}`, account.id);
       const appointmentEmail = String(appointment.customerEmail || "").toLowerCase();
       const existing = appointmentCustomerId && byId.get(appointmentCustomerId) || appointmentEmail && byEmail.get(appointmentEmail);
       if (existing) {
-        if (!appointment.customerId) {
+        if (appointment.customerId !== existing.id) {
           appointmentUpdates.push({ id: appointment.id, record: { ...appointment, customerId: existing.id } });
         }
         continue;
       }
-      const newCustomerId = appointmentCustomerId || `customer-${(0, import_node_crypto2.randomBytes)(8).toString("hex")}`;
+      const deletedCustomer = appointmentCustomerId && deletedById.get(appointmentCustomerId);
+      if (deletedCustomer) {
+        const restored = { ...deletedCustomer, deletedAt: void 0, deletedBy: void 0 };
+        customerRestores.push({ id: restored.id, record: restored });
+        byId.set(String(restored.id), restored);
+        if (restored.email) byEmail.set(String(restored.email).toLowerCase(), restored);
+        continue;
+      }
+      const newCustomerId = `customer-${(0, import_node_crypto2.randomBytes)(8).toString("hex")}`;
       const record = {
         id: newCustomerId,
         name: appointment.customerName,
@@ -30391,6 +30419,7 @@ New temporary password: ${newPassword}`, account.id);
         membershipExpiry: null
       };
       toCreate.push(record);
+      if (appointmentCustomerId) byId.set(appointmentCustomerId, record);
       byId.set(String(record.id), record);
       if (record.email) byEmail.set(String(record.email).toLowerCase(), record);
       if (!appointment.customerId || appointment.customerId !== record.id) {
@@ -30398,6 +30427,7 @@ New temporary password: ${newPassword}`, account.id);
       }
     }
     if (toCreate.length) await db.add("customers", toCreate);
+    if (customerRestores.length) await db.update("customers", customerRestores);
     if (appointmentUpdates.length) await db.update("appointments", appointmentUpdates);
     const { items: refreshed } = await db.list("customers", { limit: 3e3 });
     return json({ items: refreshed.filter((customer) => !customer.deletedAt) });
@@ -30515,32 +30545,19 @@ New temporary password: ${newPassword}`, account.id);
     const items = Array.isArray(b2.items) && b2.items.length ? b2.items : b2.serviceId ? [{ serviceId: b2.serviceId, serviceName: b2.serviceName, price: b2.price || 0, currency: b2.currency || "KES", durationMin: b2.durationMin || 30, staffId: b2.staffId, staffName: b2.staffName }] : requestedCategories.length ? [{ serviceId: null, serviceName: `Requested: ${requestedCategories.join(" + ")}`, price: 0, currency: "KES", durationMin: 30, staffId: b2.staffId, staffName: b2.staffName }] : [];
     const appointmentDate = b2.date || (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
     const appointmentTime = b2.time || "00:00";
+    if (b2.cardNumber && !["owner", "admin", "receptionist"].includes(context?.role || "")) return error("Only the owner, administrator or receptionist can add a card number", 403);
+    let cardNumber = "";
+    try {
+      cardNumber = appointmentCardNumber(b2.cardNumber);
+    } catch (cause) {
+      return error(cause.message, 400);
+    }
     if (!b2.customerName || items.length === 0) return error("Missing required appointment fields", 400);
     for (const it2 of items) {
       if (!it2.serviceId && !requestedCategories.length) return error("Each service needs a service selected", 400);
     }
     const { items: existing } = await db.list("appointments", { limit: 1e3 });
-    let cursor = toMinutes(appointmentTime);
-    const newSlots = [];
-    for (const it2 of items) {
-      const start = cursor;
-      const end = start + (it2.durationMin || 30);
-      newSlots.push({ staffId: it2.staffId, start, end, name: it2.serviceName });
-      cursor = end;
-    }
-    for (const existingAppt of existing) {
-      if (existingAppt.date !== appointmentDate) continue;
-      if (["cancelled", "no-show", "completed"].includes(existingAppt.status)) continue;
-      const otherSlots = apptSlots(existingAppt);
-      for (const ns of newSlots) {
-        for (const os2 of otherSlots) {
-          if (!ns.staffId) continue;
-          if (os2.staffId === ns.staffId && ns.start < os2.end && ns.end > os2.start) {
-            return error(`${ns.name}: this staff member already has an appointment at that time`, 409);
-          }
-        }
-      }
-    }
+    if (cardNumber && existing.some((appointment) => !appointment.deletedAt && appointment.date === appointmentDate && String(appointment.cardNumber || "") === cardNumber)) return error("This card number is already assigned on the selected date", 409);
     const totalDurationMin = items.reduce((s, it2) => s + (it2.durationMin || 30), 0);
     const totalPrice = items.reduce((s, it2) => s + (it2.price || 0), 0);
     const currency = items[0]?.currency || "KES";
@@ -30583,6 +30600,7 @@ New temporary password: ${newPassword}`, account.id);
       durationMin: totalDurationMin,
       price: totalPrice,
       currency,
+      cardNumber,
       items,
       status: "pending",
       createdAt: Date.now()
@@ -30615,17 +30633,33 @@ New temporary password: ${newPassword}`, account.id);
     const [existing] = await db.get("appointments", [params.id]);
     if (!existing) return error("Appointment not found", 404);
     const patch = body;
+    const canManageCardNumber = ["owner", "admin", "receptionist"].includes(context.role);
+    if ("cardNumber" in patch && !canManageCardNumber) return error("Only the owner, administrator or receptionist can add a card number", 403);
+    if (existing.cardNumber && "cardNumber" in patch && String(patch.cardNumber || "") !== String(existing.cardNumber)) return error("A card number cannot be changed after it is entered", 409);
+    if ("cardNumber" in patch) {
+      try {
+        patch.cardNumber = appointmentCardNumber(patch.cardNumber);
+      } catch (cause) {
+        return error(cause.message, 400);
+      }
+    }
+    const canManageClosedAppointments = ["owner", "admin"].includes(context.role);
     const isCancellation = patch.status === "cancelled" || patch.status === "no-show";
     const isStatusOnlyChange = Object.keys(patch).length === 1 && "status" in patch;
     if (context.role === "barber" && existing.staffId !== context.staffId) return error("You can only update appointments assigned to you", 403);
     if (!isCancellation && !isStatusOnlyChange && !["owner", "admin", "receptionist"].includes(context.role)) return error("Only the owner, administrator or receptionist can edit appointment details", 403);
     const editsDetails = patch.date || patch.time || patch.serviceId || patch.durationMin || "staffId" in patch;
     if (editsDetails && !["owner", "admin", "receptionist"].includes(currentContext()?.role || "")) return error("Only the owner, administrator or receptionist can edit appointment details", 403);
-    if (["completed", "cancelled", "no-show"].includes(existing.status) && (patch.date || patch.time || patch.serviceId || "staffId" in patch)) return error("Completed or closed appointments cannot be edited", 409);
+    if (!canManageClosedAppointments && ["completed", "cancelled", "no-show"].includes(existing.status) && (patch.date || patch.time || patch.serviceId || "staffId" in patch)) return error("Completed or closed appointments can only be edited by the owner or administrator", 409);
     const nextDate = patch.date || existing.date;
     const nextTime = patch.time || existing.time;
     const nextStaffId = "staffId" in patch ? patch.staffId : existing.staffId;
     const nextDuration = Number(patch.durationMin || existing.durationMin || 30);
+    const nextCardNumber = String(patch.cardNumber || existing.cardNumber || "");
+    if (nextCardNumber) {
+      const { items: appointments } = await db.list("appointments", { limit: 2e3 });
+      if (appointments.some((appointment) => appointment.id !== existing.id && !appointment.deletedAt && appointment.date === nextDate && String(appointment.cardNumber || "") === nextCardNumber)) return error("This card number is already assigned on the selected date", 409);
+    }
     if (nextStaffId && nextStaffId !== existing.staffId) {
       const [assignedStaff] = await db.get("staff", [patch.staffId]);
       if (!assignedStaff) return error("Staff member not found", 404);
@@ -30637,15 +30671,6 @@ New temporary password: ${newPassword}`, account.id);
     if (patch.serviceId) {
       const [service] = await db.get("services", [patch.serviceId]);
       if (!service) return error("Service not found", 404);
-    }
-    if (nextStaffId) {
-      const { items: appointments } = await db.list("appointments", { limit: 2e3 });
-      const start = toMinutes(nextTime);
-      const end = start + nextDuration;
-      for (const appointment of appointments) {
-        if (appointment.id === existing.id || appointment.date !== nextDate || ["completed", "cancelled", "no-show"].includes(appointment.status)) continue;
-        for (const slot of apptSlots(appointment)) if (slot.staffId === nextStaffId && start < slot.end && end > slot.start) return error("That staff member already has an appointment at the selected time", 409);
-      }
     }
     const [ok] = await db.update("appointments", [{ id: params.id, record: { ...existing, ...patch } }]);
     if (patch.staffId) {
@@ -30663,6 +30688,94 @@ New temporary password: ${newPassword}`, account.id);
     const order = items.find((item) => String(item.appointmentId || "") === params.id);
     if (!order) return error("No completed work was found for this appointment", 404);
     return json({ item: order });
+  }],
+  "POST /api/appointments/:id/reopen": [async ({ params }) => {
+    requireOwner();
+    const [appointment] = await db.get("appointments", [params.id]);
+    if (!appointment || appointment.deletedAt) return error("Appointment not found", 404);
+    if (appointment.status !== "completed") return error("Only completed appointments can be reopened", 409);
+    const { items: orders } = await db.list("orders", { limit: 5e3 });
+    const order = orders.find((item) => String(item.appointmentId || "") === appointment.id && !item.deletedAt);
+    if (order) {
+      const { items: payoutItems } = await db.list("payout_items", { limit: 1e4 });
+      if (payoutItems.some((item) => !item.deletedAt && item.orderId === order.id)) return error("This deal is already included in a recorded payout and cannot be undone", 409);
+    }
+    const reopenedAt = Date.now();
+    if (order) {
+      const productQuantities = /* @__PURE__ */ new Map();
+      for (const item of order.items || []) {
+        if (item.type === "product" && item.refId) productQuantities.set(item.refId, (productQuantities.get(item.refId) || 0) + Number(item.qty || 0));
+        for (const used of item.consumedProducts || []) if (used.productId) productQuantities.set(used.productId, (productQuantities.get(used.productId) || 0) + Number(used.qty || 0));
+      }
+      const productIds = [...productQuantities.keys()];
+      if (productIds.length) {
+        const products = await db.get("products", productIds);
+        const productUpdates = products.flatMap((product, index) => product ? [{ id: productIds[index], record: { ...product, stock: Number(product.stock || 0) + (productQuantities.get(productIds[index]) || 0) } }] : []);
+        if (productUpdates.length) await db.update("products", productUpdates);
+        await db.add("stock_movements", productUpdates.map((update) => ({ productId: update.id, productName: update.record.name, change: productQuantities.get(update.id) || 0, reason: `Completed deal reopened: ${appointment.customerName}`, createdAt: reopenedAt, actor: currentContext()?.name || "owner" })));
+      }
+      await db.update("orders", [{ id: order.id, record: { ...order, deletedAt: reopenedAt, deletedBy: currentContext()?.name || "owner", voidReason: "Owner reopened the linked completed appointment" } }]);
+      if (order.customerId) {
+        const [customer] = await db.get("customers", [order.customerId]);
+        if (customer) {
+          const remainingOrders = orders.filter((item) => !item.deletedAt && item.id !== order.id && item.customerId === customer.id);
+          const totalSpent = remainingOrders.reduce((sum, item) => sum + Number(item.totalByCurrency?.KES || 0), 0);
+          const totalSpentUSD = remainingOrders.reduce((sum, item) => sum + Number(item.totalByCurrency?.USD || 0), 0);
+          const loyaltyPoints = Math.max(0, remainingOrders.reduce((sum, item) => sum + Math.floor(Number(item.totalByCurrency?.KES || 0) / 100) - Number(item.pointsRedeemed || 0), 0));
+          const lastVisit = remainingOrders.reduce((latest, item) => Math.max(latest, Number(item.createdAt || 0)), 0) || null;
+          await db.update("customers", [{ id: customer.id, record: { ...customer, totalSpent, totalSpentUSD, visits: remainingOrders.length, loyaltyPoints, lastVisit } }]);
+        }
+      }
+    }
+    await db.update("appointments", [{ id: appointment.id, record: { ...appointment, status: "in-service", reopenedAt, reopenedBy: currentContext()?.name || "owner" } }]);
+    const { items: queue } = await db.list("queue", { limit: 2e3 });
+    const queueEntry = queue.find((item) => item.appointmentId === appointment.id && !item.deletedAt);
+    if (queueEntry) await db.update("queue", [{ id: queueEntry.id, record: { ...queueEntry, status: "waiting", joinedAt: reopenedAt } }]);
+    await audit("reopened completed appointment", "appointment", { id: appointment.id, customerName: appointment.customerName, orderId: order?.id || null, status: "in-service" }, currentContext()?.name || "owner");
+    return json({ ok: true, orderVoided: Boolean(order), status: "in-service" });
+  }],
+  "DELETE /api/appointments/:id": [async ({ params }) => {
+    requireOwner();
+    const [appointment] = await db.get("appointments", [params.id]);
+    if (!appointment || appointment.deletedAt) return error("Appointment not found", 404);
+    const deletedAt = Date.now();
+    const deletedBy = currentContext()?.name || "owner";
+    const { items: orders } = await db.list("orders", { limit: 5e3 });
+    const order = orders.find((item) => String(item.appointmentId || "") === appointment.id && !item.deletedAt);
+    if (order) {
+      const { items: payoutItems } = await db.list("payout_items", { limit: 1e4 });
+      const recordedPayout = payoutItems.some((item) => !item.deletedAt && item.orderId === order.id);
+      const productQuantities = /* @__PURE__ */ new Map();
+      for (const item of order.items || []) {
+        if (item.type === "product" && item.refId) productQuantities.set(item.refId, (productQuantities.get(item.refId) || 0) + Number(item.qty || 0));
+        for (const used of item.consumedProducts || []) if (used.productId) productQuantities.set(used.productId, (productQuantities.get(used.productId) || 0) + Number(used.qty || 0));
+      }
+      const productIds = [...productQuantities.keys()];
+      if (productIds.length) {
+        const products = await db.get("products", productIds);
+        const productUpdates = products.flatMap((product, index) => product ? [{ id: productIds[index], record: { ...product, stock: Number(product.stock || 0) + (productQuantities.get(productIds[index]) || 0) } }] : []);
+        if (productUpdates.length) await db.update("products", productUpdates);
+        await db.add("stock_movements", productUpdates.map((update) => ({ productId: update.id, productName: update.record.name, change: productQuantities.get(update.id) || 0, reason: `Deleted appointment: ${appointment.customerName}`, createdAt: deletedAt, actor: deletedBy })));
+      }
+      await db.update("orders", [{ id: order.id, record: { ...order, deletedAt, deletedBy, voidReason: "Owner deleted the linked appointment", payoutReversalRequired: recordedPayout } }]);
+      if (order.customerId) {
+        const [customer] = await db.get("customers", [order.customerId]);
+        if (customer) {
+          const remainingOrders = orders.filter((item) => !item.deletedAt && item.id !== order.id && item.customerId === customer.id);
+          const totalSpent = remainingOrders.reduce((sum, item) => sum + Number(item.totalByCurrency?.KES || 0), 0);
+          const totalSpentUSD = remainingOrders.reduce((sum, item) => sum + Number(item.totalByCurrency?.USD || 0), 0);
+          const loyaltyPoints = Math.max(0, remainingOrders.reduce((sum, item) => sum + Math.floor(Number(item.totalByCurrency?.KES || 0) / 100) - Number(item.pointsRedeemed || 0), 0));
+          const lastVisit = remainingOrders.reduce((latest, item) => Math.max(latest, Number(item.createdAt || 0)), 0) || null;
+          await db.update("customers", [{ id: customer.id, record: { ...customer, totalSpent, totalSpentUSD, visits: remainingOrders.length, loyaltyPoints, lastVisit } }]);
+        }
+      }
+    }
+    await db.update("appointments", [{ id: appointment.id, record: { ...appointment, deletedAt, deletedBy } }]);
+    const { items: queue } = await db.list("queue", { limit: 2e3 });
+    const queueEntry = queue.find((item) => item.appointmentId === appointment.id && !item.deletedAt);
+    if (queueEntry) await db.update("queue", [{ id: queueEntry.id, record: { ...queueEntry, deletedAt, deletedBy } }]);
+    await audit("deleted appointment", "appointment", { id: appointment.id, customerName: appointment.customerName, status: appointment.status, queueId: queueEntry?.id || null, orderVoided: Boolean(order), payoutReversalRequired: Boolean(order?.payoutReversalRequired) }, deletedBy);
+    return json({ ok: true, orderVoided: Boolean(order) });
   }],
   "DELETE /api/appointments/cancelled": [async () => {
     requireOwner();
@@ -30801,21 +30914,34 @@ New temporary password: ${newPassword}`, account.id);
       if (!staffMember) return error("Assigned staff member was not found", 404);
       if (context?.branchId && staffMember.branchId && staffMember.branchId !== context.branchId) return error("Assigned staff must belong to the active branch", 400);
       const helperId = String(adjustment.helperStaffId || "");
+      const coStaffId = String(adjustment.coStaffId || "");
       let helper = null;
+      let coStaff = null;
+      if (coStaffId) {
+        [coStaff] = await db.get("staff", [coStaffId]);
+        if (!coStaff) return error("Co-staff member was not found", 404);
+        if (context?.branchId && coStaff.branchId && coStaff.branchId !== context.branchId) return error("Co-staff must belong to the active branch", 400);
+        if (coStaff.id === staffMember.id) return error("Co-staff must be different from the primary staff member", 400);
+      }
       if (helperId) {
         [helper] = await db.get("staff", [helperId]);
         if (!helper) return error("Assistant staff member was not found", 404);
         if (context?.branchId && helper.branchId && helper.branchId !== context.branchId) return error("Assistant must belong to the active branch", 400);
-        if (helper.id === staffMember.id) return error("Assistant must be different from the staff member who completed the service", 400);
+        if (helper.id === staffMember.id || helper.id === coStaff?.id) return error("Assistant must be different from the service staff", 400);
       }
       const rate = Number(adjustment.commissionPct);
       const commissionPct2 = Number.isFinite(rate) && rate >= 0 && rate <= 100 ? rate : Number(item.commissionPct || item.commissionRate || 50);
       const serviceRevenue = Number(item.lineTotalAfterDiscount ?? item.price * item.qty) || 0;
-      const assistantPayment = helper ? assistantCompensation(Number(item.price || 0) * Number(item.qty || 1), hasSpecialAssistantBraid(item)) : 0;
+      const requestedAssistantPayment = Math.max(0, Number(adjustment.assistantPayment || 0));
+      const assistantPayment = helper ? requestedAssistantPayment : 0;
       const productCost = Math.max(0, Number(item.productCost || 0));
       const commissionBase = Math.max(0, serviceRevenue - productCost - assistantPayment);
-      const commission = commissionBase * (commissionPct2 / 100);
-      updatedItems[index] = { ...item, staffId: staffMember.id, staffName: staffMember.name, helperStaffId: helper?.id || null, helperStaffName: helper?.name || null, assistantPayment, helperDeduction: assistantPayment, commissionBase, commissionPct: commissionPct2, commissionRate: commissionPct2, commission };
+      const defaultCommission = commissionBase * (commissionPct2 / 100);
+      const hasMultipleStaff = Boolean(coStaff || helper);
+      const primaryCommission = hasMultipleStaff ? Math.max(0, Number(adjustment.primaryCommission ?? defaultCommission)) : defaultCommission;
+      const coStaffCommission = coStaff ? Math.max(0, Number(adjustment.coStaffCommission ?? defaultCommission)) : 0;
+      if (primaryCommission + coStaffCommission > commissionBase) return error("Combined staff commissions cannot exceed the service amount after product and assistant costs", 400);
+      updatedItems[index] = { ...item, staffId: staffMember.id, staffName: staffMember.name, coStaffId: coStaff?.id || null, coStaffName: coStaff?.name || null, helperStaffId: helper?.id || null, helperStaffName: helper?.name || null, assistantPayment, helperDeduction: assistantPayment, commissionBase, commissionPct: commissionPct2, commissionRate: commissionPct2, commission: primaryCommission, primaryCommission, coStaffCommission, commissionParticipants: coStaff ? 2 : 1, commissionSplit: coStaff ? "manual-two-staff" : "manual-one-staff" };
     }
     const updated = { ...existing, items: updatedItems, helperDeductions: updatedItems.reduce((sum, item) => sum + (item.type === "service" ? Number(item.assistantPayment || 0) : 0), 0) };
     const [ok] = await db.update("orders", [{ id: params.id, record: updated }]);
@@ -30869,6 +30995,9 @@ New temporary password: ${newPassword}`, account.id);
       item.staffName = null;
       item.coStaffId = null;
       item.coStaffName = null;
+      item.thirdStaffId = null;
+      item.thirdStaffName = null;
+      item.thirdStaffCommission = 0;
       item.helperStaffId = null;
       item.helperStaffName = null;
       item.assistantPayment = 0;
@@ -30944,6 +31073,7 @@ New temporary password: ${newPassword}`, account.id);
     }
     for (const item of serviceItems) {
       const coStaffId = item.staffCount === 2 ? String(item.coStaffId || "") : "";
+      const thirdStaffId = String(item.thirdStaffId || "");
       const helperId = String(item.helperStaffId || "");
       if (coStaffId) {
         const [coStaff] = await db.get("staff", [coStaffId]);
@@ -30951,10 +31081,17 @@ New temporary password: ${newPassword}`, account.id);
         if (coStaff.id === item.staffId) return error("Co-staff must be different from the primary staff member", 400);
         item.coStaffName = coStaff.name;
       }
+      if (thirdStaffId) {
+        const [thirdStaff] = await db.get("staff", [thirdStaffId]);
+        if (!coStaffId) return error("Assign co-staff before adding a third staff member", 400);
+        if (!thirdStaff || thirdStaff.branchId !== context?.branchId) return error("Third staff must be an employee from the active branch", 400);
+        if (thirdStaff.id === item.staffId || thirdStaff.id === coStaffId) return error("Third staff must be different from the other service staff", 400);
+        item.thirdStaffName = thirdStaff.name;
+      }
       if (helperId) {
         const [helper] = await db.get("staff", [helperId]);
         if (!helper || helper.branchId !== context?.branchId) return error("Helper must be an employee from the active branch", 400);
-        if (helper.id === item.staffId || helper.id === coStaffId) return error("Assistant must be different from the service staff", 400);
+        if (helper.id === item.staffId || helper.id === coStaffId || helper.id === thirdStaffId) return error("Assistant must be different from the service staff", 400);
         item.helperStaffName = helper.name;
       }
       const consumedProducts = Array.isArray(item.consumedProducts) ? item.consumedProducts : [];
@@ -31006,8 +31143,6 @@ New temporary password: ${newPassword}`, account.id);
             unit: product?.unit || used.unit || ""
           };
         });
-        item.assistantPayment = item.helperStaffId ? assistantCompensation(Number(item.price || 0) * Number(item.qty || 1), hasSpecialAssistantBraid(item)) : 0;
-        item.helperDeduction = item.assistantPayment;
       }
       if (updates.length) await db.update("products", updates);
       const productMoves = productItems.map((item) => ({
@@ -31031,6 +31166,10 @@ New temporary password: ${newPassword}`, account.id);
       const movementEntries = [...productMoves, ...usedMoves].filter((move) => Number(move.change) !== 0);
       if (movementEntries.length) await db.add("stock_movements", movementEntries);
     }
+    for (const item of serviceItems) {
+      item.assistantPayment = item.helperStaffId ? assistantCompensation(Number(item.price || 0) * Number(item.qty || 1), hasSpecialAssistantBraid(item)) : 0;
+      item.helperDeduction = item.assistantPayment;
+    }
     const helperDeductions = serviceItems.reduce((sum, item) => sum + Number(item.assistantPayment || 0), 0);
     const productSalesCostTotal = productItems.reduce((sum, item) => sum + Math.max(0, Number(item.cost || 0)) * Number(item.qty || 0), 0);
     const serviceProductCostTotal = serviceItems.reduce((sum, item) => sum + (item.consumedProducts || []).reduce((inner, used) => inner + Math.max(0, Number(used.cost || 0)) * Math.max(0, Number(used.qty || 0)), 0), 0);
@@ -31041,9 +31180,15 @@ New temporary password: ${newPassword}`, account.id);
       item.commissionBase = Math.max(0, item.commissionBase - Number(item.helperDeduction || 0));
       item.commissionRate = commissionPct(item.commissionPct, item.staffCount);
       item.commissionPct = item.commissionRate;
-      item.commission = item.commissionBase * (item.commissionRate / 100);
-      item.commissionParticipants = item.staffCount;
-      item.commissionSplit = item.staffCount === 2 ? "two-staff" : "one-staff";
+      const defaultCommission = item.commissionBase * (item.commissionRate / 100);
+      const hasMultipleStaff = Boolean(item.coStaffId || item.thirdStaffId || item.helperStaffId);
+      item.primaryCommission = hasMultipleStaff ? Math.max(0, Number(item.primaryCommission ?? defaultCommission)) : defaultCommission;
+      item.coStaffCommission = item.coStaffId ? Math.max(0, Number(item.coStaffCommission ?? defaultCommission)) : 0;
+      item.thirdStaffCommission = item.thirdStaffId ? Math.max(0, Number(item.thirdStaffCommission ?? 0)) : 0;
+      if (item.primaryCommission + item.coStaffCommission + item.thirdStaffCommission > item.commissionBase) return error(`Staff commissions for ${item.name} cannot exceed the service balance after product and assistant costs`, 400);
+      item.commission = item.primaryCommission;
+      item.commissionParticipants = item.thirdStaffId ? 3 : item.staffCount;
+      item.commissionSplit = item.thirdStaffId ? "manual-three-staff" : item.coStaffId ? "manual-two-staff" : "manual-one-staff";
     }
     let customerName = b2.customerName || "Walk-in Customer";
     if (b2.customerId) {
@@ -31095,16 +31240,20 @@ New temporary password: ${newPassword}`, account.id);
       if (!order.createdAt || order.createdAt < from) continue;
       for (const item of order.items || []) {
         if (item.type !== "service") continue;
-        const commission = serviceCommission(item);
         if (item.staffId) {
           const total = totals.get(item.staffId) || { commission: 0, assistant: 0 };
-          total.commission += commission;
+          total.commission += staffCommission(item, item.staffId);
           totals.set(item.staffId, total);
         }
         if (item.coStaffId) {
           const total = totals.get(item.coStaffId) || { commission: 0, assistant: 0 };
-          total.commission += commission;
+          total.commission += staffCommission(item, item.coStaffId);
           totals.set(item.coStaffId, total);
+        }
+        if (item.thirdStaffId) {
+          const total = totals.get(item.thirdStaffId) || { commission: 0, assistant: 0 };
+          total.commission += staffCommission(item, item.thirdStaffId);
+          totals.set(item.thirdStaffId, total);
         }
         if (item.helperStaffId) {
           const total = totals.get(item.helperStaffId) || { commission: 0, assistant: 0 };
@@ -31151,6 +31300,11 @@ New temporary password: ${newPassword}`, account.id);
         if (item.coStaffId && !alreadyPaid.has(`${order.id}:${index}:co-staff`)) {
           const coStaff = staffById.get(item.coStaffId);
           if (coStaff) lines.push({ itemKey: `${order.id}:${index}:co-staff`, orderId: order.id, staffId: item.coStaffId, staffName: item.coStaffName || coStaff.name, revenue, commissionBase, helperDeduction: Number(item.helperDeduction || 0), productCost: Number(item.productCost || 0), commission, currency: item.currency || "KES", branchId: order.branchId || context.branchId || null, createdAt: now, role: "co-staff" });
+        }
+        if (item.thirdStaffId && !alreadyPaid.has(`${order.id}:${index}:third-staff`)) {
+          const thirdStaff = staffById.get(item.thirdStaffId);
+          const thirdStaffCommission = staffCommission(item, item.thirdStaffId);
+          if (thirdStaff) lines.push({ itemKey: `${order.id}:${index}:third-staff`, orderId: order.id, staffId: item.thirdStaffId, staffName: item.thirdStaffName || thirdStaff.name, revenue, commissionBase, helperDeduction: Number(item.helperDeduction || 0), productCost: Number(item.productCost || 0), commission: thirdStaffCommission, currency: item.currency || "KES", branchId: order.branchId || context.branchId || null, createdAt: now, role: "third-staff" });
         }
         if (item.helperStaffId && !alreadyPaid.has(`${order.id}:${index}:assistant`)) {
           const assistant = staffById.get(item.helperStaffId);
@@ -31261,7 +31415,7 @@ New temporary password: ${newPassword}`, account.id);
         } else if (it2.type === "service") {
           const staff = it2.staffId ? staffById.get(it2.staffId) : null;
           const serviceRevenueAfterDiscount = it2.lineTotalAfterDiscount ?? it2.price * it2.qty;
-          const comm = serviceCommission(it2);
+          const comm = staffCommission(it2, it2.staffId);
           const assistantAmount = Number(it2.assistantPayment ?? it2.helperDeduction ?? 0);
           commissionsByCurrency[cur] = (commissionsByCurrency[cur] || 0) + comm;
           if (it2.staffId) {
@@ -31273,6 +31427,30 @@ New temporary password: ${newPassword}`, account.id);
             entry.count += it2.qty;
             staffRevenue.set(key, entry);
             commissionByClient.push({ clientId: o.customerId || null, clientName: o.customerName || "Walk-in Customer", staffName: it2.staffName || staff.name, serviceName: it2.name, revenue: serviceRevenueAfterDiscount, assistantPayment: assistantAmount, commission: comm, currency: cur, createdAt: o.createdAt });
+          }
+          if (it2.coStaffId) {
+            const coStaff = staffById.get(it2.coStaffId);
+            const coStaffCommission = staffCommission(it2, it2.coStaffId);
+            commissionsByCurrency[cur] = (commissionsByCurrency[cur] || 0) + coStaffCommission;
+            const key = `${it2.coStaffId}|${cur}`;
+            const entry = staffRevenue.get(key) || { name: it2.coStaffName || coStaff?.name || "Unknown", currency: cur, revenue: 0, commission: 0, helperDeductions: 0, count: 0 };
+            entry.revenue += serviceRevenueAfterDiscount;
+            entry.commission += coStaffCommission;
+            entry.count += it2.qty;
+            staffRevenue.set(key, entry);
+            commissionByClient.push({ clientId: o.customerId || null, clientName: o.customerName || "Walk-in Customer", staffName: it2.coStaffName || coStaff?.name || "Unknown", serviceName: it2.name, revenue: serviceRevenueAfterDiscount, assistantPayment: 0, commission: coStaffCommission, currency: cur, createdAt: o.createdAt });
+          }
+          if (it2.thirdStaffId) {
+            const thirdStaff = staffById.get(it2.thirdStaffId);
+            const thirdStaffCommission = staffCommission(it2, it2.thirdStaffId);
+            commissionsByCurrency[cur] = (commissionsByCurrency[cur] || 0) + thirdStaffCommission;
+            const key = `${it2.thirdStaffId}|${cur}`;
+            const entry = staffRevenue.get(key) || { name: it2.thirdStaffName || thirdStaff?.name || "Unknown", currency: cur, revenue: 0, commission: 0, helperDeductions: 0, count: 0 };
+            entry.revenue += serviceRevenueAfterDiscount;
+            entry.commission += thirdStaffCommission;
+            entry.count += it2.qty;
+            staffRevenue.set(key, entry);
+            commissionByClient.push({ clientId: o.customerId || null, clientName: o.customerName || "Walk-in Customer", staffName: it2.thirdStaffName || thirdStaff?.name || "Unknown", serviceName: it2.name, revenue: serviceRevenueAfterDiscount, assistantPayment: 0, commission: thirdStaffCommission, currency: cur, createdAt: o.createdAt });
           }
           const skey = `${it2.name}|${cur}`;
           const s = serviceRevenue.get(skey) || { name: it2.name, currency: cur, revenue: 0, count: 0 };
