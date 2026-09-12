@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Home, Calendar, Users, Scissors, Contact, ShoppingCart, Package, DollarSign, Sparkles, Menu, X, Tag, BarChart3, CreditCard, Percent, ClipboardList, Building2, KeyRound, MessageSquare } from 'lucide-react';
+import { Home, Calendar, Users, Scissors, Contact, ShoppingCart, DollarSign, Sparkles, Menu, X, Tag, BarChart3, CreditCard, Percent, ClipboardList, Building2, KeyRound, MessageSquare } from 'lucide-react';
 import { AuthApi, BranchesApi, StaffApi } from './lib/api';
 import { Button, Field, Input, Modal, ToastHost, toast } from './components/ui';
 import AppErrorBoundary from './components/AppErrorBoundary';
@@ -10,7 +10,6 @@ import Queue from './tabs/Queue';
 import StaffTab from './tabs/Staff';
 import CustomersTab from './tabs/Customers';
 import POS from './tabs/POS';
-import Inventory from './tabs/Inventory';
 import Finance from './tabs/Finance';
 import AIAssistant from './tabs/AIAssistant';
 import Services from './tabs/Services';
@@ -25,7 +24,7 @@ import AuthScreen from './components/AuthScreen';
 import Admin from './tabs/Admin';
 import Reviews from './tabs/Reviews';
 
-type TabKey = 'dashboard' | 'appointments' | 'queue' | 'messages' | 'staff' | 'customers' | 'pos' | 'inventory' | 'services' | 'memberships' | 'promotions' | 'reviews' | 'reports' | 'finance' | 'ai' | 'booking' | 'logs' | 'admin';
+type TabKey = 'dashboard' | 'appointments' | 'queue' | 'messages' | 'staff' | 'customers' | 'pos' | 'services' | 'memberships' | 'promotions' | 'reviews' | 'reports' | 'finance' | 'ai' | 'booking' | 'logs' | 'admin';
 
 const TABS: { key: TabKey; label: string; icon: any; roles: Role[] }[] = [
   { key: 'dashboard', label: 'Dashboard', icon: Home, roles: ['owner', 'barber', 'customer', 'admin'] },
@@ -38,7 +37,6 @@ const TABS: { key: TabKey; label: string; icon: any; roles: Role[] }[] = [
   { key: 'reviews', label: 'Reviews', icon: MessageSquare, roles: ['owner', 'admin'] },
   { key: 'customers', label: 'Customers', icon: Contact, roles: ['owner', 'manager', 'admin'] },
   { key: 'pos', label: 'Point of Sale', icon: ShoppingCart, roles: ['owner', 'manager', 'receptionist', 'barber', 'admin'] },
-  { key: 'inventory', label: 'Inventory', icon: Package, roles: ['owner', 'admin'] },
   { key: 'finance', label: 'Finance', icon: DollarSign, roles: ['owner', 'admin'] },
   { key: 'reports', label: 'Reports', icon: BarChart3, roles: ['owner', 'manager', 'admin'] },
   { key: 'ai', label: 'AI Assistant', icon: Sparkles, roles: ['owner', 'admin'] },
@@ -245,7 +243,6 @@ function App() {
                 {tab === 'reviews' && <Reviews />}
                 {tab === 'customers' && <CustomersTab role={effectiveRole} />}
                 {tab === 'pos' && <POS appointment={posAppointment} currentStaffId={account?.staffId} onSaleComplete={() => { setPosAppointment(undefined); toast('Sale completed and recorded.', 'success'); }} />}
-                {tab === 'inventory' && <Inventory />}
                 {tab === 'finance' && <Finance />}
                 {tab === 'reports' && <Reports role={effectiveRole} />}
                 {tab === 'ai' && <AIAssistant />}

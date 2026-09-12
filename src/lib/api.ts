@@ -1,4 +1,4 @@
-import type { Staff, ServiceItem, Customer, Appointment, QueueEntry, Product, Order, Expense, DashboardData, RebookingItem, ChatChannel, ChatMessage, Currency, MembershipPlan, Promotion, Review, AuditLog, Branch, PayoutBatch } from '../types';
+import type { Staff, ServiceItem, Customer, Appointment, QueueEntry, Order, Expense, DashboardData, RebookingItem, ChatChannel, ChatMessage, Currency, MembershipPlan, Promotion, Review, AuditLog, Branch, PayoutBatch } from '../types';
 
 const api = {
   get: async (path: string) => ({ data: await request(path) }),
@@ -112,7 +112,7 @@ export const AppointmentsApi = {
   list: (date?: string) => api.get(date ? `/api/appointments?date=${date}` : '/api/appointments').then(r => r.data.items as Appointment[]),
   create: (a: unknown) => api.post('/api/appointments', a).then(r => { invalidate('dashboard'); return r; }),
   update: (id: string, patch: Partial<Appointment>) => api.put(`/api/appointments/${id}`, patch).then(r => { invalidate('dashboard'); return r; }),
-  reopenCompleted: (id: string) => api.post(`/api/appointments/${id}/reopen`).then(r => { invalidate('appointments'); invalidate('products'); invalidate('customers'); invalidate('dashboard'); return r; }),
+  reopenCompleted: (id: string) => api.post(`/api/appointments/${id}/reopen`).then(r => { invalidate('appointments'); invalidate('customers'); invalidate('dashboard'); return r; }),
   remove: (id: string) => api.delete(`/api/appointments/${id}`).then(r => { invalidate('dashboard'); return r; }),
   deleteCancelled: () => api.delete('/api/appointments/cancelled').then(r => { invalidate('dashboard'); return r; }),
 };
@@ -132,16 +132,9 @@ export const AuditApi = {
   list: () => api.get('/api/audit-logs').then(r => r.data.items as AuditLog[]),
 };
 
-export const ProductsApi = {
-  list: () => cached('products:list', 15000, () => api.get('/api/products').then(r => r.data.items as Product[])),
-  create: (p: Partial<Product>) => api.post('/api/products', p).then(r => { invalidate('products'); return r; }),
-  update: (id: string, patch: Partial<Product>) => api.put(`/api/products/${id}`, patch).then(r => { invalidate('products'); return r; }),
-  remove: (id: string) => api.delete(`/api/products/${id}`).then(r => { invalidate('products'); return r; }),
-};
-
 export const OrdersApi = {
   list: () => api.get('/api/orders').then(r => r.data.items as Order[]),
-  checkout: (payload: unknown) => api.post('/api/orders', payload).then(r => { invalidate('products'); invalidate('customers'); invalidate('dashboard'); return r; }),
+  checkout: (payload: unknown) => api.post('/api/orders', payload).then(r => { invalidate('customers'); invalidate('dashboard'); return r; }),
   completion: (appointmentId: string) => api.get(`/api/appointments/${appointmentId}/completion`).then(r => r.data.item),
   updateCompletion: (orderId: string, payload: unknown) => api.put(`/api/orders/${orderId}/completion`, payload).then(r => { invalidate('dashboard'); return r; }),
 };

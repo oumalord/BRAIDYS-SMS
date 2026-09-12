@@ -21,7 +21,6 @@ interface CompletionLine {
   staffId: string;
   coStaffId: string;
   serviceFee: number;
-  hasSpecialBraid: boolean;
   helperStaffId: string;
   assistantPayment: number;
   commissionBase: number;
@@ -30,8 +29,7 @@ interface CompletionLine {
   coStaffCommission: number;
 }
 
-function assistantCompensation(serviceFee: number, hasSpecialBraid = false): number {
-  if (hasSpecialBraid) return 400;
+function assistantCompensation(serviceFee: number): number {
   if (serviceFee <= 1800) return 200;
   if (serviceFee <= 2400) return 300;
   if (serviceFee <= 3300) return 400;
@@ -173,7 +171,7 @@ function Appointments({ role }: { role: Role }) {
       const lines = (Array.isArray(order.items) ? order.items : [])
         .map((item: any, index: number) => ({ item, index }))
         .filter(({ item }: { item: any }) => item.type === 'service')
-        .map(({ item, index }: { item: any; index: number }) => { const serviceFee = Number(item.price || 0) * Number(item.qty || 1); const hasSpecialBraid = (item.consumedProducts || []).some((product: any) => ['amara', 'diani', 'marley imported', 'marley angel'].includes(String(product?.name || '').trim().toLowerCase())); const assistantPayment = Number(item.assistantPayment ?? item.helperDeduction ?? 0); const commissionBase = Math.max(0, Number(item.lineTotalAfterDiscount ?? serviceFee) - Number(item.productCost || 0) - assistantPayment); const defaultCommission = commissionBase * (Number(item.commissionPct ?? item.commissionRate ?? 50) / 100); return { index, name: item.name || appointment.serviceName, staffId: item.staffId || '', coStaffId: item.coStaffId || '', serviceFee, hasSpecialBraid, helperStaffId: item.helperStaffId || '', assistantPayment, commissionBase, commissionPct: Number(item.commissionPct ?? item.commissionRate ?? 50), primaryCommission: Number(item.primaryCommission ?? item.commission ?? defaultCommission), coStaffCommission: Number(item.coStaffCommission ?? (item.coStaffId ? item.commission ?? defaultCommission : 0)) }; });
+        .map(({ item, index }: { item: any; index: number }) => { const serviceFee = Number(item.price || 0) * Number(item.qty || 1); const assistantPayment = Number(item.assistantPayment ?? item.helperDeduction ?? 0); const commissionBase = Math.max(0, Number(item.lineTotalAfterDiscount ?? serviceFee) - Number(item.productCost || 0) - assistantPayment); const defaultCommission = commissionBase * (Number(item.commissionPct ?? item.commissionRate ?? 50) / 100); return { index, name: item.name || appointment.serviceName, staffId: item.staffId || '', coStaffId: item.coStaffId || '', serviceFee, helperStaffId: item.helperStaffId || '', assistantPayment, commissionBase, commissionPct: Number(item.commissionPct ?? item.commissionRate ?? 50), primaryCommission: Number(item.primaryCommission ?? item.commission ?? defaultCommission), coStaffCommission: Number(item.coStaffCommission ?? (item.coStaffId ? item.commission ?? defaultCommission : 0)) }; });
       if (!lines.length) { toast('This appointment has no completed service work to adjust.', 'error'); return; }
       setCompletionLines(lines);
       setCompletionEdit({ orderId: order.id, appointment });
@@ -273,7 +271,7 @@ function Appointments({ role }: { role: Role }) {
               <Badge tone={STATUS_TONE[a.status]}>{a.status.replace('-', ' ')}</Badge>
               {(role === 'owner' || role === 'admin' || role === 'receptionist' || (role === 'barber' && a.staffId === account?.staffId)) && <div className="flex flex-wrap gap-2">
                 {(role === 'owner' || role === 'admin') && <Button size="sm" variant="secondary" onClick={() => beginEdit(a)}><Pencil size={14} aria-hidden="true" />Edit</Button>}
-                {(role === 'owner' || role === 'admin') && a.status === 'completed' && <Button size="sm" variant="secondary" onClick={() => showCompletionSummary(a)}>Deal summary</Button>}
+                {(role === 'owner' || role === 'admin' || (role === 'barber' && a.staffId === account?.staffId)) && a.status === 'completed' && <Button size="sm" variant="secondary" onClick={() => showCompletionSummary(a)}>Deal summary</Button>}
                 {(role === 'owner' || role === 'admin') && a.status === 'completed' && <Button size="sm" variant="secondary" onClick={() => beginCompletionEdit(a)}><Pencil size={14} aria-hidden="true" />Adjust completion</Button>}
                 {(role === 'owner' || role === 'admin') && a.status === 'completed' && <Button size="sm" variant="danger" onClick={() => reopenCompletedDeal(a)} disabled={saving}>Undo completed deal</Button>}
                 {(role === 'owner' || role === 'admin') && !['completed', 'cancelled', 'no-show'].includes(a.status) && (
@@ -349,7 +347,7 @@ function Appointments({ role }: { role: Role }) {
                 <p className="text-sm font-medium">{line.name}</p>
                 <Field label="Completed by" htmlFor={`completion-staff-${line.index}`}><Select id={`completion-staff-${line.index}`} value={line.staffId} onChange={event => setCompletionLines(current => current.map((item, index) => index === lineIndex ? { ...item, staffId: event.target.value } : item))}><option value="">Assign employee</option>{assignableStaff.map(member => <option key={member.id} value={member.id}>{member.name}</option>)}</Select></Field>
                 <Field label="Co-staff (optional)" htmlFor={`completion-co-staff-${line.index}`}><Select id={`completion-co-staff-${line.index}`} value={line.coStaffId} onChange={event => setCompletionLines(current => current.map((item, index) => index === lineIndex ? { ...item, coStaffId: event.target.value, coStaffCommission: event.target.value ? item.coStaffCommission : 0 } : item))}><option value="">No co-staff</option>{assignableStaff.filter(member => member.id !== line.staffId && member.id !== line.helperStaffId).map(member => <option key={member.id} value={member.id}>{member.name}</option>)}</Select></Field>
-                <Field label="Assistant (optional)" htmlFor={`completion-assistant-${line.index}`}><Select id={`completion-assistant-${line.index}`} value={line.helperStaffId} onChange={event => setCompletionLines(current => current.map((item, index) => index === lineIndex ? { ...item, helperStaffId: event.target.value, assistantPayment: event.target.value ? item.assistantPayment || assistantCompensation(item.serviceFee, item.hasSpecialBraid) : 0 } : item))}><option value="">No assistant</option>{assignableStaff.filter(member => member.id !== line.staffId && member.id !== line.coStaffId).map(member => <option key={member.id} value={member.id}>{member.name}</option>)}</Select></Field>
+                <Field label="Assistant (optional)" htmlFor={`completion-assistant-${line.index}`}><Select id={`completion-assistant-${line.index}`} value={line.helperStaffId} onChange={event => setCompletionLines(current => current.map((item, index) => index === lineIndex ? { ...item, helperStaffId: event.target.value, assistantPayment: event.target.value ? item.assistantPayment || assistantCompensation(item.serviceFee) : 0 } : item))}><option value="">No assistant</option>{assignableStaff.filter(member => member.id !== line.staffId && member.id !== line.coStaffId).map(member => <option key={member.id} value={member.id}>{member.name}</option>)}</Select></Field>
                 {(line.coStaffId || line.helperStaffId) ? <div className="grid sm:grid-cols-3 gap-4">
                   <Field label="Primary commission (KES)" htmlFor={`completion-primary-${line.index}`}><Input id={`completion-primary-${line.index}`} type="number" min={0} value={line.primaryCommission} onChange={event => setCompletionLines(current => current.map((item, index) => index === lineIndex ? { ...item, primaryCommission: Number(event.target.value) } : item))} /></Field>
                   {line.coStaffId ? <Field label="Co-staff commission (KES)" htmlFor={`completion-co-commission-${line.index}`}><Input id={`completion-co-commission-${line.index}`} type="number" min={0} value={line.coStaffCommission} onChange={event => setCompletionLines(current => current.map((item, index) => index === lineIndex ? { ...item, coStaffCommission: Number(event.target.value) } : item))} /></Field> : <div />}

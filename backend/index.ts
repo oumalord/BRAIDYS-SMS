@@ -970,9 +970,18 @@ export const handler = router({
     return json({ ok: true });
   }],
   'GET /api/appointments/:id/completion': [async ({ params }) => {
-    requireOwner();
+    const context = currentContext();
     const { items } = await db.list('orders', { limit: 1000 });
     const order = (items as any[]).find(item => String(item.appointmentId || '') === params.id);
+    if (context?.role === 'barber') {
+      const [appointment] = await db.get('appointments', [params.id]);
+      const identity = { staffId: context.staffId, name: context.name };
+      const ownAppointment = Boolean(appointment && sameStaffIdentity(appointment.staffId, appointment.staffName, identity));
+      const ownOrderItem = Boolean(order && Array.isArray(order.items) && order.items.some((item: any) => sameStaffIdentity(item.staffId, item.staffName, identity) || sameStaffIdentity(item.coStaffId, item.coStaffName, identity)));
+      if (!ownAppointment && !ownOrderItem) return error('You can only view completion details for your own appointments', 403);
+    } else {
+      requireOwner();
+    }
     if (!order) return error('No completed work was found for this appointment', 404);
     return json({ item: order });
   }],
@@ -1116,43 +1125,6 @@ export const handler = router({
   }],
   'DELETE /api/queue/:id': [async () => {
     return error('Records cannot be deleted. Update the queue status to preserve the audit trail.', 405);
-  }],
-
-  'GET /api/products': [async () => {
-    const { items } = await db.list('products', { limit: 500 });
-    return json({ items: (items as any[]).filter(product => !product.archivedAt) });
-  }],
-  'POST /api/products': [async ({ body }) => {
-    const b: any = body;
-    if (!b.name) return error('Product name is required', 400);
-    const [id] = await db.add('products', [{ name: b.name, category: b.category || 'Other', color: b.color || '', price: b.price || 0, cost: b.cost || 0, stock: b.stock || 0, lowStockThreshold: b.lowStockThreshold ?? 5, unit: b.unit || 'pcs', archivedAt: null }]);
-    if (!id) return error('Failed to add product', 500);
-    await audit('created', 'product', { id, name: b.name, stock: b.stock || 0, unit: b.unit || 'pcs' }, b.actor || 'owner');
-    return json({ id });
-  }],
-  'PUT /api/products/:id': [async ({ params, body }) => {
-    requireOwner();
-    const [existing] = await db.get('products', [params.id]);
-    if (!existing) return error('Product not found', 404);
-    const patch: any = body;
-    const updated = { ...existing, ...patch };
-    const [ok] = await db.update('products', [{ id: params.id, record: updated }]);
-    if (!ok) return error('Update failed', 500);
-    if (patch.stock !== undefined && Number(patch.stock) !== Number(existing.stock)) {
-      await db.add('stock_movements', [{ productId: params.id, productName: existing.name, previousStock: existing.stock, newStock: patch.stock, change: Number(patch.stock) - Number(existing.stock), reason: patch.reason || 'manual adjustment', createdAt: Date.now(), actor: patch.actor || 'owner' }]);
-    }
-    await audit('updated', 'product', { ...updated, productName: existing.name }, patch.actor || 'owner');
-    return json({ ok: true });
-  }],
-  'DELETE /api/products/:id': [async ({ params, body }) => {
-    requireOwner();
-    const [existing] = await db.get('products', [params.id]);
-    if (!existing || existing.archivedAt) return error('Product not found', 404);
-    const archived = { ...existing, archivedAt: Date.now() };
-    const [ok] = await db.update('products', [{ id: params.id, record: archived }]);
-    if (!ok) return error('Archive failed', 500);
-    await audit('archived', 'product', { id: params.id, productName: existing.name, name: existing.name }, (body as any)?.actor || currentContext()?.name || 'owner');
-    return json({ ok: true });
   }],
 
   'GET /api/orders': [async () => { const { items } = await db.list('orders', { limit: 1000 }); return json({ items: (items as any[]).filter(item => !item.deletedAt) }); }],

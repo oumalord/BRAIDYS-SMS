@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { DollarSign, Calendar, Users, AlertTriangle, TrendingUp, Sparkles } from 'lucide-react';
-import { Card, StatCard, LoadingState, EmptyState, Badge, toast } from '../components/ui';
+import { Card, StatCard, LoadingState, EmptyState, toast } from '../components/ui';
 import { DashboardApi, RebookingApi, fmtMoney } from '../lib/api';
 import type { DashboardData, RebookingItem } from '../types';
 
@@ -54,8 +54,8 @@ function Dashboard() {
         <StatCard label="Registered Customers" value={String(data.customersCount)} sub="all customer profiles" icon={Users} />
       </div>
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
-        <Card className="xl:col-span-2 p-4 sm:p-6">
+      <div className="grid grid-cols-1 gap-4">
+        <Card className="p-4 sm:p-6">
           <h2 className="font-semibold mb-4">Last 7 Days Revenue (KES)</h2>
           <div className="flex items-end gap-2 h-40" aria-hidden="true">
             {data.trend.map(t => (
@@ -70,21 +70,6 @@ function Dashboard() {
             <thead><tr><th>Date</th><th>Revenue</th></tr></thead>
             <tbody>{data.trend.map(t => <tr key={t.date}><td>{t.date}</td><td>{fmtMoney(t.revenue, 'KES')}</td></tr>)}</tbody>
           </table>
-        </Card>
-        <Card className="p-6">
-          <h2 className="font-semibold mb-4 flex items-center gap-2"><AlertTriangle size={16} className="text-[#FF9500]" aria-hidden="true" />Low Stock Alerts</h2>
-          {data.lowStockProducts.length === 0 ? (
-            <p className="text-sm text-[#6E6E73]">All products are above their reorder threshold.</p>
-          ) : (
-            <ul className="space-y-2">
-              {data.lowStockProducts.map(p => (
-                <li key={p.id} className="flex items-center justify-between text-sm">
-                  <span>{p.name}</span>
-                  <Badge tone="warning">{p.stock} {p.unit} left</Badge>
-                </li>
-              ))}
-            </ul>
-          )}
         </Card>
       </div>
 

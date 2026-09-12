@@ -109,18 +109,6 @@ export interface QueueEntry {
   calledAt?: number;
 }
 
-export interface Product {
-  id: string;
-  name: string;
-  category: string;
-  color?: string;
-  price: number;
-  cost: number;
-  stock: number;
-  lowStockThreshold: number;
-  unit: string;
-}
-
 export interface OrderItem {
   type: 'service' | 'product';
   refId: string;
@@ -201,7 +189,6 @@ export interface DashboardData {
   estimatedProfitByCurrency: Record<string, number>;
   todaysAppointmentsCount: number;
   upcomingAppointments: Appointment[];
-  lowStockProducts: Product[];
   activeStaffCount: number;
   totalStaffCount: number;
   waitingQueueCount: number;

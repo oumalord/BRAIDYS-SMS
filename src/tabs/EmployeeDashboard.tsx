@@ -5,6 +5,7 @@ import { Badge, Button, Card, EmptyState, LoadingState, toast } from '../compone
 import type { Appointment } from '../types';
 
 function todayStr() { return new Date().toISOString().slice(0, 10); }
+const fmtExactKES = (n: number) => `KES ${(n || 0).toLocaleString('en-KE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 function EmployeeDashboard({ account, onAddService }: { account: { name?: string; staffId?: string }; onAddService: (appointment: Appointment) => void }) {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
@@ -52,18 +53,18 @@ function EmployeeDashboard({ account, onAddService }: { account: { name?: string
 
       <div className="grid gap-4 sm:grid-cols-3">
         <Card className="p-5"><Clock size={18} className="text-[#0071e3]" aria-hidden="true" /><p className="mt-3 text-xs text-[#6E6E73]">Waiting Now</p><p className="text-2xl font-semibold">{waitingClients.length}</p></Card>
-        <Card className="p-5"><DollarSign size={18} className="text-green-600" aria-hidden="true" /><p className="mt-3 text-xs text-[#6E6E73]">Today's Earnings</p><p className="text-2xl font-semibold">{fmtKES(dailyEarnings)}</p><p className="text-xs text-[#6E6E73] mt-1">Commission {fmtKES(dailyCommission)} + assistant compensation {fmtKES(dailyAssistant)}</p></Card>
+        <Card className="p-5"><DollarSign size={18} className="text-green-600" aria-hidden="true" /><p className="mt-3 text-xs text-[#6E6E73]">Today's Earnings</p><p className="text-2xl font-semibold">{fmtExactKES(dailyEarnings)}</p><p className="text-xs text-[#6E6E73] mt-1">Commission {fmtExactKES(dailyCommission)} + assistant compensation {fmtExactKES(dailyAssistant)}</p></Card>
         <Card className="p-5"><UserRound size={18} className="text-[#0071e3]" aria-hidden="true" /><p className="mt-3 text-xs text-[#6E6E73]">Assigned clients</p><p className="text-2xl font-semibold">{assignedClients.length}</p></Card>
       </div>
 
       <Card className="p-5">
         <p className="text-xs text-[#6E6E73]">My 14-day Earnings</p>
-        <p className="text-xl font-semibold mt-1">{fmtKES(fortnightEarnings)}</p>
+        <p className="text-xl font-semibold mt-1">{fmtExactKES(fortnightEarnings)}</p>
       </Card>
 
       <Card className="p-5">
         <h2 className="font-semibold mb-3">Completed Services</h2>
-        {completedWork.length === 0 ? <p className="text-sm text-[#6E6E73]">Completed services and their earnings will appear here.</p> : <div className="space-y-2">{completedWork.map((work, index) => <div key={`${work.createdAt}-${work.serviceName}-${index}`} className="flex items-center justify-between gap-3 border-b border-black/5 pb-2 last:border-0"><div><p className="text-sm font-medium">{work.serviceName}</p><p className="text-xs text-[#6E6E73]">{new Date(work.createdAt).toLocaleString()} · {work.role === 'assistant' ? 'Assistant fee' : 'Commission'}</p></div><p className="shrink-0 text-sm font-semibold">{fmtKES(work.amount)}</p></div>)}</div>}
+        {completedWork.length === 0 ? <p className="text-sm text-[#6E6E73]">Completed services and their earnings will appear here.</p> : <div className="space-y-2">{completedWork.map((work, index) => <div key={`${work.createdAt}-${work.serviceName}-${index}`} className="flex items-center justify-between gap-3 border-b border-black/5 pb-2 last:border-0"><div><p className="text-sm font-medium">{work.serviceName}</p><p className="text-xs text-[#6E6E73]">{new Date(work.createdAt).toLocaleString()} · {work.role === 'assistant' ? 'Assistant fee' : 'Commission'}</p></div><p className="shrink-0 text-sm font-semibold">{fmtExactKES(work.amount)}</p></div>)}</div>}
       </Card>
 
       {waitingClients.length > 0 && (
