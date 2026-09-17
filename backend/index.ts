@@ -2,6 +2,7 @@ import { router, json, error, db, ai, storage, currentContext } from './runtime.
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 
 const DAY = 24 * 3600 * 1000;
+const DEFAULT_STAFF_PIN = '1234';
 
 function passwordHash(password: string, salt = randomBytes(16).toString('hex')) {
   return `${salt}:${scryptSync(password, salt, 64).toString('hex')}`;
@@ -592,7 +593,7 @@ export const handler = router({
     if (!branch) return error('Choose a valid branch for this staff member', 400);
     if (!b.phone) return error('Employee phone is required', 400);
     const isReceptionist = String(b.role || '').toLowerCase().includes('reception');
-    const pin = String(b.pin || '');
+    const pin = String(b.pin || DEFAULT_STAFF_PIN);
     if (!/^\d{4}$/.test(pin)) return error('Staff PIN must be exactly 4 digits', 400);
     const [id] = await db.add('staff', [{ tenantId: branch.salonId, salonName: branch.salonName || context?.salonName || '', name: b.name, role: b.role || 'Staff', specialties: b.specialties || [], branch: branch.name, branchId: branch.id, branchName: branch.name, chair: b.chair || '', phone: b.phone || '', accountEmail: b.accountEmail || '', accountStatus: b.accountStatus || 'pending', employmentStatus: 'active', commissionPct: 50, status: b.status || 'available' }]);
     if (!id) return error('Failed to add staff', 500);

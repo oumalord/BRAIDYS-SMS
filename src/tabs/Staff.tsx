@@ -16,7 +16,7 @@ function StaffTab({ role = 'owner' }: { role?: Role }) {
   useEffect(load, []);
   const [reviews, setReviews] = useState<Review[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
-  const [form, setForm] = useState({ name: '', role: 'Barber', chair: '', phone: '', credential: '', branchId: '' });
+  const [form, setForm] = useState({ name: '', role: 'Barber', chair: '', phone: '', credential: '1234', branchId: '' });
   useEffect(() => { ReviewsApi.list().then(setReviews); BranchesApi.list().then(loaded => { setBranches(loaded); setForm(current => ({ ...current, branchId: current.branchId || window.localStorage.getItem('safigroom_selected_branch') || loaded[0]?.id || '' })); }); }, []);
   const avgRating = (staffId: string) => {
     const mine = reviews.filter(r => r.staffId === staffId);
@@ -33,7 +33,7 @@ function StaffTab({ role = 'owner' }: { role?: Role }) {
       await StaffApi.create({ ...form, pin: form.credential, accountStatus: 'active', specialties: [], status: 'available' });
       toast('Staff member and worker account created.', 'success');
       setOpen(false);
-      setForm({ name: '', role: 'Barber', chair: '', phone: '', credential: '', branchId: branches[0]?.id || '' });
+      setForm({ name: '', role: 'Barber', chair: '', phone: '', credential: '1234', branchId: branches[0]?.id || '' });
       load();
     } catch (cause: any) {
       toast(cause?.message || 'Could not create this staff member.', 'error');
@@ -141,7 +141,7 @@ function StaffTab({ role = 'owner' }: { role?: Role }) {
             <Field label="Chair / Station" htmlFor="s-chair"><Input id="s-chair" value={form.chair} onChange={e => setForm(f => ({ ...f, chair: e.target.value }))} placeholder="e.g. Chair 3" /></Field>
             <Field label="Branch" htmlFor="s-branch"><Select id="s-branch" value={form.branchId} onChange={e => setForm(f => ({ ...f, branchId: e.target.value }))}>{branches.map(branch => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</Select></Field>
             <Field label="Phone" htmlFor="s-phone"><Input id="s-phone" value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} placeholder="+254…" /></Field>
-            <Field label="Login PIN" htmlFor="s-account-credential"><Input id="s-account-credential" type="password" inputMode="numeric" maxLength={4} minLength={4} value={form.credential} onChange={e => setForm(f => ({ ...f, credential: e.target.value.replace(/\D/g, '').slice(0, 4) }))} placeholder="Exactly 4 digits" /></Field>
+            <Field label="Login PIN" htmlFor="s-account-credential"><Input id="s-account-credential" type="password" inputMode="numeric" maxLength={4} minLength={4} value={form.credential} onChange={e => setForm(f => ({ ...f, credential: e.target.value.replace(/\D/g, '').slice(0, 4) }))} placeholder="1234" /></Field>
             <p className="text-sm rounded-xl bg-[#0071e3]/10 text-[#0058b0] px-3 py-2">Commission is fixed at 50% after product and helper deductions.</p>
           </div>
         </Modal>
