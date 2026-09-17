@@ -1353,8 +1353,6 @@ export const handler = router({
           unit: String(entry?.unit || ''),
         }))
         .filter((entry: any) => entry.productId && entry.qty > 0);
-      item.assistantPayment = 0;
-      item.helperDeduction = 0;
     }
 
     const productItems = orderItems.filter((it: any) => it.type === 'product');
