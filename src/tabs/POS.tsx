@@ -5,16 +5,9 @@ import { CustomersApi, ServicesApi, StaffApi, OrdersApi, PosDraftsApi, Appointme
 import { MpesaPayModal } from '../components/MpesaPay';
 import type { Appointment, Customer, ServiceItem, Staff, Currency } from '../types';
 
-interface CartLine { key: string; type: 'service'; refId: string; name: string; price: number; currency: Currency; qty: number; staffCount?: 1 | 2; commissionPct?: 30 | 33.35 | 40 | 50; staffId?: string; staffName?: string; coStaffId?: string; coStaffName?: string; thirdStaffId?: string; thirdStaffName?: string; helperStaffId?: string; helperStaffName?: string; assistantPayment?: number; assistantPaymentManual?: boolean; primaryCommission?: number; coStaffCommission?: number; thirdStaffCommission?: number; }
+interface CartLine { key: string; type: 'service'; refId: string; name: string; price: number; currency: Currency; qty: number; staffCount?: 1 | 2; commissionPct?: 30 | 33.35 | 40 | 50; staffId?: string; staffName?: string; coStaffId?: string; coStaffName?: string; thirdStaffId?: string; thirdStaffName?: string; helperStaffId?: string; helperStaffName?: string; assistantPayment?: number; primaryCommission?: number; coStaffCommission?: number; thirdStaffCommission?: number; }
 
 function todayStr() { return new Date().toISOString().slice(0, 10); }
-function assistantCompensation(serviceFee: number): number {
-  if (serviceFee <= 1800) return 200;
-  if (serviceFee <= 2400) return 300;
-  if (serviceFee <= 3300) return 400;
-  return 500;
-}
-
 function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: () => void; appointment?: Appointment; currentStaffId?: string }) {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [servingClients, setServingClients] = useState<Customer[]>([]);
@@ -109,10 +102,10 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
   const setStaffCount = (key: string, staffCount: 1 | 2) => setCart(current => current.map(line => line.key === key ? { ...line, staffCount, ...(staffCount === 1 ? { coStaffId: undefined, coStaffName: undefined, coStaffCommission: 0, thirdStaffId: undefined, thirdStaffName: undefined, thirdStaffCommission: 0 } : {}) } : line));
   const toggleThirdStaff = (key: string) => setCart(current => current.map(line => line.key === key ? line.thirdStaffId !== undefined ? { ...line, thirdStaffId: undefined, thirdStaffName: undefined, thirdStaffCommission: 0 } : { ...line, thirdStaffId: '' } : line));
   const setManualAmount = (key: string, field: 'primaryCommission' | 'coStaffCommission' | 'thirdStaffCommission', value: number) => setCart(current => current.map(line => line.key === key ? { ...line, [field]: Math.max(0, value) } : line));
-  const setAssistantPayment = (key: string, assistantPayment: number) => setCart(current => current.map(line => line.key === key ? { ...line, assistantPayment: Math.max(0, assistantPayment), assistantPaymentManual: true } : line));
+  const setAssistantPayment = (key: string, assistantPayment: number) => setCart(current => current.map(line => line.key === key ? { ...line, assistantPayment: Math.max(0, assistantPayment) } : line));
   const setLineHelper = (key: string, helperStaffId: string) => {
     const helper = staff.find(x => x.id === helperStaffId);
-    setCart(c => c.map(l => l.key === key ? { ...l, helperStaffId: helper?.id, helperStaffName: helper?.name, assistantPayment: helper ? assistantCompensation(l.price * l.qty) : 0, assistantPaymentManual: false } : l));
+    setCart(c => c.map(l => l.key === key ? { ...l, helperStaffId: helper?.id, helperStaffName: helper?.name, assistantPayment: 0 } : l));
   };
 
   const currencies = Array.from(new Set(cart.map(l => l.currency)));
@@ -166,7 +159,7 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
             price: l.price,
             currency: l.currency,
             qty: l.qty,
-            staffCount: l.staffCount || 1, commissionPct: l.commissionPct || 50, staffId: l.staffId || null, staffName: l.staffName || null, coStaffId: l.staffCount === 2 ? l.coStaffId || null : null, coStaffName: l.staffCount === 2 ? l.coStaffName || null : null, thirdStaffId: l.thirdStaffId || null, thirdStaffName: l.thirdStaffName || null, helperStaffId: l.helperStaffId || null, helperStaffName: l.helperStaffName || null, assistantPayment: Number(l.assistantPayment || 0), assistantPaymentManual: Boolean(l.assistantPaymentManual), primaryCommission: l.primaryCommission, coStaffCommission: l.coStaffCommission, thirdStaffCommission: l.thirdStaffCommission,
+            staffCount: l.staffCount || 1, commissionPct: l.commissionPct || 50, staffId: l.staffId || null, staffName: l.staffName || null, coStaffId: l.staffCount === 2 ? l.coStaffId || null : null, coStaffName: l.staffCount === 2 ? l.coStaffName || null : null, thirdStaffId: l.thirdStaffId || null, thirdStaffName: l.thirdStaffName || null, helperStaffId: l.helperStaffId || null, helperStaffName: l.helperStaffName || null, assistantPayment: Number(l.assistantPayment || 0), primaryCommission: l.primaryCommission, coStaffCommission: l.coStaffCommission, thirdStaffCommission: l.thirdStaffCommission,
           })),
         discountPct, paymentMethod, promoCode: promoCode.trim() || undefined, redeemPoints: redeemPoints || undefined, mpesaReceiptNumber, appointmentId: appointment?.id,
       });
@@ -189,6 +182,8 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
     if (currentStaffId && !customerId) { toast('Please select a client you are serving.', 'error'); return; }
     const missingStaff = cart.find(l => !l.staffId);
     if (missingStaff) { toast('Assign a staff member to every service before checkout.', 'error'); return; }
+    const missingAssistantFee = cart.find(l => l.helperStaffId && Number(l.assistantPayment || 0) <= 0);
+    if (missingAssistantFee) { toast(`Enter the assistant fee for ${missingAssistantFee.name} before checkout.`, 'error'); return; }
     const kesDue = totalByCurrency.KES || 0;
     if (paymentMethod === 'M-Pesa' && kesDue > 0) {
       setShowPay(true);
@@ -260,7 +255,7 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
                         {l.helperStaffId && <Field label="Assistant fee (KES)" htmlFor={`assistant-fee-${l.key}`}><Input id={`assistant-fee-${l.key}`} type="number" min={0} value={l.assistantPayment ?? 0} onChange={e => setAssistantPayment(l.key, Number(e.target.value))} className="py-1.5 text-xs" /></Field>}
                       </div>}
                       {l.staffCount === 2 && <p className="text-xs text-[#6E6E73]">Choose both staff members, then enter each person's exact earnings.</p>}
-                      {l.helperStaffId && <p className="text-xs text-[#6E6E73]">The automatic fee is applied at checkout; change it only for services with a staff-set fee.</p>}
+                      {l.helperStaffId && <p className="text-xs text-[#6E6E73]">Enter the assistant's agreed fee before payment.</p>}
                     </div>
                 </div>
               ))}

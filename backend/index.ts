@@ -41,17 +41,6 @@ function commissionPct(value: unknown, staffCount?: unknown): 30 | 33.35 | 40 | 
   if (rate === 30 || rate === 33.35 || rate === 40 || rate === 50) return rate;
   return serviceStaffCount(staffCount) === 2 ? 33.35 : 50;
 }
-function assistantCompensation(serviceFee: unknown, hasSpecialBraid = false): number {
-  if (hasSpecialBraid) return 400;
-  const amount = Math.max(0, Number(serviceFee) || 0);
-  if (amount <= 1800) return 200;
-  if (amount <= 2400) return 300;
-  if (amount <= 3300) return 400;
-  return 500;
-}
-function hasSpecialAssistantBraid(item: any): boolean {
-  return (item.consumedProducts || []).some((product: any) => ['amara', 'diani', 'marley imported', 'marley angel'].includes(String(product?.name || '').trim().toLowerCase()));
-}
 function sameStaffIdentity(staffId: unknown, staffName: unknown, context: { staffId?: string; name: string }): boolean {
   if (staffId && String(staffId) === String(context.staffId || '')) return true;
   const normalize = (value: unknown) => String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
@@ -75,8 +64,8 @@ function serviceCommission(item: any): number {
   if (Number.isFinite(recorded)) return Math.max(0, recorded);
   const revenue = Number(item.lineTotalAfterDiscount ?? Number(item.price || 0) * Number(item.qty || 1)) || 0;
   const productCost = Math.max(0, Number(item.productCost || 0));
-  const assistantCompensation = Math.max(0, Number(item.assistantPayment ?? item.helperDeduction ?? 0));
-  const commissionBase = Math.max(0, Number(item.commissionBase ?? (revenue - productCost - assistantCompensation)) || 0);
+  const assistantFee = Math.max(0, Number(item.assistantPayment ?? item.helperDeduction ?? 0));
+  const commissionBase = Math.max(0, Number(item.commissionBase ?? (revenue - productCost - assistantFee)) || 0);
   const rate = Number(item.commissionPct ?? item.commissionRate ?? 50);
   return commissionBase * (Number.isFinite(rate) ? rate / 100 : 0.5);
 }
@@ -1430,15 +1419,11 @@ export const handler = router({
     }
 
     for (const item of serviceItems) {
-      const requestedAssistantPayment = Number(item.assistantPayment);
-      const hasManualAssistantPayment = item.assistantPaymentManual === true && Number.isFinite(requestedAssistantPayment) && requestedAssistantPayment >= 0;
-      item.assistantPayment = item.helperStaffId
-        ? hasManualAssistantPayment
-          ? requestedAssistantPayment
-          : assistantCompensation(Number(item.price || 0) * Number(item.qty || 1), hasSpecialAssistantBraid(item))
-        : 0;
-      item.assistantPaymentManual = Boolean(item.helperStaffId && hasManualAssistantPayment);
+      const assistantPayment = Number(item.assistantPayment);
+      if (item.helperStaffId && (!Number.isFinite(assistantPayment) || assistantPayment <= 0)) return error(`Enter the assistant fee for ${item.name} before completing payment`, 400);
+      item.assistantPayment = item.helperStaffId ? assistantPayment : 0;
       item.helperDeduction = item.assistantPayment;
+      delete item.assistantPaymentManual;
     }
     const helperDeductions = serviceItems.reduce((sum: number, item: any) => sum + Number(item.assistantPayment || 0), 0);
     const productSalesCostTotal = productItems.reduce((sum: number, item: any) => sum + Math.max(0, Number(item.cost || 0)) * Number(item.qty || 0), 0);

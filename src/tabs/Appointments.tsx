@@ -29,13 +29,6 @@ interface CompletionLine {
   coStaffCommission: number;
 }
 
-function assistantCompensation(serviceFee: number): number {
-  if (serviceFee <= 1800) return 200;
-  if (serviceFee <= 2400) return 300;
-  if (serviceFee <= 3300) return 400;
-  return 500;
-}
-
 function canAssignStaff(member: Staff) {
   return member.employmentStatus !== 'laid-off' && member.status !== 'off';
 }
@@ -219,7 +212,7 @@ function Appointments({ role }: { role: Role }) {
 
   const saveCompletionEdit = async () => {
     if (!completionEdit) return;
-    if (completionLines.some(line => !line.staffId || line.assistantPayment < 0 || line.primaryCommission < 0 || line.coStaffCommission < 0 || line.primaryCommission + line.coStaffCommission > line.commissionBase)) { toast('Assign staff and keep combined commissions within the service balance.', 'error'); return; }
+    if (completionLines.some(line => !line.staffId || (line.helperStaffId && line.assistantPayment <= 0) || line.primaryCommission < 0 || line.coStaffCommission < 0 || line.primaryCommission + line.coStaffCommission > line.commissionBase)) { toast('Assign staff, enter each assistant fee, and keep combined commissions within the service balance.', 'error'); return; }
     setSaving(true);
     try {
       await OrdersApi.updateCompletion(completionEdit.orderId, { items: completionLines });
@@ -347,7 +340,7 @@ function Appointments({ role }: { role: Role }) {
                 <p className="text-sm font-medium">{line.name}</p>
                 <Field label="Completed by" htmlFor={`completion-staff-${line.index}`}><Select id={`completion-staff-${line.index}`} value={line.staffId} onChange={event => setCompletionLines(current => current.map((item, index) => index === lineIndex ? { ...item, staffId: event.target.value } : item))}><option value="">Assign employee</option>{assignableStaff.map(member => <option key={member.id} value={member.id}>{member.name}</option>)}</Select></Field>
                 <Field label="Co-staff (optional)" htmlFor={`completion-co-staff-${line.index}`}><Select id={`completion-co-staff-${line.index}`} value={line.coStaffId} onChange={event => setCompletionLines(current => current.map((item, index) => index === lineIndex ? { ...item, coStaffId: event.target.value, coStaffCommission: event.target.value ? item.coStaffCommission : 0 } : item))}><option value="">No co-staff</option>{assignableStaff.filter(member => member.id !== line.staffId && member.id !== line.helperStaffId).map(member => <option key={member.id} value={member.id}>{member.name}</option>)}</Select></Field>
-                <Field label="Assistant (optional)" htmlFor={`completion-assistant-${line.index}`}><Select id={`completion-assistant-${line.index}`} value={line.helperStaffId} onChange={event => setCompletionLines(current => current.map((item, index) => index === lineIndex ? { ...item, helperStaffId: event.target.value, assistantPayment: event.target.value ? item.assistantPayment || assistantCompensation(item.serviceFee) : 0 } : item))}><option value="">No assistant</option>{assignableStaff.filter(member => member.id !== line.staffId && member.id !== line.coStaffId).map(member => <option key={member.id} value={member.id}>{member.name}</option>)}</Select></Field>
+                <Field label="Assistant (optional)" htmlFor={`completion-assistant-${line.index}`}><Select id={`completion-assistant-${line.index}`} value={line.helperStaffId} onChange={event => setCompletionLines(current => current.map((item, index) => index === lineIndex ? { ...item, helperStaffId: event.target.value, assistantPayment: 0 } : item))}><option value="">No assistant</option>{assignableStaff.filter(member => member.id !== line.staffId && member.id !== line.coStaffId).map(member => <option key={member.id} value={member.id}>{member.name}</option>)}</Select></Field>
                 {(line.coStaffId || line.helperStaffId) ? <div className="grid sm:grid-cols-3 gap-4">
                   <Field label="Primary commission (KES)" htmlFor={`completion-primary-${line.index}`}><Input id={`completion-primary-${line.index}`} type="number" min={0} value={line.primaryCommission} onChange={event => setCompletionLines(current => current.map((item, index) => index === lineIndex ? { ...item, primaryCommission: Number(event.target.value) } : item))} /></Field>
                   {line.coStaffId ? <Field label="Co-staff commission (KES)" htmlFor={`completion-co-commission-${line.index}`}><Input id={`completion-co-commission-${line.index}`} type="number" min={0} value={line.coStaffCommission} onChange={event => setCompletionLines(current => current.map((item, index) => index === lineIndex ? { ...item, coStaffCommission: Number(event.target.value) } : item))} /></Field> : <div />}
