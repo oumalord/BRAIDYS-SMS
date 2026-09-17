@@ -108,7 +108,7 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
   };
   const setStaffCount = (key: string, staffCount: 1 | 2) => setCart(current => current.map(line => line.key === key ? { ...line, staffCount, ...(staffCount === 1 ? { coStaffId: undefined, coStaffName: undefined, coStaffCommission: 0, thirdStaffId: undefined, thirdStaffName: undefined, thirdStaffCommission: 0 } : {}) } : line));
   const toggleThirdStaff = (key: string) => setCart(current => current.map(line => line.key === key ? line.thirdStaffId !== undefined ? { ...line, thirdStaffId: undefined, thirdStaffName: undefined, thirdStaffCommission: 0 } : { ...line, thirdStaffId: '' } : line));
-  const setManualAmount = (key: string, field: 'primaryCommission' | 'coStaffCommission' | 'thirdStaffCommission' | 'assistantPayment', value: number) => setCart(current => current.map(line => line.key === key ? { ...line, [field]: Math.max(0, value) } : line));
+  const setManualAmount = (key: string, field: 'primaryCommission' | 'coStaffCommission' | 'thirdStaffCommission', value: number) => setCart(current => current.map(line => line.key === key ? { ...line, [field]: Math.max(0, value) } : line));
   const setLineHelper = (key: string, helperStaffId: string) => {
     const helper = staff.find(x => x.id === helperStaffId);
     setCart(c => c.map(l => l.key === key ? { ...l, helperStaffId: helper?.id, helperStaffName: helper?.name, assistantPayment: helper ? assistantCompensation(l.price * l.qty) : 0 } : l));
@@ -256,10 +256,10 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
                         <Field label="Primary earns (KES)" htmlFor={`primary-commission-${l.key}`}><Input id={`primary-commission-${l.key}`} type="number" min={0} value={l.primaryCommission ?? ''} onChange={e => setManualAmount(l.key, 'primaryCommission', Number(e.target.value))} className="py-1.5 text-xs" /></Field>
                         {l.staffCount === 2 && <Field label="Co-staff earns (KES)" htmlFor={`co-commission-${l.key}`}><Input id={`co-commission-${l.key}`} type="number" min={0} value={l.coStaffCommission ?? ''} onChange={e => setManualAmount(l.key, 'coStaffCommission', Number(e.target.value))} className="py-1.5 text-xs" /></Field>}
                         {l.thirdStaffId !== undefined && <Field label="Third staff earns (KES)" htmlFor={`third-commission-${l.key}`}><Input id={`third-commission-${l.key}`} type="number" min={0} value={l.thirdStaffCommission ?? ''} onChange={e => setManualAmount(l.key, 'thirdStaffCommission', Number(e.target.value))} className="py-1.5 text-xs" /></Field>}
-                        {l.helperStaffId && <Field label="Assistant fee (KES)" htmlFor={`assistant-fee-${l.key}`}><Input id={`assistant-fee-${l.key}`} type="number" min={0} value={l.assistantPayment ?? 0} onChange={e => setManualAmount(l.key, 'assistantPayment', Number(e.target.value))} className="py-1.5 text-xs" /></Field>}
+                        {l.helperStaffId && <Field label="Assistant fee (KES)" htmlFor={`assistant-fee-${l.key}`}><Input id={`assistant-fee-${l.key}`} type="number" value={l.assistantPayment ?? 0} readOnly className="py-1.5 text-xs" /></Field>}
                       </div>}
                       {l.staffCount === 2 && <p className="text-xs text-[#6E6E73]">Choose both staff members, then enter each person's exact earnings.</p>}
-                      {l.helperStaffId && <p className="text-xs text-[#6E6E73]">Enter the assistant's exact fee above.</p>}
+                      {l.helperStaffId && <p className="text-xs text-[#6E6E73]">The assistant fee is applied automatically when payment is completed.</p>}
                     </div>
                 </div>
               ))}
