@@ -1430,7 +1430,14 @@ export const handler = router({
     }
 
     for (const item of serviceItems) {
-      item.assistantPayment = item.helperStaffId ? assistantCompensation(Number(item.price || 0) * Number(item.qty || 1), hasSpecialAssistantBraid(item)) : 0;
+      const requestedAssistantPayment = Number(item.assistantPayment);
+      const hasManualAssistantPayment = item.assistantPaymentManual === true && Number.isFinite(requestedAssistantPayment) && requestedAssistantPayment >= 0;
+      item.assistantPayment = item.helperStaffId
+        ? hasManualAssistantPayment
+          ? requestedAssistantPayment
+          : assistantCompensation(Number(item.price || 0) * Number(item.qty || 1), hasSpecialAssistantBraid(item))
+        : 0;
+      item.assistantPaymentManual = Boolean(item.helperStaffId && hasManualAssistantPayment);
       item.helperDeduction = item.assistantPayment;
     }
     const helperDeductions = serviceItems.reduce((sum: number, item: any) => sum + Number(item.assistantPayment || 0), 0);
