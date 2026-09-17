@@ -207,8 +207,8 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
                   <h3 className="text-xs font-semibold text-[#6E6E73] uppercase tracking-wide mb-2">{cat}</h3>
                   <div className="grid sm:grid-cols-2 gap-2">
                     {services.filter(s => s.category === cat).map(s => (
-                      <button key={s.id} onClick={() => addService(s)} className={`text-left rounded-2xl border p-3 hover:border-[#0071e3]/40 hover:shadow-sm transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3] ${s.commissionPct === 40 ? 'border-amber-300 bg-amber-50/40' : 'border-black/5 bg-white'}`}>
-                        <div className="flex items-center justify-between gap-2"><p className="font-medium text-sm">{s.name}</p>{s.commissionPct === 40 && <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800">40%</span>}</div>
+                      <button key={s.id} onClick={() => addService(s)} className={`text-left rounded-2xl border p-3 hover:border-[#0071e3]/40 hover:shadow-sm transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3] ${s.commissionPct === 40 ? 'border-amber-300 bg-amber-50/40' : s.commissionPct === 50 ? 'border-blue-300 bg-blue-50/40' : 'border-black/5 bg-white'}`}>
+                        <div className="flex items-center justify-between gap-2"><p className="font-medium text-sm">{s.name}</p>{s.commissionPct === 40 ? <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800">40%</span> : s.commissionPct === 50 ? <span className="shrink-0 rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-semibold text-blue-800">50%</span> : null}</div>
                         <p className="text-xs text-[#6E6E73]">{fmtMoney(s.price, s.currency)} · {s.durationMin} min</p>
                       </button>
                     ))}
