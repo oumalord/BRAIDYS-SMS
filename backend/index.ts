@@ -610,7 +610,7 @@ export const handler = router({
     await audit('created', 'staff', { id, name: b.name, responsibility: b.role || 'Staff', accountEmail: b.accountEmail || '', commissionPct: 50 }, b.actor || 'owner');
     if (currentContext()) {
       const context = currentContext()!;
-      await db.add('accounts', [{ id: `account-${randomBytes(8).toString('hex')}`, tenantId: branch.salonId, salonName: branch.salonName || context.salonName, branchId: branch.id, name: b.name, email: '', phone: b.phone, role: isReceptionist ? 'receptionist' : 'barber', status: 'active', pinHash: passwordHash(pin), staffId: id, createdAt: Date.now() }]);
+      await db.add('accounts', [{ id: `account-${randomBytes(8).toString('hex')}`, tenantId: branch.salonId, salonName: branch.salonName || context.salonName, branchId: branch.id, name: b.name, email: String(b.accountEmail || '').trim().toLowerCase(), phone: b.phone, role: isReceptionist ? 'receptionist' : 'barber', status: 'active', pinHash: passwordHash(pin), staffId: id, createdAt: Date.now() }]);
     }
     return json({ id });
   }],
@@ -632,7 +632,7 @@ export const handler = router({
     const { items: accounts } = await db.list('accounts', { limit: 5000 });
     const account = (accounts as any[]).find(item => item.staffId === params.id);
     if (account) {
-      const accountPatch = { ...account, name: updated.name, phone: updated.phone };
+      const accountPatch = { ...account, name: updated.name, email: String(updated.accountEmail || '').trim().toLowerCase(), phone: updated.phone };
       if (String(patch.pin || '')) {
         accountPatch.pinHash = passwordHash(String(patch.pin));
         delete accountPatch.passwordHash;
