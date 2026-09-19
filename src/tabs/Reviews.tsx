@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { MessageSquare, Star } from 'lucide-react';
+import { Copy, MessageSquare, Star } from 'lucide-react';
 import { ReviewsApi } from '../lib/api';
-import { Badge, Card, EmptyState, LoadingState, Select, toast } from '../components/ui';
+import { Badge, Button, Card, EmptyState, Input, LoadingState, Select, toast } from '../components/ui';
 import type { Review } from '../types';
 
 function stars(rating: number): string {
@@ -13,6 +13,9 @@ function Reviews() {
   const [loading, setLoading] = useState(true);
   const [reviews, setReviews] = useState<Review[]>([]);
   const [staffFilter, setStaffFilter] = useState('all');
+  let salonId = '';
+  try { salonId = JSON.parse(window.localStorage.getItem('safigroom_account') || '{}').salonId || ''; } catch { salonId = ''; }
+  const reviewLink = `${window.location.origin}/review?salonId=${encodeURIComponent(salonId)}`;
 
   useEffect(() => {
     let active = true;
@@ -73,6 +76,11 @@ function Reviews() {
           </Select>
         </div>
       </div>
+
+      <Card className="p-5 flex flex-col sm:flex-row gap-5 sm:items-center">
+        <img className="h-36 w-36 rounded-lg border border-black/10" src={`https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(reviewLink)}`} alt="QR code for the customer review form" />
+        <div className="space-y-2"><h2 className="font-semibold">Customer review QR code</h2><p className="text-sm text-[#6E6E73]">Display or print this code so clients can scan it and submit feedback without logging in.</p><div className="flex flex-col sm:flex-row gap-2"><Input aria-label="Public review link" value={reviewLink} readOnly /><Button variant="secondary" onClick={() => { void navigator.clipboard?.writeText(reviewLink); toast('Review link copied.', 'success'); }}><Copy size={15} aria-hidden="true" />Copy link</Button></div></div>
+      </Card>
 
       <div className="grid sm:grid-cols-3 gap-4">
         <Card className="p-5">

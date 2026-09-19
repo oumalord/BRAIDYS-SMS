@@ -209,6 +209,7 @@ export const PromotionsApi = {
 export const ReviewsApi = {
   list: (staffId?: string) => api.get(staffId ? `/api/reviews?staffId=${staffId}` : '/api/reviews').then(r => r.data.items as Review[]),
   create: (r: Partial<Review>) => api.post('/api/reviews', r),
+  createPublic: (r: Partial<Review>) => api.post('/api/public/reviews', r),
 };
 
 export const MpesaApi = {

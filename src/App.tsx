@@ -22,6 +22,7 @@ import EmployeeDashboard from './tabs/EmployeeDashboard';
 import AuthScreen from './components/AuthScreen';
 import Admin from './tabs/Admin';
 import Reviews from './tabs/Reviews';
+import PublicReview from './components/PublicReview';
 
 type TabKey = 'dashboard' | 'appointments' | 'messages' | 'staff' | 'customers' | 'pos' | 'services' | 'memberships' | 'promotions' | 'reviews' | 'reports' | 'finance' | 'ai' | 'booking' | 'logs' | 'admin';
 
@@ -117,6 +118,8 @@ function App() {
   const visibleTabs = TABS.filter(t => t.roles.includes(effectiveRole) && (t.key !== 'admin' || account?.role === 'admin'));
   if (account?.role === 'admin') visibleTabs.sort((first, second) => (first.key === 'admin' ? -1 : second.key === 'admin' ? 1 : 0));
   const isOwner = effectiveRole === 'owner' || effectiveRole === 'admin';
+
+  if (window.location.pathname === '/review') return <PublicReview />;
 
   if (!account) return <AuthScreen onAuthenticated={authenticatedAccount => {
     setAccount(authenticatedAccount);
