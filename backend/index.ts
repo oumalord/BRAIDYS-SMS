@@ -4,6 +4,17 @@ import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypt
 const DAY = 24 * 3600 * 1000;
 const DEFAULT_STAFF_PIN = '1234';
 
+function saturdayFridayRange(date = new Date()) {
+  const current = new Date(date);
+  const daysSinceSaturday = (current.getDay() + 1) % 7;
+  const fromDate = new Date(current);
+  fromDate.setDate(current.getDate() - daysSinceSaturday);
+  fromDate.setHours(0, 0, 0, 0);
+  const toDate = new Date(fromDate);
+  toDate.setDate(fromDate.getDate() + 7);
+  return { from: fromDate.getTime(), to: toDate.getTime() };
+}
+
 function passwordHash(password: string, salt = randomBytes(16).toString('hex')) {
   return `${salt}:${scryptSync(password, salt, 64).toString('hex')}`;
 }
@@ -483,7 +494,7 @@ export const handler = router({
     const dayStart = new Date();
     dayStart.setHours(0, 0, 0, 0);
     const todayFrom = dayStart.getTime();
-    const fortnightFrom = now - 14 * DAY;
+    const { from: weekFrom } = saturdayFridayRange();
 
     const [{ items: orders }, { items: deletedPayoutItems }] = await Promise.all([
       db.list('orders', { limit: 5000 }),
@@ -506,32 +517,34 @@ export const handler = router({
         if (!deletedEarningKeys.has(itemKey) && String(item.staffId || '') === String(context.staffId || '')) {
           const commission = staffCommission(item, item.staffId);
           if (order.createdAt >= todayFrom) todayCommission += commission;
-          if (order.createdAt >= fortnightFrom) fortnightCommission += commission;
+          if (order.createdAt >= weekFrom) fortnightCommission += commission;
           completedWork.push({ serviceName: item.name || 'Service', createdAt: order.createdAt, role: 'commission', amount: commission });
         }
         if (!deletedEarningKeys.has(`${itemKey}:co-staff`) && String(item.coStaffId || '') === String(context.staffId || '')) {
           const commission = staffCommission(item, item.coStaffId);
           if (order.createdAt >= todayFrom) todayCommission += commission;
-          if (order.createdAt >= fortnightFrom) fortnightCommission += commission;
+          if (order.createdAt >= weekFrom) fortnightCommission += commission;
           completedWork.push({ serviceName: item.name || 'Service', createdAt: order.createdAt, role: 'commission', amount: commission });
         }
         if (!deletedEarningKeys.has(`${itemKey}:third-staff`) && String(item.thirdStaffId || '') === String(context.staffId || '')) {
           const commission = staffCommission(item, item.thirdStaffId);
           if (order.createdAt >= todayFrom) todayCommission += commission;
-          if (order.createdAt >= fortnightFrom) fortnightCommission += commission;
+          if (order.createdAt >= weekFrom) fortnightCommission += commission;
           completedWork.push({ serviceName: item.name || 'Service', createdAt: order.createdAt, role: 'commission', amount: commission });
         }
         if (!deletedEarningKeys.has(`${itemKey}:assistant`) && String(item.helperStaffId || '') === String(context.staffId || '')) {
           if (order.createdAt >= todayFrom) todayAssistant += assistant;
-          if (order.createdAt >= fortnightFrom) fortnightAssistant += assistant;
+          if (order.createdAt >= weekFrom) fortnightAssistant += assistant;
           completedWork.push({ serviceName: item.name || 'Service', createdAt: order.createdAt, role: 'assistant', amount: assistant });
         }
       }
     }
 
+    const weekly = { commission: fortnightCommission, assistant: fortnightAssistant, total: fortnightCommission + fortnightAssistant };
     return json({
       today: { commission: todayCommission, assistant: todayAssistant, total: todayCommission + todayAssistant },
-      fortnight: { commission: fortnightCommission, assistant: fortnightAssistant, total: fortnightCommission + fortnightAssistant },
+      week: weekly,
+      fortnight: weekly,
       completedWork: completedWork.sort((left, right) => right.createdAt - left.createdAt).slice(0, 30),
     });
   }],
@@ -1465,7 +1478,7 @@ export const handler = router({
     const context = currentContext();
     if (!context || !['owner', 'admin'].includes(context.role)) return error('Only the owner or administrator can view payroll staff', 403);
     const { items } = await db.list('staff', { limit: 2000 });
-    const from = Date.now() - 14 * DAY;
+    const from = saturdayFridayRange().from;
     const [{ items: orders }, { items: deletedPayoutItems }] = await Promise.all([
       db.list('orders', { limit: 5000 }),
       db.list('payout_items', { limit: 10000 }),
@@ -1528,7 +1541,7 @@ export const handler = router({
     const now = Date.now();
     let from = 0;
     if (range === 'today') { const day = new Date(); day.setHours(0, 0, 0, 0); from = day.getTime(); }
-    if (range === 'week') from = now - 7 * DAY;
+    if (range === 'week') from = saturdayFridayRange().from;
     if (range === 'fortnight') from = now - 14 * DAY;
     if (range === 'month') from = now - 30 * DAY;
 
@@ -1617,7 +1630,7 @@ export const handler = router({
     const now = Date.now();
     let cutoff = 0;
     if (range === 'today') { const d = new Date(); d.setHours(0, 0, 0, 0); cutoff = d.getTime(); }
-    else if (range === 'week') cutoff = now - 7 * DAY;
+    else if (range === 'week') cutoff = saturdayFridayRange().from;
     else if (range === 'month') cutoff = now - 30 * DAY;
     else cutoff = 0;
 
@@ -1784,7 +1797,7 @@ export const handler = router({
 
     const now = Date.now();
     const monthAgo = now - 30 * DAY;
-    const weekAgo = now - 7 * DAY;
+    const weekAgo = saturdayFridayRange().from;
     const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
 
     const sumRange = (cutoff: number) => {

@@ -9,7 +9,13 @@ type Range = 'today' | 'week' | 'month' | 'all';
 function cutoffMs(range: Range) {
   const now = Date.now();
   if (range === 'today') { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime(); }
-  if (range === 'week') return now - 7 * 24 * 3600 * 1000;
+  if (range === 'week') {
+    const current = new Date();
+    const daysSinceSaturday = (current.getDay() + 1) % 7;
+    current.setDate(current.getDate() - daysSinceSaturday);
+    current.setHours(0, 0, 0, 0);
+    return current.getTime();
+  }
   if (range === 'month') return now - 30 * 24 * 3600 * 1000;
   return 0;
 }
