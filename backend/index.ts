@@ -496,11 +496,14 @@ export const handler = router({
     const todayFrom = dayStart.getTime();
     const { from: weekFrom } = saturdayFridayRange();
 
-    const [{ items: orders }, { items: deletedPayoutItems }] = await Promise.all([
+    const [{ items: orders }, { items: payoutItems }] = await Promise.all([
       db.list('orders', { limit: 5000 }),
       db.list('payout_items', { limit: 10000 }),
     ]);
-    const deletedEarningKeys = new Set((deletedPayoutItems as any[]).filter(item => item.deletedAt).map(item => item.itemKey));
+    const paidEarningKeys = new Set((payoutItems as any[]).map(item => item.itemKey));
+    const paidHistory = (payoutItems as any[])
+      .filter(item => !item.deletedAt && item.staffId === context.staffId)
+      .map(item => ({ serviceName: item.serviceName || item.orderId || 'Paid earning', createdAt: item.createdAt, role: item.role === 'assistant' ? 'assistant' : 'commission', amount: Number(item.commission || 0) }));
     let todayCommission = 0;
     let todayAssistant = 0;
     let fortnightCommission = 0;
@@ -514,25 +517,25 @@ export const handler = router({
         if (item.type !== 'service') continue;
         const itemKey = `${order.id}:${index}`;
         const assistant = Number(item.assistantPayment ?? item.helperDeduction ?? 0) || 0;
-        if (!deletedEarningKeys.has(itemKey) && String(item.staffId || '') === String(context.staffId || '')) {
+        if (!paidEarningKeys.has(itemKey) && String(item.staffId || '') === String(context.staffId || '')) {
           const commission = staffCommission(item, item.staffId);
           if (order.createdAt >= todayFrom) todayCommission += commission;
           if (order.createdAt >= weekFrom) fortnightCommission += commission;
           completedWork.push({ serviceName: item.name || 'Service', createdAt: order.createdAt, role: 'commission', amount: commission });
         }
-        if (!deletedEarningKeys.has(`${itemKey}:co-staff`) && String(item.coStaffId || '') === String(context.staffId || '')) {
+        if (!paidEarningKeys.has(`${itemKey}:co-staff`) && String(item.coStaffId || '') === String(context.staffId || '')) {
           const commission = staffCommission(item, item.coStaffId);
           if (order.createdAt >= todayFrom) todayCommission += commission;
           if (order.createdAt >= weekFrom) fortnightCommission += commission;
           completedWork.push({ serviceName: item.name || 'Service', createdAt: order.createdAt, role: 'commission', amount: commission });
         }
-        if (!deletedEarningKeys.has(`${itemKey}:third-staff`) && String(item.thirdStaffId || '') === String(context.staffId || '')) {
+        if (!paidEarningKeys.has(`${itemKey}:third-staff`) && String(item.thirdStaffId || '') === String(context.staffId || '')) {
           const commission = staffCommission(item, item.thirdStaffId);
           if (order.createdAt >= todayFrom) todayCommission += commission;
           if (order.createdAt >= weekFrom) fortnightCommission += commission;
           completedWork.push({ serviceName: item.name || 'Service', createdAt: order.createdAt, role: 'commission', amount: commission });
         }
-        if (!deletedEarningKeys.has(`${itemKey}:assistant`) && String(item.helperStaffId || '') === String(context.staffId || '')) {
+        if (!paidEarningKeys.has(`${itemKey}:assistant`) && String(item.helperStaffId || '') === String(context.staffId || '')) {
           if (order.createdAt >= todayFrom) todayAssistant += assistant;
           if (order.createdAt >= weekFrom) fortnightAssistant += assistant;
           completedWork.push({ serviceName: item.name || 'Service', createdAt: order.createdAt, role: 'assistant', amount: assistant });
@@ -546,6 +549,7 @@ export const handler = router({
       week: weekly,
       fortnight: weekly,
       completedWork: completedWork.sort((left, right) => right.createdAt - left.createdAt).slice(0, 30),
+      paidHistory: paidHistory.sort((left, right) => right.createdAt - left.createdAt).slice(0, 100),
     });
   }],
   'GET /api/audit-logs': [async ({ query }) => {
@@ -1483,7 +1487,7 @@ export const handler = router({
       db.list('orders', { limit: 5000 }),
       db.list('payout_items', { limit: 10000 }),
     ]);
-    const deletedEarningKeys = new Set((deletedPayoutItems as any[]).filter(item => item.deletedAt).map(item => item.itemKey));
+    const paidEarningKeys = new Set((deletedPayoutItems as any[]).map(item => item.itemKey));
     const totals = new Map<string, { commission: number; assistant: number }>();
     for (const order of orders as any[]) {
       if (order.deletedAt) continue;
@@ -1491,22 +1495,22 @@ export const handler = router({
       for (const [index, item] of (order.items || []).entries()) {
         if (item.type !== 'service') continue;
         const itemKey = `${order.id}:${index}`;
-        if (item.staffId && !deletedEarningKeys.has(itemKey)) {
+        if (item.staffId && !paidEarningKeys.has(itemKey)) {
           const total = totals.get(item.staffId) || { commission: 0, assistant: 0 };
           total.commission += staffCommission(item, item.staffId);
           totals.set(item.staffId, total);
         }
-        if (item.coStaffId && !deletedEarningKeys.has(`${itemKey}:co-staff`)) {
+        if (item.coStaffId && !paidEarningKeys.has(`${itemKey}:co-staff`)) {
           const total = totals.get(item.coStaffId) || { commission: 0, assistant: 0 };
           total.commission += staffCommission(item, item.coStaffId);
           totals.set(item.coStaffId, total);
         }
-        if (item.thirdStaffId && !deletedEarningKeys.has(`${itemKey}:third-staff`)) {
+        if (item.thirdStaffId && !paidEarningKeys.has(`${itemKey}:third-staff`)) {
           const total = totals.get(item.thirdStaffId) || { commission: 0, assistant: 0 };
           total.commission += staffCommission(item, item.thirdStaffId);
           totals.set(item.thirdStaffId, total);
         }
-        if (item.helperStaffId && !deletedEarningKeys.has(`${itemKey}:assistant`)) {
+        if (item.helperStaffId && !paidEarningKeys.has(`${itemKey}:assistant`)) {
           const total = totals.get(item.helperStaffId) || { commission: 0, assistant: 0 };
           total.assistant += Number(item.assistantPayment ?? item.helperDeduction ?? 0);
           totals.set(item.helperStaffId, total);
@@ -1563,19 +1567,19 @@ export const handler = router({
         const revenue = Number(item.lineTotalAfterDiscount ?? item.price * item.qty) || 0;
         const commissionBase = Math.max(0, Number(item.commissionBase ?? (revenue - Number(item.productCost || 0) - Number(item.assistantPayment ?? item.helperDeduction ?? 0))) || 0);
         const commission = serviceCommission(item);
-        if (!alreadyPaid.has(`${order.id}:${index}`)) lines.push({ itemKey: `${order.id}:${index}`, orderId: order.id, staffId: item.staffId, staffName: item.staffName || member.name, revenue, commissionBase, helperDeduction: Number(item.helperDeduction || 0), productCost: Number(item.productCost || 0), commission, currency: item.currency || 'KES', branchId: order.branchId || context.branchId || null, createdAt: now });
+        if (!alreadyPaid.has(`${order.id}:${index}`)) lines.push({ itemKey: `${order.id}:${index}`, orderId: order.id, serviceName: item.name || 'Service', staffId: item.staffId, staffName: item.staffName || member.name, revenue, commissionBase, helperDeduction: Number(item.helperDeduction || 0), productCost: Number(item.productCost || 0), commission, currency: item.currency || 'KES', branchId: order.branchId || context.branchId || null, createdAt: now });
         if (item.coStaffId && !alreadyPaid.has(`${order.id}:${index}:co-staff`)) {
           const coStaff = staffById.get(item.coStaffId);
-          if (coStaff) lines.push({ itemKey: `${order.id}:${index}:co-staff`, orderId: order.id, staffId: item.coStaffId, staffName: item.coStaffName || coStaff.name, revenue, commissionBase, helperDeduction: Number(item.helperDeduction || 0), productCost: Number(item.productCost || 0), commission: Number(item.coStaffCommission ?? 0), currency: item.currency || 'KES', branchId: order.branchId || context.branchId || null, createdAt: now, role: 'co-staff' });
+          if (coStaff) lines.push({ itemKey: `${order.id}:${index}:co-staff`, orderId: order.id, serviceName: item.name || 'Service', staffId: item.coStaffId, staffName: item.coStaffName || coStaff.name, revenue, commissionBase, helperDeduction: Number(item.helperDeduction || 0), productCost: Number(item.productCost || 0), commission: Number(item.coStaffCommission ?? 0), currency: item.currency || 'KES', branchId: order.branchId || context.branchId || null, createdAt: now, role: 'co-staff' });
         }
         if (item.thirdStaffId && !alreadyPaid.has(`${order.id}:${index}:third-staff`)) {
           const thirdStaff = staffById.get(item.thirdStaffId);
           const thirdStaffCommission = staffCommission(item, item.thirdStaffId);
-          if (thirdStaff) lines.push({ itemKey: `${order.id}:${index}:third-staff`, orderId: order.id, staffId: item.thirdStaffId, staffName: item.thirdStaffName || thirdStaff.name, revenue, commissionBase, helperDeduction: Number(item.helperDeduction || 0), productCost: Number(item.productCost || 0), commission: thirdStaffCommission, currency: item.currency || 'KES', branchId: order.branchId || context.branchId || null, createdAt: now, role: 'third-staff' });
+          if (thirdStaff) lines.push({ itemKey: `${order.id}:${index}:third-staff`, orderId: order.id, serviceName: item.name || 'Service', staffId: item.thirdStaffId, staffName: item.thirdStaffName || thirdStaff.name, revenue, commissionBase, helperDeduction: Number(item.helperDeduction || 0), productCost: Number(item.productCost || 0), commission: thirdStaffCommission, currency: item.currency || 'KES', branchId: order.branchId || context.branchId || null, createdAt: now, role: 'third-staff' });
         }
         if (item.helperStaffId && !alreadyPaid.has(`${order.id}:${index}:assistant`)) {
           const assistant = staffById.get(item.helperStaffId);
-          if (assistant) lines.push({ itemKey: `${order.id}:${index}:assistant`, orderId: order.id, staffId: item.helperStaffId, staffName: item.helperStaffName || assistant.name, revenue: 0, commissionBase: 0, helperDeduction: 0, productCost: 0, commission: Number(item.assistantPayment ?? item.helperDeduction ?? 0), currency: item.currency || 'KES', branchId: order.branchId || context.branchId || null, createdAt: now, role: 'assistant' });
+          if (assistant) lines.push({ itemKey: `${order.id}:${index}:assistant`, orderId: order.id, serviceName: item.name || 'Service', staffId: item.helperStaffId, staffName: item.helperStaffName || assistant.name, revenue: 0, commissionBase: 0, helperDeduction: 0, productCost: 0, commission: Number(item.assistantPayment ?? item.helperDeduction ?? 0), currency: item.currency || 'KES', branchId: order.branchId || context.branchId || null, createdAt: now, role: 'assistant' });
         }
       });
     }

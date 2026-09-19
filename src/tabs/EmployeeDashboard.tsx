@@ -14,6 +14,7 @@ function EmployeeDashboard({ account, onAddService }: { account: { name?: string
   const [dailyCommission, setDailyCommission] = useState(0);
   const [dailyAssistant, setDailyAssistant] = useState(0);
   const [completedWork, setCompletedWork] = useState<{ serviceName: string; createdAt: number; role: 'commission' | 'assistant'; amount: number }[]>([]);
+  const [paidHistory, setPaidHistory] = useState<{ serviceName: string; createdAt: number; role: 'commission' | 'assistant'; amount: number }[]>([]);
   const [waitingClients, setWaitingClients] = useState<Appointment[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -28,6 +29,7 @@ function EmployeeDashboard({ account, onAddService }: { account: { name?: string
       setDailyCommission(earnings.today.commission || 0);
       setDailyAssistant(earnings.today.assistant || 0);
       setCompletedWork(earnings.completedWork || []);
+      setPaidHistory(earnings.paidHistory || []);
       
       // Show waiting clients (those checked-in and waiting)
       const waiting = staffAppointments.filter(item => item.date === todayStr() && ['checked-in', 'pending'].includes(item.status));
@@ -65,6 +67,11 @@ function EmployeeDashboard({ account, onAddService }: { account: { name?: string
       <Card className="p-5">
         <h2 className="font-semibold mb-3">Completed Services</h2>
         {completedWork.length === 0 ? <p className="text-sm text-[#6E6E73]">Completed services and their earnings will appear here.</p> : <div className="space-y-2">{completedWork.map((work, index) => <div key={`${work.createdAt}-${work.serviceName}-${index}`} className="flex items-center justify-between gap-3 border-b border-black/5 pb-2 last:border-0"><div><p className="text-sm font-medium">{work.serviceName}</p><p className="text-xs text-[#6E6E73]">{new Date(work.createdAt).toLocaleString()} · {work.role === 'assistant' ? 'Assistant fee' : 'Commission'}</p></div><p className="shrink-0 text-sm font-semibold">{fmtExactKES(work.amount)}</p></div>)}</div>}
+      </Card>
+
+      <Card className="p-5">
+        <h2 className="font-semibold mb-3">Paid Earnings History</h2>
+        {paidHistory.length === 0 ? <p className="text-sm text-[#6E6E73]">Paid weekly earnings will remain recorded here.</p> : <div className="space-y-2">{paidHistory.map((work, index) => <div key={`${work.createdAt}-${work.serviceName}-${index}`} className="flex items-center justify-between gap-3 border-b border-black/5 pb-2 last:border-0"><div><p className="text-sm font-medium">{work.serviceName}</p><p className="text-xs text-[#6E6E73]">{new Date(work.createdAt).toLocaleString()} · Paid {work.role === 'assistant' ? 'assistant fee' : 'commission'}</p></div><p className="shrink-0 text-sm font-semibold">{fmtExactKES(work.amount)}</p></div>)}</div>}
       </Card>
 
       {waitingClients.length > 0 && (
