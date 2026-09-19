@@ -14,8 +14,11 @@ function Finance() {
   const [staff, setStaff] = useState<Staff[]>([]);
   const [payrollSending, setPayrollSending] = useState(false);
   const [paying, setPaying] = useState(false);
+  const [deletingEarnings, setDeletingEarnings] = useState(false);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
+  const [earningsDeleteOpen, setEarningsDeleteOpen] = useState(false);
+  const [earningsDeleteRange, setEarningsDeleteRange] = useState({ from: '', to: '' });
   const [form, setForm] = useState({ category: 'Supplies', amount: 0, note: '', date: new Date().toISOString().slice(0, 10) });
 
   const load = () => {
@@ -66,6 +69,25 @@ function Finance() {
     }
   };
 
+  const deletePaidEarnings = async () => {
+    if (!earningsDeleteRange.from || !earningsDeleteRange.to) { toast('Choose both earnings dates.', 'error'); return; }
+    const from = new Date(`${earningsDeleteRange.from}T00:00:00`).getTime();
+    const to = new Date(`${earningsDeleteRange.to}T00:00:00`).getTime() + 24 * 3600 * 1000;
+    if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from) { toast('Choose a valid date range.', 'error'); return; }
+    if (!window.confirm('Delete all paid staff earnings in this date range from staff dashboards and payroll? Orders and the payout audit trail will remain.')) return;
+    setDeletingEarnings(true);
+    try {
+      const response = await PayoutsApi.deleteEarnings(from, to);
+      toast(`${response.data.deleted} paid earning lines cleared: ${fmtMoney(response.data.totalKES, 'KES')}.`, 'success');
+      setEarningsDeleteOpen(false);
+      load();
+    } catch (cause: any) {
+      toast(cause?.message || 'Could not clear paid staff earnings.', 'error');
+    } finally {
+      setDeletingEarnings(false);
+    }
+  };
+
   if (loading && !data) return <LoadingState label="Loading finance data…" />;
 
   const revenueKES = data?.revenueByCurrency.KES || 0;
@@ -82,6 +104,7 @@ function Finance() {
           </Select>
           <Button onClick={() => setOpen(true)}><Plus size={16} aria-hidden="true" />Add Expense</Button>
           <Button variant="secondary" onClick={recordPayout} disabled={paying}>{paying ? 'Recording…' : 'Mark 14-day earnings paid'}</Button>
+          <Button variant="danger" onClick={() => setEarningsDeleteOpen(true)}>Clear paid earnings</Button>
         </div>
       </div>
 
@@ -133,6 +156,13 @@ function Finance() {
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4"><div><h2 className="font-semibold">Payroll</h2><p className="text-xs text-[#6E6E73]">Calculated from each employee's last 14 days of service commissions and assistant payments.</p></div><Button onClick={sendPayroll} disabled={payrollSending}>{payrollSending ? 'Sending…' : 'Send payroll batch'}</Button></div>
         <div className="space-y-2">{staff.filter(member => member.employmentStatus !== 'laid-off').map(member => { const calculated = (member.commissionEarned14Days || 0) + (member.assistantEarned14Days || 0); return <div key={member.id} className="flex items-center justify-between gap-3 border-b border-black/5 pb-2"><div><p className="text-sm font-medium">{member.name}</p><p className="text-xs text-[#6E6E73]">{member.phone || 'No phone number'} · {member.branchName || member.branch}</p><p className="text-xs text-[#6E6E73]">14-day commission {fmtMoney(member.commissionEarned14Days || 0, 'KES')} + assistant compensation {fmtMoney(member.assistantEarned14Days || 0, 'KES')}</p></div><p className="font-semibold text-sm">{fmtMoney(calculated, 'KES')}</p></div>; })}</div>
       </Card>
+
+      {earningsDeleteOpen && <Modal title="Clear paid staff earnings" onClose={() => setEarningsDeleteOpen(false)} footer={<><Button variant="secondary" onClick={() => setEarningsDeleteOpen(false)}>Cancel</Button><Button variant="danger" onClick={deletePaidEarnings} disabled={deletingEarnings}>{deletingEarnings ? 'Clearing…' : 'Clear earnings'}</Button></>}>
+        <div className="space-y-4">
+          <p className="text-sm text-[#6E6E73]">Choose the order dates whose paid earning lines should disappear from staff dashboards and payroll. Orders and payout history remain for audit.</p>
+          <div className="grid sm:grid-cols-2 gap-4"><Field label="From" htmlFor="earnings-delete-from"><Input id="earnings-delete-from" type="date" value={earningsDeleteRange.from} onChange={event => setEarningsDeleteRange(current => ({ ...current, from: event.target.value }))} /></Field><Field label="To" htmlFor="earnings-delete-to"><Input id="earnings-delete-to" type="date" value={earningsDeleteRange.to} onChange={event => setEarningsDeleteRange(current => ({ ...current, to: event.target.value }))} /></Field></div>
+        </div>
+      </Modal>}
 
       <Card className="p-6">
         <div className="flex items-center justify-between mb-4"><div><h2 className="font-semibold">Recorded payouts</h2><p className="text-xs text-[#6E6E73]">This records internal payment completion only. It does not send money.</p></div></div>

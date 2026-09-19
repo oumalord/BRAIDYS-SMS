@@ -153,6 +153,7 @@ export const ExpensesApi = {
 export const PayoutsApi = {
   list: () => api.get('/api/payouts').then(r => r.data.items as PayoutBatch[]),
   record: (range: 'today' | 'week' | 'fortnight' | 'month' | 'all') => api.post('/api/payouts', { range }),
+  deleteEarnings: (from: number, to: number) => api.post('/api/earnings/delete', { from, to }),
 };
 
 export const PayrollApi = {

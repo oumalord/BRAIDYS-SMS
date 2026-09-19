@@ -485,7 +485,11 @@ export const handler = router({
     const todayFrom = dayStart.getTime();
     const fortnightFrom = now - 14 * DAY;
 
-    const { items: orders } = await db.list('orders', { limit: 5000 });
+    const [{ items: orders }, { items: deletedPayoutItems }] = await Promise.all([
+      db.list('orders', { limit: 5000 }),
+      db.list('payout_items', { limit: 10000 }),
+    ]);
+    const deletedEarningKeys = new Set((deletedPayoutItems as any[]).filter(item => item.deletedAt).map(item => item.itemKey));
     let todayCommission = 0;
     let todayAssistant = 0;
     let fortnightCommission = 0;
@@ -495,28 +499,29 @@ export const handler = router({
     for (const order of orders as any[]) {
       if (order.deletedAt) continue;
       if (!order.createdAt) continue;
-      for (const item of order.items || []) {
+      for (const [index, item] of (order.items || []).entries()) {
         if (item.type !== 'service') continue;
+        const itemKey = `${order.id}:${index}`;
         const assistant = Number(item.assistantPayment ?? item.helperDeduction ?? 0) || 0;
-        if (String(item.staffId || '') === String(context.staffId || '')) {
+        if (!deletedEarningKeys.has(itemKey) && String(item.staffId || '') === String(context.staffId || '')) {
           const commission = staffCommission(item, item.staffId);
           if (order.createdAt >= todayFrom) todayCommission += commission;
           if (order.createdAt >= fortnightFrom) fortnightCommission += commission;
           completedWork.push({ serviceName: item.name || 'Service', createdAt: order.createdAt, role: 'commission', amount: commission });
         }
-        if (String(item.coStaffId || '') === String(context.staffId || '')) {
+        if (!deletedEarningKeys.has(`${itemKey}:co-staff`) && String(item.coStaffId || '') === String(context.staffId || '')) {
           const commission = staffCommission(item, item.coStaffId);
           if (order.createdAt >= todayFrom) todayCommission += commission;
           if (order.createdAt >= fortnightFrom) fortnightCommission += commission;
           completedWork.push({ serviceName: item.name || 'Service', createdAt: order.createdAt, role: 'commission', amount: commission });
         }
-        if (String(item.thirdStaffId || '') === String(context.staffId || '')) {
+        if (!deletedEarningKeys.has(`${itemKey}:third-staff`) && String(item.thirdStaffId || '') === String(context.staffId || '')) {
           const commission = staffCommission(item, item.thirdStaffId);
           if (order.createdAt >= todayFrom) todayCommission += commission;
           if (order.createdAt >= fortnightFrom) fortnightCommission += commission;
           completedWork.push({ serviceName: item.name || 'Service', createdAt: order.createdAt, role: 'commission', amount: commission });
         }
-        if (String(item.helperStaffId || '') === String(context.staffId || '')) {
+        if (!deletedEarningKeys.has(`${itemKey}:assistant`) && String(item.helperStaffId || '') === String(context.staffId || '')) {
           if (order.createdAt >= todayFrom) todayAssistant += assistant;
           if (order.createdAt >= fortnightFrom) fortnightAssistant += assistant;
           completedWork.push({ serviceName: item.name || 'Service', createdAt: order.createdAt, role: 'assistant', amount: assistant });
@@ -1461,29 +1466,34 @@ export const handler = router({
     if (!context || !['owner', 'admin'].includes(context.role)) return error('Only the owner or administrator can view payroll staff', 403);
     const { items } = await db.list('staff', { limit: 2000 });
     const from = Date.now() - 14 * DAY;
-    const { items: orders } = await db.list('orders', { limit: 5000 });
+    const [{ items: orders }, { items: deletedPayoutItems }] = await Promise.all([
+      db.list('orders', { limit: 5000 }),
+      db.list('payout_items', { limit: 10000 }),
+    ]);
+    const deletedEarningKeys = new Set((deletedPayoutItems as any[]).filter(item => item.deletedAt).map(item => item.itemKey));
     const totals = new Map<string, { commission: number; assistant: number }>();
     for (const order of orders as any[]) {
       if (order.deletedAt) continue;
       if (!order.createdAt || order.createdAt < from) continue;
-      for (const item of order.items || []) {
+      for (const [index, item] of (order.items || []).entries()) {
         if (item.type !== 'service') continue;
-        if (item.staffId) {
+        const itemKey = `${order.id}:${index}`;
+        if (item.staffId && !deletedEarningKeys.has(itemKey)) {
           const total = totals.get(item.staffId) || { commission: 0, assistant: 0 };
           total.commission += staffCommission(item, item.staffId);
           totals.set(item.staffId, total);
         }
-        if (item.coStaffId) {
+        if (item.coStaffId && !deletedEarningKeys.has(`${itemKey}:co-staff`)) {
           const total = totals.get(item.coStaffId) || { commission: 0, assistant: 0 };
           total.commission += staffCommission(item, item.coStaffId);
           totals.set(item.coStaffId, total);
         }
-        if (item.thirdStaffId) {
+        if (item.thirdStaffId && !deletedEarningKeys.has(`${itemKey}:third-staff`)) {
           const total = totals.get(item.thirdStaffId) || { commission: 0, assistant: 0 };
           total.commission += staffCommission(item, item.thirdStaffId);
           totals.set(item.thirdStaffId, total);
         }
-        if (item.helperStaffId) {
+        if (item.helperStaffId && !deletedEarningKeys.has(`${itemKey}:assistant`)) {
           const total = totals.get(item.helperStaffId) || { commission: 0, assistant: 0 };
           total.assistant += Number(item.assistantPayment ?? item.helperDeduction ?? 0);
           totals.set(item.helperStaffId, total);
@@ -1491,6 +1501,25 @@ export const handler = router({
       }
     }
     return json({ items: (items as any[]).map(member => ({ ...member, commissionEarned14Days: totals.get(member.id)?.commission || 0, assistantEarned14Days: totals.get(member.id)?.assistant || 0 })) });
+  }],
+  'POST /api/earnings/delete': [async ({ body }) => {
+    const context = currentContext();
+    if (!context || !['owner', 'admin'].includes(context.role)) return error('Only the owner or administrator can delete staff earnings', 403);
+    const from = Number(body?.from);
+    const to = Number(body?.to);
+    if (!Number.isFinite(from) || !Number.isFinite(to) || from < 0 || to <= from) return error('Choose a valid earnings date range', 400);
+    const [{ items: orders }, { items: payoutItems }] = await Promise.all([
+      db.list('orders', { limit: 5000 }),
+      db.list('payout_items', { limit: 10000 }),
+    ]);
+    const orderDates = new Map((orders as any[]).filter(order => !order.deletedAt && Number(order.createdAt) >= from && Number(order.createdAt) < to).map(order => [String(order.id), Number(order.createdAt)]));
+    const now = Date.now();
+    const matching = (payoutItems as any[]).filter(item => !item.deletedAt && orderDates.has(String(item.orderId)));
+    if (!matching.length) return error('No paid staff earnings were found in that date range', 404);
+    await db.update('payout_items', matching.map(item => ({ id: item.id, record: { ...item, deletedAt: now, deletedBy: context.name, deletionReason: 'Owner cleared paid staff earnings' } })));
+    const totalKES = matching.filter(item => item.currency === 'KES').reduce((sum, item) => sum + Number(item.commission || 0), 0);
+    await audit('deleted paid staff earnings', 'payout_items', { from, to, itemCount: matching.length, totalKES }, context.name);
+    return json({ deleted: matching.length, totalKES, from, to });
   }],
   'POST /api/payouts': [async ({ body }) => {
     const context = currentContext();
@@ -1509,7 +1538,7 @@ export const handler = router({
       db.list('payout_items', { limit: 10000 }),
     ]);
     const staffById = new Map((staff as any[]).map(member => [member.id, member]));
-    const alreadyPaid = new Set((paidItems as any[]).map(item => item.itemKey));
+    const alreadyPaid = new Set((paidItems as any[]).filter(item => !item.deletedAt).map(item => item.itemKey));
     const lines: any[] = [];
     for (const order of orders as any[]) {
       if (order.deletedAt) continue;
