@@ -575,7 +575,7 @@ export const handler = router({
     return json({ seeded, migrated: true });
   }],
 
-  'GET /api/staff': [async () => { const { items } = await db.list('staff', { limit: 200 }); return json({ items }); }],
+  'GET /api/staff': [async () => { const { items } = await db.list('staff', { limit: 200 }); return json({ items: (items as any[]).filter(item => !item.deletedAt) }); }],
   'POST /api/staff': [async ({ body }) => {
     requireOwner();
     const b: any = body;
@@ -624,6 +624,28 @@ export const handler = router({
       await db.update('accounts', [{ id: account.id, record: accountPatch }]);
     }
     return json({ ok: true });
+  }],
+  'DELETE /api/staff/:id/permanent': [async ({ params }) => {
+    requireOwner();
+    const [staffMember] = await db.get('staff', [params.id]);
+    if (!staffMember) return error('Staff member not found', 404);
+    const { items: accounts } = await db.list('accounts', { limit: 5000 });
+    const account = (accounts as any[]).find(item => item.staffId === params.id);
+    const deletedBy = currentContext()?.name || 'owner';
+    await audit('permanently blocked and deleted staff', 'staff', {
+      id: staffMember.id,
+      name: staffMember.name,
+      role: staffMember.role,
+      branchId: staffMember.branchId,
+      accountId: account?.id || null,
+      accountEmail: staffMember.accountEmail || account?.email || '',
+      accountPhone: staffMember.phone || account?.phone || '',
+      deletedBy,
+    }, deletedBy);
+    const deletedAt = Date.now();
+    await db.update('staff', [{ id: staffMember.id, record: { ...staffMember, deletedAt, deletedBy, employmentStatus: 'permanently-deleted', status: 'off', accountStatus: 'disabled' } }]);
+    if (account) await db.update('accounts', [{ id: account.id, record: { ...account, deletedAt, deletedBy, status: 'disabled', accountStatus: 'disabled' } }]);
+    return json({ ok: true, id: staffMember.id });
   }],
 
   'GET /api/services': [async () => { const { items } = await db.list('services', { limit: 500 }); return json({ items }); }],

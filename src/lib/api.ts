@@ -90,6 +90,7 @@ export const StaffApi = {
   list: () => cached('staff:list', 20000, () => api.get('/api/staff').then(r => r.data.items as Staff[])),
   create: (s: Partial<Staff> & { pin?: string }) => api.post('/api/staff', s).then(r => { invalidate('staff'); return r; }),
   update: (id: string, patch: Partial<Staff> & { pin?: string }) => api.put(`/api/staff/${id}`, patch).then(r => { invalidate('staff'); return r; }),
+  permanentlyDelete: (id: string) => api.delete(`/api/staff/${id}/permanent`).then(r => { invalidate('staff'); return r; }),
   changeMyPin: (pin: string) => api.post('/api/staff/me/pin', { pin }),
   myEarnings: () => api.get('/api/staff/me/earnings').then(r => r.data as { today: { commission: number; assistant: number; total: number }; fortnight: { commission: number; assistant: number; total: number }; completedWork: { serviceName: string; createdAt: number; role: 'commission' | 'assistant'; amount: number }[] }),
 };

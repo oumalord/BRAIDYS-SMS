@@ -48,6 +48,17 @@ function StaffTab({ role = 'owner' }: { role?: Role }) {
     load();
   };
 
+  const permanentlyDelete = async (member: Staff) => {
+    if (!window.confirm(`Permanently block and delete ${member.name}? Their login will stop immediately. Historical sales and earnings records will remain for audit. This cannot be undone.`)) return;
+    try {
+      await StaffApi.permanentlyDelete(member.id);
+      toast(`${member.name} was permanently blocked and deleted.`, 'success');
+      load();
+    } catch (cause: any) {
+      toast(cause?.message || 'Could not permanently delete this staff member.', 'error');
+    }
+  };
+
   const editStaff = (member: Staff) => {
     setEditing(member);
     setEditForm({ name: member.name, phone: member.phone, chair: member.chair, pin: '' });
@@ -108,6 +119,7 @@ function StaffTab({ role = 'owner' }: { role?: Role }) {
               {avgRating(s.id) && <p className="text-xs text-[#6E6E73] flex items-center gap-1 mt-0.5"><Star size={11} className="fill-[#FF9500] text-[#FF9500]" aria-hidden="true" />{avgRating(s.id)!.avg.toFixed(1)} ({avgRating(s.id)!.count} review{avgRating(s.id)!.count === 1 ? '' : 's'})</p>}
             </div>
             {(role === 'owner' || role === 'admin') && <Button size="sm" variant={s.employmentStatus === 'laid-off' ? 'secondary' : 'danger'} onClick={() => changeEmployment(s)}><UserX size={14} aria-hidden="true" />{s.employmentStatus === 'laid-off' ? 'Reactivate' : 'Lay off'}</Button>}
+            {role === 'owner' && <Button size="sm" variant="danger" onClick={() => permanentlyDelete(s)}><UserX size={14} aria-hidden="true" />Block & delete</Button>}
             {(role === 'owner' || role === 'admin') && <Button size="sm" variant="secondary" onClick={() => editStaff(s)}>Edit details</Button>}
             {(role === 'owner' || role === 'admin') && <select
               aria-label={`Status for ${s.name}`}
