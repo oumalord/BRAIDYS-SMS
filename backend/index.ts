@@ -1524,7 +1524,7 @@ export const handler = router({
         if (!alreadyPaid.has(`${order.id}:${index}`)) lines.push({ itemKey: `${order.id}:${index}`, orderId: order.id, staffId: item.staffId, staffName: item.staffName || member.name, revenue, commissionBase, helperDeduction: Number(item.helperDeduction || 0), productCost: Number(item.productCost || 0), commission, currency: item.currency || 'KES', branchId: order.branchId || context.branchId || null, createdAt: now });
         if (item.coStaffId && !alreadyPaid.has(`${order.id}:${index}:co-staff`)) {
           const coStaff = staffById.get(item.coStaffId);
-          if (coStaff) lines.push({ itemKey: `${order.id}:${index}:co-staff`, orderId: order.id, staffId: item.coStaffId, staffName: item.coStaffName || coStaff.name, revenue, commissionBase, helperDeduction: Number(item.helperDeduction || 0), productCost: Number(item.productCost || 0), commission, currency: item.currency || 'KES', branchId: order.branchId || context.branchId || null, createdAt: now, role: 'co-staff' });
+          if (coStaff) lines.push({ itemKey: `${order.id}:${index}:co-staff`, orderId: order.id, staffId: item.coStaffId, staffName: item.coStaffName || coStaff.name, revenue, commissionBase, helperDeduction: Number(item.helperDeduction || 0), productCost: Number(item.productCost || 0), commission: Number(item.coStaffCommission ?? 0), currency: item.currency || 'KES', branchId: order.branchId || context.branchId || null, createdAt: now, role: 'co-staff' });
         }
         if (item.thirdStaffId && !alreadyPaid.has(`${order.id}:${index}:third-staff`)) {
           const thirdStaff = staffById.get(item.thirdStaffId);
@@ -1593,7 +1593,7 @@ export const handler = router({
     else cutoff = 0;
 
     const [ordersResult, expensesResult, staffResult, productsResult, appointmentsResult, queueResult, customersResult] = await Promise.all([
-      db.list('orders', { limit: 1000 }),
+      db.list('orders', { limit: 5000 }),
       db.list('expenses', { limit: 500 }),
       db.list('staff', { limit: 200 }),
       db.list('products', { limit: 500 }),
