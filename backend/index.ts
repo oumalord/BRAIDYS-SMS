@@ -486,7 +486,6 @@ export const handler = router({
     const fortnightFrom = now - 14 * DAY;
 
     const { items: orders } = await db.list('orders', { limit: 5000 });
-    const linkedAppointmentIds = new Set<string>();
     let todayCommission = 0;
     let todayAssistant = 0;
     let fortnightCommission = 0;
@@ -499,57 +498,30 @@ export const handler = router({
       for (const item of order.items || []) {
         if (item.type !== 'service') continue;
         const assistant = Number(item.assistantPayment ?? item.helperDeduction ?? 0) || 0;
-        if (sameStaffIdentity(item.staffId, item.staffName, context)) {
+        if (String(item.staffId || '') === String(context.staffId || '')) {
           const commission = staffCommission(item, item.staffId);
           if (order.createdAt >= todayFrom) todayCommission += commission;
           if (order.createdAt >= fortnightFrom) fortnightCommission += commission;
           completedWork.push({ serviceName: item.name || 'Service', createdAt: order.createdAt, role: 'commission', amount: commission });
-          if (order.appointmentId) linkedAppointmentIds.add(String(order.appointmentId));
         }
-        if (sameStaffIdentity(item.coStaffId, item.coStaffName, context)) {
+        if (String(item.coStaffId || '') === String(context.staffId || '')) {
           const commission = staffCommission(item, item.coStaffId);
           if (order.createdAt >= todayFrom) todayCommission += commission;
           if (order.createdAt >= fortnightFrom) fortnightCommission += commission;
           completedWork.push({ serviceName: item.name || 'Service', createdAt: order.createdAt, role: 'commission', amount: commission });
-          if (order.appointmentId) linkedAppointmentIds.add(String(order.appointmentId));
         }
-        if (sameStaffIdentity(item.thirdStaffId, item.thirdStaffName, context)) {
+        if (String(item.thirdStaffId || '') === String(context.staffId || '')) {
           const commission = staffCommission(item, item.thirdStaffId);
           if (order.createdAt >= todayFrom) todayCommission += commission;
           if (order.createdAt >= fortnightFrom) fortnightCommission += commission;
           completedWork.push({ serviceName: item.name || 'Service', createdAt: order.createdAt, role: 'commission', amount: commission });
-          if (order.appointmentId) linkedAppointmentIds.add(String(order.appointmentId));
         }
-        if (sameStaffIdentity(item.helperStaffId, item.helperStaffName, context)) {
+        if (String(item.helperStaffId || '') === String(context.staffId || '')) {
           if (order.createdAt >= todayFrom) todayAssistant += assistant;
           if (order.createdAt >= fortnightFrom) fortnightAssistant += assistant;
           completedWork.push({ serviceName: item.name || 'Service', createdAt: order.createdAt, role: 'assistant', amount: assistant });
-          if (order.appointmentId) linkedAppointmentIds.add(String(order.appointmentId));
         }
       }
-    }
-
-    const { items: appointments } = await db.list('appointments', { limit: 2000 });
-    for (const appointment of appointments as any[]) {
-      if (appointment.status !== 'completed') continue;
-      if (linkedAppointmentIds.has(String(appointment.id || ''))) continue;
-
-      let serviceValue = 0;
-      if (Array.isArray(appointment.items) && appointment.items.length) {
-        serviceValue = appointment.items
-          .filter((item: any) => sameStaffIdentity(item?.staffId, item?.staffName, context))
-          .reduce((sum: number, item: any) => sum + (Number(item.price || 0) * Number(item.qty || 1)), 0);
-      } else if (sameStaffIdentity(appointment.staffId, appointment.staffName, context)) {
-        serviceValue = Number(appointment.price || 0);
-      }
-
-      if (serviceValue <= 0) continue;
-      const appointmentTs = new Date(`${appointment.date || ''}T00:00:00`).getTime();
-      if (!Number.isFinite(appointmentTs)) continue;
-      const derivedCommission = serviceValue * 0.5;
-      if (appointmentTs >= todayFrom) todayCommission += derivedCommission;
-      if (appointmentTs >= fortnightFrom) fortnightCommission += derivedCommission;
-      completedWork.push({ serviceName: appointment.serviceName || 'Service', createdAt: appointmentTs, role: 'commission', amount: derivedCommission });
     }
 
     return json({
