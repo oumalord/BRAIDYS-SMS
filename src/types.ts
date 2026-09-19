@@ -72,6 +72,7 @@ export interface Appointment {
   id: string;
   customerId: string | null;
   customerName: string;
+  phone?: string;
   serviceId: string;
   serviceName: string;
   staffId: string | null;

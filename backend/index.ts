@@ -2001,13 +2001,14 @@ export const handler = router({
     const b: any = body;
     const salonId = String(b.salonId || '').trim();
     const customerName = String(b.customerName || '').trim();
+    const phone = String(b.phone || '').trim();
     const serviceName = String(b.serviceName || '').trim();
     const staffName = String(b.staffName || '').trim();
     const comment = String(b.comment || '').trim();
     const rating = Number(b.rating);
-    if (!salonId || !customerName || !serviceName || !rating || rating < 1 || rating > 5) return error('Salon, name, service and a rating from 1 to 5 are required', 400);
-    if (customerName.length > 120 || serviceName.length > 160 || staffName.length > 120 || comment.length > 2000) return error('Review details are too long', 400);
-    const [id] = await db.add('reviews', [{ tenantId: salonId, appointmentId: null, customerId: null, customerName, staffId: null, staffName, serviceName, rating, comment, survey: b.survey || {}, source: 'public-qr', createdAt: Date.now() }]);
+    if (!salonId || !customerName || !phone || !serviceName || !rating || rating < 1 || rating > 5) return error('Salon, name, phone, service and a rating from 1 to 5 are required', 400);
+    if (customerName.length > 120 || phone.length > 40 || serviceName.length > 160 || staffName.length > 120 || comment.length > 2000) return error('Review details are too long', 400);
+    const [id] = await db.add('reviews', [{ tenantId: salonId, appointmentId: null, customerId: null, customerName, phone, staffId: null, staffName, serviceName, rating, comment, survey: b.survey || {}, source: 'public-qr', createdAt: Date.now() }]);
     if (!id) return error('Failed to submit review', 500);
     await audit('created', 'public review', { id, customerName, staffName, serviceName, rating }, 'customer');
     return json({ id });

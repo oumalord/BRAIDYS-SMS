@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Copy, MessageSquare, Star } from 'lucide-react';
+import { Copy, MessageSquare, RefreshCw, Star } from 'lucide-react';
 import { ReviewsApi } from '../lib/api';
 import { Badge, Button, Card, EmptyState, Input, LoadingState, Select, toast } from '../components/ui';
 import type { Review } from '../types';
@@ -17,20 +17,23 @@ function Reviews() {
   try { salonId = JSON.parse(window.localStorage.getItem('safigroom_account') || '{}').salonId || ''; } catch { salonId = ''; }
   const reviewLink = `${window.location.origin}/review?salonId=${encodeURIComponent(salonId)}`;
 
+  const loadReviews = () => ReviewsApi.list().then(setReviews).catch((cause: any) => toast(cause?.message || 'Could not load reviews.', 'error'));
+
   useEffect(() => {
     let active = true;
     ReviewsApi.list()
-      .then(items => {
-        if (active) setReviews(items);
-      })
-      .catch((cause: any) => {
-        if (active) toast(cause?.message || 'Could not load reviews.', 'error');
-      })
+      .then(items => { if (active) setReviews(items); })
+      .catch((cause: any) => { if (active) toast(cause?.message || 'Could not load reviews.', 'error'); })
       .finally(() => {
         if (active) setLoading(false);
       });
+    const refresh = window.setInterval(() => { void loadReviews(); }, 15000);
+    const onFocus = () => { void loadReviews(); };
+    window.addEventListener('focus', onFocus);
     return () => {
       active = false;
+      window.clearInterval(refresh);
+      window.removeEventListener('focus', onFocus);
     };
   }, []);
 
@@ -69,12 +72,11 @@ function Reviews() {
           <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2"><MessageSquare size={20} aria-hidden="true" />Client Reviews</h1>
           <p className="text-sm text-[#6E6E73]">See all completed-service feedback with the staff member who served each client.</p>
         </div>
-        <div className="w-full sm:w-64">
+        <div className="flex w-full sm:w-auto gap-2"><Button variant="secondary" onClick={() => { void loadReviews(); }}><RefreshCw size={15} aria-hidden="true" />Refresh</Button><div className="w-full sm:w-64">
           <Select aria-label="Filter reviews by staff" value={staffFilter} onChange={event => setStaffFilter(event.target.value)}>
             <option value="all">All staff</option>
             {staffOptions.map(name => <option key={name} value={name}>{name}</option>)}
-          </Select>
-        </div>
+          </Select></div></div>
       </div>
 
       <Card className="p-5 flex flex-col sm:flex-row gap-5 sm:items-center">
@@ -106,7 +108,7 @@ function Reviews() {
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                 <div>
                   <p className="font-medium">{item.serviceName || 'Service'}</p>
-                  <p className="text-xs text-[#6E6E73]">Client: {item.customerName || 'Customer'} · Staff: {item.staffName || 'Unassigned'}</p>
+                  <p className="text-xs text-[#6E6E73]">Client: {item.customerName || 'Customer'}{item.phone ? ` · ${item.phone}` : ''} · Staff: {item.staffName || 'Unassigned'}</p>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-sm text-[#d89b00] flex items-center gap-1"><Star size={14} aria-hidden="true" />{stars(item.rating)}</span>
