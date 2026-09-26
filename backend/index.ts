@@ -1472,6 +1472,7 @@ export const handler = router({
   'GET /api/payroll/staff': [async () => {
     const context = currentContext();
     if (!context || !['owner', 'admin'].includes(context.role)) return error('Only the owner or administrator can view payroll staff', 403);
+    const now = Date.now();
     const { items } = await db.list('staff', { limit: 2000 });
     const period = sundaySaturdayRange();
     const { from } = period;

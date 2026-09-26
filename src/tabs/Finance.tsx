@@ -13,6 +13,9 @@ function Finance() {
   const [payouts, setPayouts] = useState<PayoutBatch[]>([]);
   const [staff, setStaff] = useState<Staff[]>([]);
   const [payrollPeriod, setPayrollPeriod] = useState<{ from: number; to: number } | null>(null);
+  const [payrollLoading, setPayrollLoading] = useState(true);
+  const [payrollError, setPayrollError] = useState('');
+  const [financeDataError, setFinanceDataError] = useState('');
   const [payrollSending, setPayrollSending] = useState(false);
   const [paying, setPaying] = useState(false);
   const [deletingEarnings, setDeletingEarnings] = useState(false);
@@ -22,9 +25,24 @@ function Finance() {
   const [earningsDeleteRange, setEarningsDeleteRange] = useState({ from: '', to: '' });
   const [form, setForm] = useState({ category: 'Supplies', amount: 0, note: '', date: new Date().toISOString().slice(0, 10) });
 
+  const loadPayroll = () => {
+    setPayrollLoading(true);
+    setPayrollError('');
+    PayrollApi.staff()
+      .then(payroll => { setStaff(payroll.items); setPayrollPeriod(payroll.period); })
+      .catch((cause: any) => setPayrollError(cause?.message || 'Could not load this week’s payroll data.'))
+      .finally(() => setPayrollLoading(false));
+  };
   const load = () => {
     setLoading(true);
-    Promise.all([DashboardApi.get(range), ExpensesApi.list(), PayoutsApi.list(), PayrollApi.staff()]).then(([d, e, p, payroll]) => { setData(d); setExpenses(e); setPayouts(p); setStaff(payroll.items); setPayrollPeriod(payroll.period); }).finally(() => setLoading(false));
+    setFinanceDataError('');
+    DashboardApi.get(range)
+      .then(setData)
+      .catch((cause: any) => setFinanceDataError(cause?.message || 'Finance metrics are temporarily unavailable.'))
+      .finally(() => setLoading(false));
+    ExpensesApi.list().then(setExpenses).catch(() => undefined);
+    PayoutsApi.list().then(setPayouts).catch(() => undefined);
+    loadPayroll();
   };
   useEffect(() => {
     load();
@@ -89,8 +107,6 @@ function Finance() {
     }
   };
 
-  if (loading && !data) return <LoadingState label="Loading finance data…" />;
-
   const revenueKES = data?.revenueByCurrency.KES || 0;
   const staffEarningsKES = data?.commissionsByCurrency.KES || 0;
   const profitKES = data?.estimatedProfitByCurrency.KES || 0;
@@ -135,6 +151,8 @@ function Finance() {
         </div>
       </div>
 
+      {!data && loading && <LoadingState label="Loading finance metrics…" />}
+      {!data && !loading && financeDataError && <Card className="p-5"><p role="status" className="text-sm text-amber-700">{financeDataError}</p></Card>}
       {data && (
         <>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -183,8 +201,8 @@ function Finance() {
       )}
 
       <Card className="p-6">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4"><div><h2 className="font-semibold">Payroll</h2><p className="text-xs text-[#6E6E73]">Unpaid commissions and assistant earnings from {payrollDateRange}.</p></div><div className="flex flex-wrap gap-2"><Button variant="secondary" onClick={downloadPayroll} disabled={!payrollStaff.length}><Download size={16} aria-hidden="true" />Download payroll CSV</Button><Button onClick={sendPayroll} disabled={payrollSending}>{payrollSending ? 'Sending…' : 'Send payroll batch'}</Button></div></div>
-        <div className="space-y-2">{payrollStaff.map(member => { const commission = member.commissionEarnedWeek || 0; const assistant = member.assistantEarnedWeek || 0; const calculated = commission + assistant; return <div key={member.id} className="flex items-center justify-between gap-3 border-b border-black/5 pb-2"><div><p className="text-sm font-medium">{member.name}</p><p className="text-xs text-[#6E6E73]">{member.phone || 'No phone number'} · {member.branchName || member.branch}</p><p className="text-xs text-[#6E6E73]">Commission {fmtMoney(commission, 'KES')} + assistant compensation {fmtMoney(assistant, 'KES')}</p></div><p className="font-semibold text-sm">{fmtMoney(calculated, 'KES')}</p></div>; })}</div>
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4"><div><h2 className="font-semibold">Payroll</h2><p className="text-xs text-[#6E6E73]">Unpaid commissions and assistant earnings from {payrollDateRange}.</p></div><div className="flex flex-wrap gap-2"><Button variant="secondary" onClick={downloadPayroll} disabled={payrollLoading || !payrollStaff.length}><Download size={16} aria-hidden="true" />Download payroll CSV</Button><Button variant="secondary" onClick={loadPayroll} disabled={payrollLoading}>{payrollLoading ? 'Refreshing…' : 'Refresh payroll'}</Button><Button onClick={sendPayroll} disabled={payrollSending || payrollLoading}>{payrollSending ? 'Sending…' : 'Send payroll batch'}</Button></div></div>
+        {payrollLoading ? <p className="text-sm text-[#6E6E73]">Loading staff payroll…</p> : payrollError ? <p role="alert" className="text-sm text-amber-700">{payrollError} Use “Refresh payroll” to try again.</p> : payrollStaff.length === 0 ? <p className="text-sm text-[#6E6E73]">No active staff records were returned for payroll.</p> : <div className="space-y-2">{payrollStaff.map(member => { const commission = member.commissionEarnedWeek || 0; const assistant = member.assistantEarnedWeek || 0; const calculated = commission + assistant; return <div key={member.id} className="flex items-center justify-between gap-3 border-b border-black/5 pb-2"><div><p className="text-sm font-medium">{member.name}</p><p className="text-xs text-[#6E6E73]">{member.phone || 'No phone number'} · {member.branchName || member.branch}</p><p className="text-xs text-[#6E6E73]">Commission {fmtMoney(commission, 'KES')} + assistant compensation {fmtMoney(assistant, 'KES')}</p></div><p className="font-semibold text-sm">{fmtMoney(calculated, 'KES')}</p></div>; })}</div>}
       </Card>
 
       {earningsDeleteOpen && <Modal title="Clear paid staff earnings" onClose={() => setEarningsDeleteOpen(false)} footer={<><Button variant="secondary" onClick={() => setEarningsDeleteOpen(false)}>Cancel</Button><Button variant="danger" onClick={deletePaidEarnings} disabled={deletingEarnings}>{deletingEarnings ? 'Clearing…' : 'Clear earnings'}</Button></>}>
