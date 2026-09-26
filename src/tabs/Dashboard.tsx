@@ -12,20 +12,45 @@ function Dashboard() {
   const [rebooking, setRebooking] = useState<RebookingItem[]>([]);
   const [ownerStaffEarnings, setOwnerStaffEarnings] = useState<Staff[]>([]);
   const [earningsPeriod, setEarningsPeriod] = useState<{ from: number; to: number } | null>(null);
+  const [earningsLoading, setEarningsLoading] = useState(true);
+  const [earningsError, setEarningsError] = useState('');
+  const [dashboardError, setDashboardError] = useState('');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let alive = true;
     setLoading(true);
-    Promise.all([DashboardApi.get(range), RebookingApi.list(), PayrollApi.staff()])
-      .then(([d, r, payroll]) => { if (alive) { setData(d); setRebooking(r); setOwnerStaffEarnings(payroll.items); setEarningsPeriod(payroll.period); } })
-      .catch(() => toast('Could not load dashboard data.', 'error'))
+    setEarningsLoading(true);
+    setEarningsError('');
+    setDashboardError('');
+    DashboardApi.get(range)
+      .then(d => { if (alive) setData(d); })
+      .catch((cause: any) => {
+        if (!alive) return;
+        setDashboardError(cause?.message || 'Could not load dashboard data.');
+        toast('Could not load dashboard metrics.', 'error');
+      })
       .finally(() => { if (alive) setLoading(false); });
+    RebookingApi.list()
+      .then(items => { if (alive) setRebooking(items); })
+      .catch(() => { if (alive) toast('Could not load rebooking suggestions.', 'error'); });
+    PayrollApi.staff()
+      .then(payroll => {
+        if (!alive) return;
+        setOwnerStaffEarnings(payroll.items);
+        setEarningsPeriod(payroll.period);
+      })
+      .catch((cause: any) => {
+        if (!alive) return;
+        setEarningsError(cause?.message || 'Weekly staff earnings are temporarily unavailable.');
+        toast('Could not load weekly staff earnings. Other dashboard data is still available.', 'error');
+      })
+      .finally(() => { if (alive) setEarningsLoading(false); });
     return () => { alive = false; };
   }, [range]);
 
   if (loading && !data) return <LoadingState label="Loading dashboard…" />;
-  if (!data) return <EmptyState icon={AlertTriangle} title="No data yet" description="Dashboard metrics will appear once your business has activity." />;
+  if (!data) return <EmptyState icon={AlertTriangle} title="Dashboard data unavailable" description={dashboardError || 'Could not load your business data. Please try again shortly.'} />;
 
   const maxTrend = Math.max(1, ...data.trend.map(t => t.revenue));
   const revenueKES = data.revenueByCurrency.KES || 0;
@@ -61,7 +86,7 @@ function Dashboard() {
 
       <Card className="p-4 sm:p-6">
         <div className="mb-4"><h2 className="font-semibold">Staff Earnings · Sunday–Saturday</h2><p className="text-xs text-[#6E6E73]">Unpaid earnings from {earningsDateRange}. Includes commission and assistant-only earnings for every staff member.</p></div>
-        {ownerStaffEarnings.length === 0 ? <p className="text-sm text-[#6E6E73]">No staff records are available.</p> : <div className="space-y-2">{[...ownerStaffEarnings].sort((first, second) => ((second.commissionEarnedWeek || 0) + (second.assistantEarnedWeek || 0)) - ((first.commissionEarnedWeek || 0) + (first.assistantEarnedWeek || 0))).map(member => { const commission = member.commissionEarnedWeek || 0; const assistant = member.assistantEarnedWeek || 0; return <div key={member.id} className="flex items-center justify-between gap-3 border-b border-black/5 pb-2 last:border-0"><div><p className="text-sm font-medium">{member.name}</p><p className="text-xs text-[#6E6E73]">Commission {fmtMoney(commission, 'KES')} · assistant earnings {fmtMoney(assistant, 'KES')}</p></div><p className="shrink-0 text-sm font-semibold">{fmtMoney(commission + assistant, 'KES')}</p></div>; })}</div>}
+        {earningsLoading ? <p className="text-sm text-[#6E6E73]">Loading weekly staff earnings…</p> : earningsError ? <p role="status" className="text-sm text-amber-700">{earningsError} Business metrics are available above.</p> : ownerStaffEarnings.length === 0 ? <p className="text-sm text-[#6E6E73]">No staff records are available.</p> : <div className="space-y-2">{[...ownerStaffEarnings].sort((first, second) => ((second.commissionEarnedWeek || 0) + (second.assistantEarnedWeek || 0)) - ((first.commissionEarnedWeek || 0) + (first.assistantEarnedWeek || 0))).map(member => { const commission = member.commissionEarnedWeek || 0; const assistant = member.assistantEarnedWeek || 0; return <div key={member.id} className="flex items-center justify-between gap-3 border-b border-black/5 pb-2 last:border-0"><div><p className="text-sm font-medium">{member.name}</p><p className="text-xs text-[#6E6E73]">Commission {fmtMoney(commission, 'KES')} · assistant earnings {fmtMoney(assistant, 'KES')}</p></div><p className="shrink-0 text-sm font-semibold">{fmtMoney(commission + assistant, 'KES')}</p></div>; })}</div>}
       </Card>
 
       <div className="grid grid-cols-1 gap-4">
