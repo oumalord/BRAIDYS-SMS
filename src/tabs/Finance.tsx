@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Plus, Receipt } from 'lucide-react';
+import { Download, Plus, Receipt } from 'lucide-react';
 import { Card, Button, Badge, Modal, Field, Input, Select, EmptyState, LoadingState, StatCard, toast } from '../components/ui';
-import { DashboardApi, ExpensesApi, PayrollApi, PayoutsApi, fmtMoney } from '../lib/api';
+import { DashboardApi, downloadCSV, ExpensesApi, PayrollApi, PayoutsApi, fmtMoney } from '../lib/api';
 import type { DashboardData, Expense, PayoutBatch, Staff } from '../types';
 
 type Range = 'today' | 'week' | 'month' | 'all';
@@ -97,6 +97,29 @@ function Finance() {
   const payrollDateRange = payrollPeriod
     ? `${new Date(payrollPeriod.from).toLocaleDateString()} – ${new Date(payrollPeriod.to).toLocaleDateString()}`
     : 'Sunday–Saturday';
+  const payrollStaff = staff.filter(member => member.employmentStatus !== 'laid-off');
+  const downloadPayroll = () => {
+    const startDate = payrollPeriod ? new Date(payrollPeriod.from) : new Date();
+    const endDate = payrollPeriod ? new Date(payrollPeriod.to) : new Date();
+    const dateKey = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    const totalCommission = payrollStaff.reduce((sum, member) => sum + (member.commissionEarnedWeek || 0), 0);
+    const totalAssistant = payrollStaff.reduce((sum, member) => sum + (member.assistantEarnedWeek || 0), 0);
+    const rows: (string | number)[][] = [
+      ['SafiGroom weekly payroll'],
+      ['Earnings period', payrollDateRange],
+      ['Generated', new Date().toLocaleString()],
+      [],
+      ['Staff ID', 'Staff name', 'Role', 'Phone', 'Branch', 'Commission (KES)', 'Assistant earnings (KES)', 'Total earnings (KES)'],
+      ...payrollStaff.map(member => {
+        const commission = member.commissionEarnedWeek || 0;
+        const assistant = member.assistantEarnedWeek || 0;
+        return [member.id, member.name, member.role, member.phone || '', member.branchName || member.branch || '', commission, assistant, commission + assistant];
+      }),
+      [],
+      ['TOTAL', '', '', '', '', totalCommission, totalAssistant, totalCommission + totalAssistant],
+    ];
+    downloadCSV(`safigroom-payroll-${dateKey(startDate)}-to-${dateKey(endDate)}.csv`, rows);
+  };
 
   return (
     <div className="space-y-6">
@@ -160,8 +183,8 @@ function Finance() {
       )}
 
       <Card className="p-6">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4"><div><h2 className="font-semibold">Payroll</h2><p className="text-xs text-[#6E6E73]">Unpaid commissions and assistant earnings from {payrollDateRange}.</p></div><Button onClick={sendPayroll} disabled={payrollSending}>{payrollSending ? 'Sending…' : 'Send payroll batch'}</Button></div>
-        <div className="space-y-2">{staff.filter(member => member.employmentStatus !== 'laid-off').map(member => { const commission = member.commissionEarnedWeek || 0; const assistant = member.assistantEarnedWeek || 0; const calculated = commission + assistant; return <div key={member.id} className="flex items-center justify-between gap-3 border-b border-black/5 pb-2"><div><p className="text-sm font-medium">{member.name}</p><p className="text-xs text-[#6E6E73]">{member.phone || 'No phone number'} · {member.branchName || member.branch}</p><p className="text-xs text-[#6E6E73]">Commission {fmtMoney(commission, 'KES')} + assistant compensation {fmtMoney(assistant, 'KES')}</p></div><p className="font-semibold text-sm">{fmtMoney(calculated, 'KES')}</p></div>; })}</div>
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4"><div><h2 className="font-semibold">Payroll</h2><p className="text-xs text-[#6E6E73]">Unpaid commissions and assistant earnings from {payrollDateRange}.</p></div><div className="flex flex-wrap gap-2"><Button variant="secondary" onClick={downloadPayroll} disabled={!payrollStaff.length}><Download size={16} aria-hidden="true" />Download payroll CSV</Button><Button onClick={sendPayroll} disabled={payrollSending}>{payrollSending ? 'Sending…' : 'Send payroll batch'}</Button></div></div>
+        <div className="space-y-2">{payrollStaff.map(member => { const commission = member.commissionEarnedWeek || 0; const assistant = member.assistantEarnedWeek || 0; const calculated = commission + assistant; return <div key={member.id} className="flex items-center justify-between gap-3 border-b border-black/5 pb-2"><div><p className="text-sm font-medium">{member.name}</p><p className="text-xs text-[#6E6E73]">{member.phone || 'No phone number'} · {member.branchName || member.branch}</p><p className="text-xs text-[#6E6E73]">Commission {fmtMoney(commission, 'KES')} + assistant compensation {fmtMoney(assistant, 'KES')}</p></div><p className="font-semibold text-sm">{fmtMoney(calculated, 'KES')}</p></div>; })}</div>
       </Card>
 
       {earningsDeleteOpen && <Modal title="Clear paid staff earnings" onClose={() => setEarningsDeleteOpen(false)} footer={<><Button variant="secondary" onClick={() => setEarningsDeleteOpen(false)}>Cancel</Button><Button variant="danger" onClick={deletePaidEarnings} disabled={deletingEarnings}>{deletingEarnings ? 'Clearing…' : 'Clear earnings'}</Button></>}>
