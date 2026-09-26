@@ -1,5 +1,6 @@
 import { router, json, error, db, ai, storage, currentContext } from './runtime.ts';
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
+import { calculateUnpaidStaffEarnings, serviceCommission, staffCommission } from './earnings.ts';
 
 const DAY = 24 * 3600 * 1000;
 const DEFAULT_STAFF_PIN = '1234';
@@ -78,27 +79,6 @@ function requireAdmin() {
 
 function requireOwner() {
   if (!['owner', 'admin'].includes(currentContext()?.role || '')) throw new Error('Only the owner or administrator can edit records');
-}
-
-function serviceCommission(item: any): number {
-  if (item?.type !== 'service') return 0;
-  const recorded = Number(item.commission);
-  if (Number.isFinite(recorded)) return Math.max(0, recorded);
-  const revenue = Number(item.lineTotalAfterDiscount ?? Number(item.price || 0) * Number(item.qty || 1)) || 0;
-  const productCost = Math.max(0, Number(item.productCost || 0));
-  const assistantFee = Math.max(0, Number(item.assistantPayment ?? item.helperDeduction ?? 0));
-  const commissionBase = Math.max(0, Number(item.commissionBase ?? (revenue - productCost - assistantFee)) || 0);
-  const rate = Number(item.commissionPct ?? item.commissionRate ?? 50);
-  return commissionBase * (Number.isFinite(rate) ? rate / 100 : 0.5);
-}
-
-function staffCommission(item: any, staffId: unknown): number {
-  if (!staffId) return 0;
-  const hasMultipleStaff = Boolean(item.coStaffId || item.thirdStaffId || item.helperStaffId);
-  if (String(item.staffId || '') === String(staffId)) return hasMultipleStaff ? Number(item.primaryCommission ?? serviceCommission(item)) || 0 : serviceCommission(item);
-  if (String(item.coStaffId || '') === String(staffId)) return Number(item.coStaffCommission ?? serviceCommission(item)) || 0;
-  if (String(item.thirdStaffId || '') === String(staffId)) return Number(item.thirdStaffCommission ?? 0) || 0;
-  return 0;
 }
 
 function createTicketNumber(date: string): string {
@@ -511,8 +491,7 @@ export const handler = router({
       db.list('payout_items', { limit: 10000 }),
       db.list('appointments', { limit: 5000 }),
     ]);
-    const paidEarningKeys = new Set((payoutItems as any[]).filter(item => !item.deletedAt).map(item => item.itemKey));
-    const appointmentsById = new Map((appointments as any[]).map(appointment => [appointment.id, appointment]));
+    const unpaidEarnings = calculateUnpaidStaffEarnings(orders as any[], payoutItems as any[], appointments as any[], weekFrom, now);
     const paidHistory = (payoutItems as any[])
       .filter(item => !item.deletedAt && item.staffId === context.staffId)
       .map(item => ({ serviceName: item.serviceName || item.orderId || 'Paid earning', createdAt: item.createdAt, role: item.role === 'assistant' ? 'assistant' : 'commission', amount: Number(item.commission || 0) }));
@@ -520,42 +499,17 @@ export const handler = router({
     let todayAssistant = 0;
     let fortnightCommission = 0;
     let fortnightAssistant = 0;
-    const completedWork: { serviceName: string; createdAt: number; role: 'commission' | 'assistant'; amount: number }[] = [];
-
-    for (const order of orders as any[]) {
-      if (order.deletedAt) continue;
-      if (!order.createdAt) continue;
-      for (const [index, item] of (order.items || []).entries()) {
-        if (item.type !== 'service') continue;
-        const itemKey = `${order.id}:${index}`;
-        const linkedAppointment: any = appointmentsById.get(String(order.appointmentId || ''));
-        const primaryStaffId = item.staffId || linkedAppointment?.staffId;
-        const earningItem = primaryStaffId === item.staffId ? item : { ...item, staffId: primaryStaffId, staffName: item.staffName || linkedAppointment?.staffName };
-        const assistant = Number(item.assistantPayment ?? item.helperDeduction ?? 0) || 0;
-        if (!paidEarningKeys.has(itemKey) && String(primaryStaffId || '') === String(context.staffId || '')) {
-          const commission = staffCommission(earningItem, primaryStaffId);
-          if (order.createdAt >= todayFrom) todayCommission += commission;
-          if (order.createdAt >= weekFrom) fortnightCommission += commission;
-          completedWork.push({ serviceName: item.name || 'Service', createdAt: order.createdAt, role: 'commission', amount: commission });
-        }
-        if (!paidEarningKeys.has(`${itemKey}:co-staff`) && String(item.coStaffId || '') === String(context.staffId || '')) {
-          const commission = staffCommission(item, item.coStaffId);
-          if (order.createdAt >= todayFrom) todayCommission += commission;
-          if (order.createdAt >= weekFrom) fortnightCommission += commission;
-          completedWork.push({ serviceName: item.name || 'Service', createdAt: order.createdAt, role: 'commission', amount: commission });
-        }
-        if (!paidEarningKeys.has(`${itemKey}:third-staff`) && String(item.thirdStaffId || '') === String(context.staffId || '')) {
-          const commission = staffCommission(item, item.thirdStaffId);
-          if (order.createdAt >= todayFrom) todayCommission += commission;
-          if (order.createdAt >= weekFrom) fortnightCommission += commission;
-          completedWork.push({ serviceName: item.name || 'Service', createdAt: order.createdAt, role: 'commission', amount: commission });
-        }
-        if (!paidEarningKeys.has(`${itemKey}:assistant`) && String(item.helperStaffId || '') === String(context.staffId || '')) {
-          if (order.createdAt >= todayFrom) todayAssistant += assistant;
-          if (order.createdAt >= weekFrom) fortnightAssistant += assistant;
-          completedWork.push({ serviceName: item.name || 'Service', createdAt: order.createdAt, role: 'assistant', amount: assistant });
-        }
+    const ownEarnings = unpaidEarnings.filter(line => line.staffId === String(context.staffId));
+    const completedWork = ownEarnings.map(line => ({ serviceName: line.serviceName, createdAt: line.createdAt, role: line.role, amount: line.amount }));
+    for (const earning of ownEarnings) {
+      const isToday = earning.createdAt >= todayFrom;
+      const amountField = earning.role === 'assistant' ? 'assistant' : 'commission';
+      if (isToday) {
+        if (amountField === 'assistant') todayAssistant += earning.amount;
+        else todayCommission += earning.amount;
       }
+      if (amountField === 'assistant') fortnightAssistant += earning.amount;
+      else fortnightCommission += earning.amount;
     }
 
     const weekly = { commission: fortnightCommission, assistant: fortnightAssistant, total: fortnightCommission + fortnightAssistant };
@@ -1526,39 +1480,13 @@ export const handler = router({
       db.list('payout_items', { limit: 10000 }),
       db.list('appointments', { limit: 5000 }),
     ]);
-    const paidEarningKeys = new Set((deletedPayoutItems as any[]).filter(item => !item.deletedAt).map(item => item.itemKey));
-    const appointmentsById = new Map((appointments as any[]).map(appointment => [appointment.id, appointment]));
+    const unpaidEarnings = calculateUnpaidStaffEarnings(orders as any[], deletedPayoutItems as any[], appointments as any[], from, now);
     const totals = new Map<string, { commission: number; assistant: number }>();
-    for (const order of orders as any[]) {
-      if (order.deletedAt) continue;
-      if (!order.createdAt || order.createdAt < from || order.createdAt >= period.to) continue;
-      for (const [index, item] of (order.items || []).entries()) {
-        if (item.type !== 'service') continue;
-        const itemKey = `${order.id}:${index}`;
-        const linkedAppointment: any = appointmentsById.get(String(order.appointmentId || ''));
-        const primaryStaffId = item.staffId || linkedAppointment?.staffId;
-        const earningItem = primaryStaffId === item.staffId ? item : { ...item, staffId: primaryStaffId, staffName: item.staffName || linkedAppointment?.staffName };
-        if (primaryStaffId && !paidEarningKeys.has(itemKey)) {
-          const total = totals.get(primaryStaffId) || { commission: 0, assistant: 0 };
-          total.commission += staffCommission(earningItem, primaryStaffId);
-          totals.set(primaryStaffId, total);
-        }
-        if (item.coStaffId && !paidEarningKeys.has(`${itemKey}:co-staff`)) {
-          const total = totals.get(item.coStaffId) || { commission: 0, assistant: 0 };
-          total.commission += staffCommission(item, item.coStaffId);
-          totals.set(item.coStaffId, total);
-        }
-        if (item.thirdStaffId && !paidEarningKeys.has(`${itemKey}:third-staff`)) {
-          const total = totals.get(item.thirdStaffId) || { commission: 0, assistant: 0 };
-          total.commission += staffCommission(item, item.thirdStaffId);
-          totals.set(item.thirdStaffId, total);
-        }
-        if (item.helperStaffId && !paidEarningKeys.has(`${itemKey}:assistant`)) {
-          const total = totals.get(item.helperStaffId) || { commission: 0, assistant: 0 };
-          total.assistant += Number(item.assistantPayment ?? item.helperDeduction ?? 0);
-          totals.set(item.helperStaffId, total);
-        }
-      }
+    for (const earning of unpaidEarnings) {
+      const total = totals.get(earning.staffId) || { commission: 0, assistant: 0 };
+      if (earning.role === 'assistant') total.assistant += earning.amount;
+      else total.commission += earning.amount;
+      totals.set(earning.staffId, total);
     }
     return json({
       items: (items as any[]).filter(member => !member.deletedAt).map(member => ({
@@ -1605,40 +1533,16 @@ export const handler = router({
       db.list('payout_items', { limit: 10000 }),
       db.list('appointments', { limit: 5000 }),
     ]);
-    const appointmentsById = new Map((appointments as any[]).map(appointment => [appointment.id, appointment]));
     const staffById = new Map((staff as any[]).map(member => [member.id, member]));
-    const alreadyPaid = new Set((paidItems as any[]).filter(item => !item.deletedAt).map(item => item.itemKey));
-    const lines: any[] = [];
-    for (const order of orders as any[]) {
-      if (order.deletedAt) continue;
-      if (!order.createdAt || order.createdAt < from || order.createdAt >= now) continue;
-      (order.items || []).forEach((item: any, index: number) => {
-        if (item.type !== 'service') return;
-        const linkedAppointment: any = appointmentsById.get(String(order.appointmentId || ''));
-        const primaryStaffId = item.staffId || linkedAppointment?.staffId;
-        if (!primaryStaffId) return;
-        const earningItem = primaryStaffId === item.staffId ? item : { ...item, staffId: primaryStaffId, staffName: item.staffName || linkedAppointment?.staffName };
-        const primaryMember: any = staffById.get(primaryStaffId);
-        if (!primaryMember) return;
-        const revenue = Number(item.lineTotalAfterDiscount ?? item.price * item.qty) || 0;
-        const commissionBase = Math.max(0, Number(item.commissionBase ?? (revenue - Number(item.productCost || 0) - Number(item.assistantPayment ?? item.helperDeduction ?? 0))) || 0);
-        const commission = staffCommission(earningItem, primaryStaffId);
-        if (!alreadyPaid.has(`${order.id}:${index}`)) lines.push({ itemKey: `${order.id}:${index}`, orderId: order.id, serviceName: item.name || 'Service', staffId: primaryStaffId, staffName: item.staffName || linkedAppointment?.staffName || primaryMember.name, revenue, commissionBase, helperDeduction: Number(item.helperDeduction || 0), productCost: Number(item.productCost || 0), commission, currency: item.currency || 'KES', branchId: order.branchId || context.branchId || null, createdAt: now });
-        if (item.coStaffId && !alreadyPaid.has(`${order.id}:${index}:co-staff`)) {
-          const coStaff = staffById.get(item.coStaffId);
-          if (coStaff) lines.push({ itemKey: `${order.id}:${index}:co-staff`, orderId: order.id, serviceName: item.name || 'Service', staffId: item.coStaffId, staffName: item.coStaffName || coStaff.name, revenue, commissionBase, helperDeduction: Number(item.helperDeduction || 0), productCost: Number(item.productCost || 0), commission: Number(item.coStaffCommission ?? 0), currency: item.currency || 'KES', branchId: order.branchId || context.branchId || null, createdAt: now, role: 'co-staff' });
-        }
-        if (item.thirdStaffId && !alreadyPaid.has(`${order.id}:${index}:third-staff`)) {
-          const thirdStaff = staffById.get(item.thirdStaffId);
-          const thirdStaffCommission = staffCommission(item, item.thirdStaffId);
-          if (thirdStaff) lines.push({ itemKey: `${order.id}:${index}:third-staff`, orderId: order.id, serviceName: item.name || 'Service', staffId: item.thirdStaffId, staffName: item.thirdStaffName || thirdStaff.name, revenue, commissionBase, helperDeduction: Number(item.helperDeduction || 0), productCost: Number(item.productCost || 0), commission: thirdStaffCommission, currency: item.currency || 'KES', branchId: order.branchId || context.branchId || null, createdAt: now, role: 'third-staff' });
-        }
-        if (item.helperStaffId && !alreadyPaid.has(`${order.id}:${index}:assistant`)) {
-          const assistant = staffById.get(item.helperStaffId);
-          if (assistant) lines.push({ itemKey: `${order.id}:${index}:assistant`, orderId: order.id, serviceName: item.name || 'Service', staffId: item.helperStaffId, staffName: item.helperStaffName || assistant.name, revenue: 0, commissionBase: 0, helperDeduction: 0, productCost: 0, commission: Number(item.assistantPayment ?? item.helperDeduction ?? 0), currency: item.currency || 'KES', branchId: order.branchId || context.branchId || null, createdAt: now, role: 'assistant' });
-        }
-      });
-    }
+    const lines = calculateUnpaidStaffEarnings(orders as any[], paidItems as any[], appointments as any[], from, now)
+      .filter(earning => staffById.has(earning.staffId))
+      .map(earning => ({
+        ...earning,
+        staffName: staffById.get(earning.staffId)?.name || 'Unknown staff',
+        commission: earning.amount,
+        branchId: earning.branchId || context.branchId || null,
+        createdAt: now,
+      }));
     if (!lines.length) return error('There are no unpaid commissions in this period.', 409);
     const totalKES = lines.filter(line => line.currency === 'KES').reduce((sum, line) => sum + line.commission, 0);
     const [batchId] = await db.add('payout_batches', [{ range, from, to: now, totalKES, employeeCount: new Set(lines.map(line => line.staffId)).size, itemCount: lines.length, status: 'recorded', createdAt: now }]);
