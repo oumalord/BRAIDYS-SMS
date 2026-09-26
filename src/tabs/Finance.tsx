@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Download, Plus, Receipt } from 'lucide-react';
+import { Download, Plus, Receipt, Search } from 'lucide-react';
 import { Card, Button, Badge, Modal, Field, Input, Select, EmptyState, LoadingState, StatCard, toast } from '../components/ui';
-import { DashboardApi, downloadCSV, ExpensesApi, PayrollApi, PayoutsApi, fmtMoney } from '../lib/api';
-import type { DashboardData, Expense, PayoutBatch, Staff } from '../types';
+import { AppointmentsApi, DashboardApi, downloadCSV, ExpensesApi, PayrollApi, PayoutsApi, fmtMoney } from '../lib/api';
+import type { DashboardData, Expense, PayoutBatch, Staff, WeeklyStaffWorkReport } from '../types';
 
 type Range = 'today' | 'week' | 'month' | 'all';
 
@@ -23,6 +23,10 @@ function Finance() {
   const [earningsDeleteOpen, setEarningsDeleteOpen] = useState(false);
   const [earningsDeleteRange, setEarningsDeleteRange] = useState({ from: '', to: '' });
   const [form, setForm] = useState({ category: 'Supplies', amount: 0, note: '', date: new Date().toISOString().slice(0, 10) });
+  const [breakdownStaff, setBreakdownStaff] = useState<Staff | null>(null);
+  const [breakdown, setBreakdown] = useState<WeeklyStaffWorkReport | null>(null);
+  const [breakdownLoading, setBreakdownLoading] = useState(false);
+  const [breakdownError, setBreakdownError] = useState('');
 
   const loadPayroll = () => {
     setPayrollLoading(true);
@@ -100,6 +104,21 @@ function Finance() {
     ? `${new Date(payrollPeriod.from).toLocaleDateString()} – ${new Date(payrollPeriod.to).toLocaleDateString()}`
     : 'Sunday–Saturday';
   const payrollStaff = staff.filter(member => member.employmentStatus !== 'laid-off');
+  const openBreakdown = async (member: Staff) => {
+    setBreakdownStaff(member);
+    setBreakdown(null);
+    setBreakdownError('');
+    setBreakdownLoading(true);
+    try { setBreakdown(await AppointmentsApi.staffWeeklyWork(member.id)); }
+    catch (cause: any) { setBreakdownError(cause?.message || 'Could not load this staff member’s appointment earnings.'); }
+    finally { setBreakdownLoading(false); }
+  };
+  const closeBreakdown = () => { setBreakdownStaff(null); setBreakdown(null); setBreakdownError(''); };
+  const breakdownLines = breakdown?.services.flatMap(service => service.distribution
+    .filter(line => line.staffId === breakdownStaff?.id)
+    .map(line => ({ service, line }))) || [];
+  const breakdownCommission = breakdownLines.filter(({ line }) => line.role !== 'assistant').reduce((sum, item) => sum + item.line.amount, 0);
+  const breakdownAssistant = breakdownLines.filter(({ line }) => line.role === 'assistant').reduce((sum, item) => sum + item.line.amount, 0);
   const downloadPayroll = () => {
     const startDate = payrollPeriod ? new Date(payrollPeriod.from) : new Date();
     const endDate = payrollPeriod ? new Date(payrollPeriod.to) : new Date();
@@ -170,11 +189,11 @@ function Finance() {
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <caption className="sr-only">Commission and assistant earnings per staff member</caption>
-                  <thead><tr className="text-left text-xs text-[#6E6E73] border-b border-black/5"><th className="pb-2 pr-3">Staff</th><th className="pb-2 pr-3">Services</th><th className="pb-2 pr-3">Service revenue</th><th className="pb-2 pr-3">Assistant fees deducted</th><th className="pb-2 pr-3">Commission</th><th className="pb-2 pr-3">Assistant earnings</th><th className="pb-2">Total earnings</th></tr></thead>
+                  <thead><tr className="text-left text-xs text-[#6E6E73] border-b border-black/5"><th className="pb-2 pr-3">Staff</th><th className="pb-2 pr-3">Services</th><th className="pb-2 pr-3">Service revenue</th><th className="pb-2 pr-3">Assistant fees deducted</th><th className="pb-2 pr-3">Commission</th><th className="pb-2 pr-3">Assistant earnings</th><th className="pb-2 pr-3">Total earnings</th><th className="pb-2">Breakdown</th></tr></thead>
                   <tbody>
                     {data.staffEarnings.map(member => (
                       <tr key={`${member.staffId}-${member.currency}`} className="border-b border-black/5 last:border-0">
-                        <td className="py-2 pr-3">{member.name}</td><td className="py-2 pr-3">{member.count}</td><td className="py-2 pr-3">{fmtMoney(member.revenue, member.currency)}</td><td className="py-2 pr-3">{fmtMoney(member.helperDeductions, member.currency)}</td><td className="py-2 pr-3">{fmtMoney(member.commission, member.currency)}</td><td className="py-2 pr-3">{fmtMoney(member.assistantEarnings, member.currency)}</td><td className="py-2 font-medium">{fmtMoney(member.commission + member.assistantEarnings, member.currency)}</td>
+                        <td className="py-2 pr-3">{member.name}</td><td className="py-2 pr-3">{member.count}</td><td className="py-2 pr-3">{fmtMoney(member.revenue, member.currency)}</td><td className="py-2 pr-3">{fmtMoney(member.helperDeductions, member.currency)}</td><td className="py-2 pr-3">{fmtMoney(member.commission, member.currency)}</td><td className="py-2 pr-3">{fmtMoney(member.assistantEarnings, member.currency)}</td><td className="py-2 pr-3 font-medium">{fmtMoney(member.commission + member.assistantEarnings, member.currency)}</td><td className="py-2"><Button size="sm" variant="secondary" onClick={() => openBreakdown(staff.find(item => item.id === member.staffId) || { id: member.staffId, name: member.name } as Staff)}><Search size={14} aria-hidden="true" />Open</Button></td>
                       </tr>
                     ))}
                   </tbody>
@@ -189,6 +208,16 @@ function Finance() {
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4"><div><h2 className="font-semibold">Payroll</h2><p className="text-xs text-[#6E6E73]">Unpaid commissions and assistant earnings from {payrollDateRange}.</p></div><div className="flex flex-wrap gap-2"><Button variant="secondary" onClick={downloadPayroll} disabled={payrollLoading || !payrollStaff.length}><Download size={16} aria-hidden="true" />Download payroll CSV</Button><Button variant="secondary" onClick={loadPayroll} disabled={payrollLoading}>{payrollLoading ? 'Refreshing…' : 'Refresh payroll'}</Button><Button onClick={sendPayroll} disabled={payrollSending || payrollLoading}>{payrollSending ? 'Sending…' : 'Send payroll batch'}</Button></div></div>
         {payrollLoading ? <p className="text-sm text-[#6E6E73]">Loading staff payroll…</p> : payrollError ? <p role="alert" className="text-sm text-amber-700">{payrollError} Use “Refresh payroll” to try again.</p> : payrollStaff.length === 0 ? <p className="text-sm text-[#6E6E73]">No active staff records were returned for payroll.</p> : <div className="space-y-2">{payrollStaff.map(member => { const commission = member.commissionEarnedWeek || 0; const assistant = member.assistantEarnedWeek || 0; const calculated = commission + assistant; return <div key={member.id} className="flex items-center justify-between gap-3 border-b border-black/5 pb-2"><div><p className="text-sm font-medium">{member.name}</p><p className="text-xs text-[#6E6E73]">{member.phone || 'No phone number'} · {member.branchName || member.branch}</p><p className="text-xs text-[#6E6E73]">Commission {fmtMoney(commission, 'KES')} + assistant compensation {fmtMoney(assistant, 'KES')}</p></div><p className="font-semibold text-sm">{fmtMoney(calculated, 'KES')}</p></div>; })}</div>}
       </Card>
+
+      {breakdownStaff && <Modal title={`${breakdownStaff.name} appointment earnings`} onClose={closeBreakdown} footer={<Button variant="secondary" onClick={closeBreakdown}>Close</Button>}>
+        <div className="space-y-4">
+          <p className="text-sm text-[#6E6E73]">Completed appointments linked to this staff member for {payrollDateRange}. Amounts come from recorded service commissions and assistant compensation.</p>
+          {breakdownLoading ? <LoadingState label="Loading appointment earnings…" /> : breakdownError ? <p role="alert" className="text-sm text-amber-700">{breakdownError}</p> : !breakdownLines.length ? <p className="text-sm text-[#6E6E73]">No completed appointment earnings were found.</p> : <>
+            <div className="grid grid-cols-3 gap-3"><div className="rounded-xl bg-black/[0.03] p-3"><p className="text-xs text-[#6E6E73]">Appointments</p><p className="text-lg font-semibold">{breakdownLines.length}</p></div><div className="rounded-xl bg-black/[0.03] p-3"><p className="text-xs text-[#6E6E73]">Commission</p><p className="text-lg font-semibold">{fmtMoney(breakdownCommission, 'KES')}</p></div><div className="rounded-xl bg-black/[0.03] p-3"><p className="text-xs text-[#6E6E73]">Assistant</p><p className="text-lg font-semibold">{fmtMoney(breakdownAssistant, 'KES')}</p></div></div>
+            <div className="max-h-[55vh] overflow-y-auto divide-y divide-black/5">{breakdownLines.map(({ service, line }, index) => <div key={`${service.orderId}-${line.itemKey}-${index}`} className="py-3"><div className="flex items-start justify-between gap-3"><div><p className="text-sm font-medium">{service.serviceName} · {service.customerName}</p><p className="text-xs text-[#6E6E73]">{service.appointmentDate || 'No appointment date'}{service.appointmentTime ? ` at ${service.appointmentTime}` : ''} · {line.role.replace('-', ' ')} · {service.appointmentStatus || 'completed'}</p></div><p className="shrink-0 text-sm font-semibold">{fmtMoney(line.amount, 'KES')}</p></div><p className="mt-1 text-xs text-[#6E6E73]">Revenue {fmtMoney(service.serviceRevenue, 'KES')} · commission base {fmtMoney(service.commissionBase, 'KES')} · order {service.orderId.slice(0, 8)}</p></div>)}</div>
+          </>}
+        </div>
+      </Modal>}
 
       {earningsDeleteOpen && <Modal title="Clear paid staff earnings" onClose={() => setEarningsDeleteOpen(false)} footer={<><Button variant="secondary" onClick={() => setEarningsDeleteOpen(false)}>Cancel</Button><Button variant="danger" onClick={deletePaidEarnings} disabled={deletingEarnings}>{deletingEarnings ? 'Clearing…' : 'Clear earnings'}</Button></>}>
         <div className="space-y-4">
