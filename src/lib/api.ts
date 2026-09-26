@@ -1,4 +1,4 @@
-import type { Staff, ServiceItem, Customer, Appointment, QueueEntry, Order, Expense, DashboardData, RebookingItem, ChatChannel, ChatMessage, Currency, MembershipPlan, Promotion, Review, AuditLog, Branch, PayoutBatch } from '../types';
+import type { Staff, ServiceItem, Customer, Appointment, QueueEntry, Order, Expense, DashboardData, RebookingItem, ChatChannel, ChatMessage, Currency, MembershipPlan, Promotion, Review, AuditLog, Branch, PayoutBatch, WeeklyStaffWorkReport } from '../types';
 
 const api = {
   get: async (path: string) => ({ data: await request(path) }),
@@ -111,6 +111,7 @@ export const CustomersApi = {
 
 export const AppointmentsApi = {
   list: (date?: string) => api.get(date ? `/api/appointments?date=${date}` : '/api/appointments').then(r => r.data.items as Appointment[]),
+  staffWeeklyWork: (staffId: string) => api.get(`/api/appointments/staff-weekly?staffId=${encodeURIComponent(staffId)}`).then(r => r.data as WeeklyStaffWorkReport),
   create: (a: unknown) => api.post('/api/appointments', a).then(r => { invalidate('dashboard'); return r; }),
   update: (id: string, patch: Partial<Appointment>) => api.put(`/api/appointments/${id}`, patch).then(r => { invalidate('dashboard'); return r; }),
   reopenCompleted: (id: string) => api.post(`/api/appointments/${id}/reopen`).then(r => { invalidate('appointments'); invalidate('customers'); invalidate('dashboard'); return r; }),

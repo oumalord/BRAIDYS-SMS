@@ -821,6 +821,71 @@ export const handler = router({
     const visible = context?.role === 'barber' ? activeItems.filter((a: any) => a.staffId === context.staffId) : activeItems;
     return json({ items: date ? visible.filter((a: any) => a.date === date) : visible });
   }],
+  'GET /api/appointments/staff-weekly': [async ({ query }) => {
+    const context = currentContext();
+    if (!context || !['owner', 'admin'].includes(context.role)) return error('Only the owner or administrator can view staff commission distributions', 403);
+    const search = String(query.name || '').trim().toLowerCase();
+    const requestedStaffId = String(query.staffId || '').trim();
+    if (!search && !requestedStaffId) return error('Enter a staff name to search', 400);
+    const period = sundaySaturdayRange();
+    const now = Date.now();
+    const [{ items: staffRows }, { items: orders }, { items: appointmentRows }, { items: payoutItems }] = await Promise.all([
+      db.list('staff', { limit: 2000 }),
+      db.list('orders', { limit: 5000 }),
+      db.list('appointments', { limit: 5000 }),
+      db.list('payout_items', { limit: 10000 }),
+    ]);
+    let matchedStaff = (staffRows as any[]).filter(member => !member.deletedAt && (!context.branchId || member.branchId === context.branchId)
+      && (requestedStaffId ? String(member.id) === requestedStaffId : String(member.name || '').trim().toLowerCase().includes(search)));
+    if (search) {
+      const exactMatches = matchedStaff.filter(member => String(member.name || '').trim().toLowerCase() === search);
+      if (exactMatches.length) matchedStaff = exactMatches;
+    }
+    if (!matchedStaff.length) return json({ period: { from: period.from, to: Math.min(period.to - 1, now) }, staff: [], services: [] });
+
+    const staffById = new Map((staffRows as any[]).map(member => [String(member.id), member]));
+    const appointmentsById = new Map((appointmentRows as any[]).filter((appointment: any) => !appointment.deletedAt).map((appointment: any) => [String(appointment.id), appointment]));
+    const activePaidKeys = new Set((payoutItems as any[]).filter(item => !item.deletedAt).map(item => String(item.itemKey || '')));
+    const earningLines = calculateUnpaidStaffEarnings(orders as any[], [], appointmentRows as any[], period.from, now + 1);
+    const selectedStaffIds = new Set(matchedStaff.map(member => String(member.id)));
+    const staffLineKey = (orderId: string, itemIndex: number) => `${orderId}:${itemIndex}`;
+    const services: any[] = [];
+    for (const order of orders as any[]) {
+      const createdAt = Number(order.createdAt || 0);
+      if (order.deletedAt || createdAt < period.from || createdAt >= period.to) continue;
+      const appointment: any = appointmentsById.get(String(order.appointmentId || ''));
+      const recordBranchId = order.branchId || appointment?.branchId || null;
+      if (context.branchId && recordBranchId && recordBranchId !== context.branchId) continue;
+      for (const [itemIndex, item] of (Array.isArray(order.items) ? order.items : []).entries()) {
+        if (item.type !== 'service') continue;
+        const baseKey = staffLineKey(String(order.id), itemIndex);
+        const distribution = earningLines
+          .filter(line => line.orderId === String(order.id) && (line.itemKey === baseKey || line.itemKey.startsWith(`${baseKey}:`)))
+          .map(line => {
+            const member: any = staffById.get(line.staffId);
+            const paidKey = String(line.itemKey);
+            const role = line.role === 'assistant' ? 'assistant' : line.itemKey.endsWith(':co-staff') ? 'co-staff'
+              : line.itemKey.endsWith(':third-staff') ? 'third-staff' : 'primary';
+            return { itemKey: paidKey, staffId: line.staffId, staffName: member?.name || 'Unknown staff', role, amount: line.amount, paid: activePaidKeys.has(paidKey) };
+          });
+        if (!distribution.some(line => selectedStaffIds.has(line.staffId))) continue;
+        const serviceRevenue = Number(item.lineTotalAfterDiscount ?? Number(item.price || 0) * Number(item.qty || 1)) || 0;
+        const productCost = Math.max(0, Number(item.productCost || 0));
+        const assistantFee = Math.max(0, Number(item.assistantPayment ?? item.helperDeduction ?? 0));
+        services.push({
+          orderId: String(order.id), createdAt, appointmentId: appointment?.id || order.appointmentId || null,
+          appointmentDate: appointment?.date || null, appointmentTime: appointment?.time || null,
+          cardNumber: appointment?.cardNumber || null, customerName: order.customerName || appointment?.customerName || 'Walk-in Customer',
+          appointmentStatus: appointment?.status || null, serviceName: item.name || appointment?.serviceName || 'Service',
+          qty: Number(item.qty || 1), serviceRevenue, productCost, assistantFee,
+          commissionBase: Math.max(0, Number(item.commissionBase ?? serviceRevenue - productCost - assistantFee) || 0),
+          distribution,
+        });
+      }
+    }
+    services.sort((first, second) => second.createdAt - first.createdAt);
+    return json({ period: { from: period.from, to: Math.min(period.to - 1, now) }, staff: matchedStaff, services });
+  }],
   'POST /api/appointments': [async ({ body }) => {
     const b: any = body;
     const context = currentContext();

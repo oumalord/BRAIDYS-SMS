@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Plus, Calendar, Clock, Pencil, Trash2 } from 'lucide-react';
+import { Plus, Calendar, Clock, Pencil, Search, Trash2 } from 'lucide-react';
 import { Card, Button, Badge, Modal, Field, Input, Select, EmptyState, LoadingState, toast } from '../components/ui';
 import { AppointmentsApi, StaffApi, ServicesApi, OrdersApi, fmtKES, fmtMoney } from '../lib/api';
 import POS from './POS';
-import type { Appointment, Staff, ServiceItem, AppointmentStatus, Role } from '../types';
+import type { Appointment, Staff, ServiceItem, AppointmentStatus, Role, WeeklyStaffWorkReport } from '../types';
 
 function todayStr() { return new Date().toISOString().slice(0, 10); }
 
@@ -48,6 +48,12 @@ function Appointments({ role }: { role: Role }) {
   const [completionEdit, setCompletionEdit] = useState<{ orderId: string; appointment: Appointment } | null>(null);
   const [completionLines, setCompletionLines] = useState<CompletionLine[]>([]);
   const [completionSummary, setCompletionSummary] = useState<{ appointment: Appointment; order: any } | null>(null);
+  const [weeklyStaffSearch, setWeeklyStaffSearch] = useState('');
+  const [weeklyStaffMatches, setWeeklyStaffMatches] = useState<Staff[]>([]);
+  const [weeklyStaffSelection, setWeeklyStaffSelection] = useState<Staff | null>(null);
+  const [weeklyStaffReport, setWeeklyStaffReport] = useState<WeeklyStaffWorkReport | null>(null);
+  const [weeklyStaffLoading, setWeeklyStaffLoading] = useState(false);
+  const [weeklyStaffError, setWeeklyStaffError] = useState('');
 
   useEffect(() => {
     Promise.all([StaffApi.list(), ServicesApi.list()]).then(([s, sv]) => { setStaff(s); setServices(sv); });
@@ -230,6 +236,33 @@ function Appointments({ role }: { role: Role }) {
     }
   };
 
+  const loadWeeklyStaffWork = async (member: Staff) => {
+    setWeeklyStaffSelection(member);
+    setWeeklyStaffLoading(true);
+    setWeeklyStaffError('');
+    try {
+      const report = await AppointmentsApi.staffWeeklyWork(member.id);
+      setWeeklyStaffReport(report);
+      if (!report.staff.some(item => item.id === member.id)) setWeeklyStaffError('No completed service records were found for this staff member this week.');
+    } catch (cause: any) {
+      setWeeklyStaffReport(null);
+      setWeeklyStaffError(cause?.message || 'Could not load this staff member’s weekly work.');
+    } finally {
+      setWeeklyStaffLoading(false);
+    }
+  };
+
+  const searchWeeklyStaff = () => {
+    const query = weeklyStaffSearch.trim().toLocaleLowerCase();
+    if (!query) { setWeeklyStaffError('Type a staff name to search.'); return; }
+    const matches = staff.filter(member => member.employmentStatus !== 'permanently-deleted' && member.name.toLocaleLowerCase().includes(query));
+    setWeeklyStaffMatches(matches);
+    setWeeklyStaffReport(null);
+    setWeeklyStaffSelection(null);
+    setWeeklyStaffError(matches.length ? '' : `No staff matching “${weeklyStaffSearch.trim()}” was found.`);
+    if (matches.length === 1) void loadWeeklyStaffWork(matches[0]);
+  };
+
   const orderByBookingTime = ['owner', 'admin', 'receptionist'].includes(role);
   const sorted = [...appts].sort((a, b) => {
     const bookingDifference = Number(b.createdAt || 0) - Number(a.createdAt || 0);
@@ -255,6 +288,38 @@ function Appointments({ role }: { role: Role }) {
           {canBookAppointments && <Button onClick={() => { setForm(current => ({ ...current, date })); setOpen(true); }}><Plus size={16} aria-hidden="true" />New Appointment</Button>}
         </div>
       </div>
+
+      {(role === 'owner' || role === 'admin') && <Card className="p-4 sm:p-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+          <div className="flex-1"><Field label="Search staff appointments and commissions this week" htmlFor="weekly-staff-search">
+            <Input id="weekly-staff-search" value={weeklyStaffSearch} onChange={event => setWeeklyStaffSearch(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); searchWeeklyStaff(); } }} placeholder="Enter a staff name, e.g. Njeru" />
+          </Field></div>
+          <Button onClick={searchWeeklyStaff} disabled={weeklyStaffLoading}><Search size={16} aria-hidden="true" />Search week</Button>
+        </div>
+        <p className="mt-2 text-xs text-[#6E6E73]">Shows service work completed Sunday–Saturday. Appointment date/card and POS completion date are both shown; each service lists the full staff commission split and whether each part was recorded paid.</p>
+        {weeklyStaffMatches.length > 1 && !weeklyStaffSelection && <div className="mt-3 flex flex-wrap gap-2" aria-label="Matching staff members">{weeklyStaffMatches.map(member => <Button key={member.id} size="sm" variant="secondary" onClick={() => void loadWeeklyStaffWork(member)}>{member.name} · {member.branchName || member.branch}</Button>)}</div>}
+        {weeklyStaffError && <p role="status" className="mt-3 text-sm text-amber-700">{weeklyStaffError}</p>}
+        {weeklyStaffLoading && <p className="mt-3 text-sm text-[#6E6E73]">Loading this week’s service and commission ledger…</p>}
+        {weeklyStaffReport && weeklyStaffSelection && !weeklyStaffLoading && (() => {
+          const memberLines = weeklyStaffReport.services.flatMap(service => service.distribution.filter(line => line.staffId === weeklyStaffSelection.id).map(line => ({ service, line })));
+          const paidTotal = memberLines.filter(entry => entry.line.paid).reduce((sum, entry) => sum + entry.line.amount, 0);
+          const unpaidTotal = memberLines.filter(entry => !entry.line.paid).reduce((sum, entry) => sum + entry.line.amount, 0);
+          const appointmentCount = new Set(memberLines.map(entry => entry.service.appointmentId || entry.service.orderId)).size;
+          return <div className="mt-5 space-y-4">
+            <div className="flex flex-col gap-2 border-b border-black/5 pb-3 sm:flex-row sm:items-end sm:justify-between">
+              <div><h2 className="font-semibold">{weeklyStaffSelection.name} · weekly completed work</h2><p className="text-xs text-[#6E6E73]">{new Date(weeklyStaffReport.period.from).toLocaleDateString()} – {new Date(weeklyStaffReport.period.to).toLocaleDateString()} · {appointmentCount} appointment/order(s) · {memberLines.length} service assignment(s)</p></div>
+              <div className="flex gap-4 text-sm"><span>Paid {fmtKES(paidTotal)}</span><span className="font-semibold">Unpaid {fmtKES(unpaidTotal)}</span></div>
+            </div>
+            {memberLines.length === 0 ? <EmptyState icon={Calendar} title="No completed service work this week" description="There are no completed POS service lines assigned to this staff member in this week’s ledger." /> : <div className="space-y-3">{memberLines.map(({ service, line }) => <div key={line.itemKey} className="rounded-xl border border-black/10 p-3 sm:p-4">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                <div><p className="font-medium">{service.customerName} · {service.serviceName}{service.qty > 1 ? ` × ${service.qty}` : ''}</p><p className="text-xs text-[#6E6E73]">Completed {new Date(service.createdAt).toLocaleString()}{service.appointmentDate ? ` · Appointment ${service.appointmentDate}${service.appointmentTime ? ` ${service.appointmentTime}` : ''}` : ' · Walk-in / no linked appointment'}{service.cardNumber ? ` · Card ${service.cardNumber}` : ''}</p><p className="text-xs text-[#6E6E73]">Service revenue {fmtKES(service.serviceRevenue)} · product cost {fmtKES(service.productCost)} · assistant fee deducted {fmtKES(service.assistantFee)} · commission base {fmtKES(service.commissionBase)}</p></div>
+                <p className="shrink-0 text-sm font-semibold">{line.role === 'assistant' ? 'Assistant fee' : 'Commission'} {fmtKES(line.amount)} · {line.paid ? 'Paid' : 'Unpaid'}</p>
+              </div>
+              <div className="mt-3 border-t border-black/5 pt-2"><p className="mb-1 text-xs font-semibold text-[#6E6E73]">Commission distribution for this service</p><div className="flex flex-wrap gap-x-4 gap-y-1">{service.distribution.map(distribution => <span key={distribution.itemKey} className={`text-xs ${distribution.staffId === weeklyStaffSelection.id ? 'font-semibold text-[#1D1D1F]' : 'text-[#6E6E73]'}`}>{distribution.staffName} · {distribution.role.replace('-', ' ')} {fmtKES(distribution.amount)} · {distribution.paid ? 'paid' : 'unpaid'}</span>)}</div></div>
+            </div>)}</div>}
+          </div>;
+        })()}
+      </Card>}
 
       {loading ? <LoadingState label="Loading appointments…" /> : sorted.length === 0 ? (
         <EmptyState icon={Calendar} title="No appointments" description="There are no appointments scheduled for this date yet." action={canBookAppointments ? <Button onClick={() => { setForm(current => ({ ...current, date })); setOpen(true); }}>Book an appointment</Button> : undefined} />

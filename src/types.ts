@@ -92,6 +92,39 @@ export interface Appointment {
   branchName?: string;
 }
 
+export interface WeeklyStaffEarningLine {
+  itemKey: string;
+  staffId: string;
+  staffName: string;
+  role: 'primary' | 'co-staff' | 'third-staff' | 'assistant';
+  amount: number;
+  paid: boolean;
+}
+
+export interface WeeklyStaffServiceWork {
+  orderId: string;
+  createdAt: number;
+  appointmentId: string | null;
+  appointmentDate: string | null;
+  appointmentTime: string | null;
+  cardNumber: string | null;
+  customerName: string;
+  appointmentStatus: AppointmentStatus | null;
+  serviceName: string;
+  qty: number;
+  serviceRevenue: number;
+  productCost: number;
+  assistantFee: number;
+  commissionBase: number;
+  distribution: WeeklyStaffEarningLine[];
+}
+
+export interface WeeklyStaffWorkReport {
+  period: { from: number; to: number };
+  staff: Staff[];
+  services: WeeklyStaffServiceWork[];
+}
+
 export type QueueStatus = 'waiting' | 'in-service' | 'completed';
 
 export interface QueueEntry {
