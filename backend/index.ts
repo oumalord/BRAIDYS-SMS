@@ -16,13 +16,13 @@ function saturdayFridayRange(date = new Date()) {
   return { from: fromDate.getTime(), to: toDate.getTime() };
 }
 
-function sundaySaturdayRange(date = new Date()) {
-  const current = new Date(date);
-  const fromDate = new Date(current);
-  fromDate.setDate(current.getDate() - current.getDay());
-  fromDate.setHours(0, 0, 0, 0);
-  const toDate = new Date(fromDate);
-  toDate.setDate(fromDate.getDate() + 7);
+function completedSaturdayFridayRange(date = new Date()) {
+  const today = new Date(date);
+  today.setHours(0, 0, 0, 0);
+  const daysSinceSaturday = (today.getDay() + 1) % 7;
+  const toDate = new Date(today);
+  const fromDate = new Date(today);
+  fromDate.setDate(today.getDate() - (daysSinceSaturday || 7));
   return { from: fromDate.getTime(), to: toDate.getTime() };
 }
 
@@ -484,14 +484,14 @@ export const handler = router({
     const dayStart = new Date();
     dayStart.setHours(0, 0, 0, 0);
     const todayFrom = dayStart.getTime();
-    const { from: weekFrom } = sundaySaturdayRange();
+    const { from: weekFrom, to: weekTo } = completedSaturdayFridayRange();
 
     const [{ items: orders }, { items: payoutItems }, { items: appointments }] = await Promise.all([
       db.list('orders', { limit: 5000 }),
       db.list('payout_items', { limit: 10000 }),
       db.list('appointments', { limit: 5000 }),
     ]);
-    const unpaidEarnings = calculateUnpaidStaffEarnings(orders as any[], payoutItems as any[], appointments as any[], weekFrom, now);
+    const unpaidEarnings = calculateUnpaidStaffEarnings(orders as any[], payoutItems as any[], appointments as any[], weekFrom, weekTo);
     const orderCreatedAtById = new Map((orders as any[]).map(order => [String(order.id), Number(order.createdAt || 0)]));
     const paidHistory = (payoutItems as any[])
       .filter(item => !item.deletedAt && item.staffId === context.staffId)
@@ -827,8 +827,7 @@ export const handler = router({
     const search = String(query.name || '').trim().toLowerCase();
     const requestedStaffId = String(query.staffId || '').trim();
     if (!search && !requestedStaffId) return error('Enter a staff name to search', 400);
-    const period = sundaySaturdayRange();
-    const now = Date.now();
+    const period = completedSaturdayFridayRange();
     const [{ items: staffRows }, { items: orders }, { items: appointmentRows }, { items: payoutItems }] = await Promise.all([
       db.list('staff', { limit: 2000 }),
       db.list('orders', { limit: 5000 }),
@@ -841,12 +840,12 @@ export const handler = router({
       const exactMatches = matchedStaff.filter(member => String(member.name || '').trim().toLowerCase() === search);
       if (exactMatches.length) matchedStaff = exactMatches;
     }
-    if (!matchedStaff.length) return json({ period: { from: period.from, to: Math.min(period.to - 1, now) }, staff: [], services: [] });
+    if (!matchedStaff.length) return json({ period: { from: period.from, to: period.to - 1 }, staff: [], services: [] });
 
     const staffById = new Map((staffRows as any[]).map(member => [String(member.id), member]));
     const appointmentsById = new Map((appointmentRows as any[]).filter((appointment: any) => !appointment.deletedAt).map((appointment: any) => [String(appointment.id), appointment]));
     const activePaidKeys = new Set((payoutItems as any[]).filter(item => !item.deletedAt).map(item => String(item.itemKey || '')));
-    const earningLines = calculateUnpaidStaffEarnings(orders as any[], [], appointmentRows as any[], period.from, now + 1);
+    const earningLines = calculateUnpaidStaffEarnings(orders as any[], [], appointmentRows as any[], period.from, period.to);
     const selectedStaffIds = new Set(matchedStaff.map(member => String(member.id)));
     const staffLineKey = (orderId: string, itemIndex: number) => `${orderId}:${itemIndex}`;
     const services: any[] = [];
@@ -1540,14 +1539,14 @@ export const handler = router({
     if (!context || !['owner', 'admin'].includes(context.role)) return error('Only the owner or administrator can view payroll staff', 403);
     const now = Date.now();
     const { items } = await db.list('staff', { limit: 2000 });
-    const period = sundaySaturdayRange();
+    const period = completedSaturdayFridayRange();
     const { from } = period;
     const [{ items: orders }, { items: deletedPayoutItems }, { items: appointments }] = await Promise.all([
       db.list('orders', { limit: 5000 }),
       db.list('payout_items', { limit: 10000 }),
       db.list('appointments', { limit: 5000 }),
     ]);
-    const unpaidEarnings = calculateUnpaidStaffEarnings(orders as any[], deletedPayoutItems as any[], appointments as any[], from, now);
+    const unpaidEarnings = calculateUnpaidStaffEarnings(orders as any[], deletedPayoutItems as any[], appointments as any[], from, period.to);
     const totals = new Map<string, { commission: number; assistant: number }>();
     for (const earning of unpaidEarnings) {
       const total = totals.get(earning.staffId) || { commission: 0, assistant: 0 };
@@ -1561,7 +1560,7 @@ export const handler = router({
         commissionEarnedWeek: totals.get(member.id)?.commission || 0,
         assistantEarnedWeek: totals.get(member.id)?.assistant || 0,
       })),
-      period: { from, to: Math.min(period.to - 1, Date.now()) },
+      period: { from, to: period.to - 1 },
     });
   }],
   'POST /api/earnings/delete': [async ({ body }) => {
