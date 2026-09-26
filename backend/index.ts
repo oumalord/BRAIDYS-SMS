@@ -15,6 +15,16 @@ function saturdayFridayRange(date = new Date()) {
   return { from: fromDate.getTime(), to: toDate.getTime() };
 }
 
+function sundaySaturdayRange(date = new Date()) {
+  const current = new Date(date);
+  const fromDate = new Date(current);
+  fromDate.setDate(current.getDate() - current.getDay());
+  fromDate.setHours(0, 0, 0, 0);
+  const toDate = new Date(fromDate);
+  toDate.setDate(fromDate.getDate() + 7);
+  return { from: fromDate.getTime(), to: toDate.getTime() };
+}
+
 function passwordHash(password: string, salt = randomBytes(16).toString('hex')) {
   return `${salt}:${scryptSync(password, salt, 64).toString('hex')}`;
 }
@@ -494,13 +504,15 @@ export const handler = router({
     const dayStart = new Date();
     dayStart.setHours(0, 0, 0, 0);
     const todayFrom = dayStart.getTime();
-    const { from: weekFrom } = saturdayFridayRange();
+    const { from: weekFrom } = sundaySaturdayRange();
 
-    const [{ items: orders }, { items: payoutItems }] = await Promise.all([
+    const [{ items: orders }, { items: payoutItems }, { items: appointments }] = await Promise.all([
       db.list('orders', { limit: 5000 }),
       db.list('payout_items', { limit: 10000 }),
+      db.list('appointments', { limit: 5000 }),
     ]);
-    const paidEarningKeys = new Set((payoutItems as any[]).map(item => item.itemKey));
+    const paidEarningKeys = new Set((payoutItems as any[]).filter(item => !item.deletedAt).map(item => item.itemKey));
+    const appointmentsById = new Map((appointments as any[]).map(appointment => [appointment.id, appointment]));
     const paidHistory = (payoutItems as any[])
       .filter(item => !item.deletedAt && item.staffId === context.staffId)
       .map(item => ({ serviceName: item.serviceName || item.orderId || 'Paid earning', createdAt: item.createdAt, role: item.role === 'assistant' ? 'assistant' : 'commission', amount: Number(item.commission || 0) }));
@@ -516,9 +528,12 @@ export const handler = router({
       for (const [index, item] of (order.items || []).entries()) {
         if (item.type !== 'service') continue;
         const itemKey = `${order.id}:${index}`;
+        const linkedAppointment: any = appointmentsById.get(String(order.appointmentId || ''));
+        const primaryStaffId = item.staffId || linkedAppointment?.staffId;
+        const earningItem = primaryStaffId === item.staffId ? item : { ...item, staffId: primaryStaffId, staffName: item.staffName || linkedAppointment?.staffName };
         const assistant = Number(item.assistantPayment ?? item.helperDeduction ?? 0) || 0;
-        if (!paidEarningKeys.has(itemKey) && String(item.staffId || '') === String(context.staffId || '')) {
-          const commission = staffCommission(item, item.staffId);
+        if (!paidEarningKeys.has(itemKey) && String(primaryStaffId || '') === String(context.staffId || '')) {
+          const commission = staffCommission(earningItem, primaryStaffId);
           if (order.createdAt >= todayFrom) todayCommission += commission;
           if (order.createdAt >= weekFrom) fortnightCommission += commission;
           completedWork.push({ serviceName: item.name || 'Service', createdAt: order.createdAt, role: 'commission', amount: commission });
@@ -557,7 +572,7 @@ export const handler = router({
     await db.deleteOlderThan('audit_logs', Date.now() - 14 * DAY);
     const { items } = await db.list('audit_logs', { limit: 5000 });
     const collection = query.collection;
-    const filtered = collection ? (items as any[]).filter(log => log.collection === collection) : items;
+    const filtered = (items as any[]).filter(log => !log.deletedAt && (!collection || log.collection === collection));
     return json({ items: (filtered as any[]).sort((a, b) => b.createdAt - a.createdAt) });
   }],
 
@@ -862,7 +877,7 @@ export const handler = router({
     const items = Array.isArray(b.items) && b.items.length ? b.items : b.serviceId ? [{ serviceId: b.serviceId, serviceName: b.serviceName, price: b.price || 0, currency: b.currency || 'KES', durationMin: b.durationMin || 30, staffId: b.staffId, staffName: b.staffName }] : requestedCategories.length ? [{ serviceId: null, serviceName: `Requested: ${requestedCategories.join(' + ')}`, price: 0, currency: 'KES', durationMin: 30, staffId: b.staffId, staffName: b.staffName }] : [];
     const appointmentDate = b.date || new Date().toISOString().slice(0, 10);
     const appointmentTime = b.time || '00:00';
-    if (b.cardNumber && !['owner', 'admin', 'receptionist'].includes(context?.role || '')) return error('Only the owner, administrator or receptionist can add a card number', 403);
+    if (b.cardNumber && !['owner', 'admin', 'manager', 'receptionist'].includes(context?.role || '')) return error('Only the owner, administrator, manager or receptionist can add a card number', 403);
     let cardNumber = '';
     try { cardNumber = appointmentCardNumber(b.cardNumber); } catch (cause: any) { return error(cause.message, 400); }
     if (!b.customerName || items.length === 0) return error('Missing required appointment fields', 400);
@@ -926,12 +941,12 @@ export const handler = router({
   }],
   'PUT /api/appointments/:id': [async ({ params, body }) => {
     const context = currentContext();
-    if (!context || !['owner', 'admin', 'receptionist', 'barber'].includes(context.role)) return error('You are not allowed to update appointments', 403);
+    if (!context || !['owner', 'admin', 'manager', 'receptionist', 'barber'].includes(context.role)) return error('You are not allowed to update appointments', 403);
     const [existing] = await db.get('appointments', [params.id]);
     if (!existing) return error('Appointment not found', 404);
     const patch: any = body;
     const canManageCardNumber = ['owner', 'admin', 'receptionist'].includes(context.role);
-    if ('cardNumber' in patch && !canManageCardNumber) return error('Only the owner, administrator or receptionist can add a card number', 403);
+    if ('cardNumber' in patch && !canManageCardNumber && String(patch.cardNumber || '') !== String(existing.cardNumber || '')) return error('Only the owner, administrator or receptionist can change a card number', 403);
     if (existing.cardNumber && 'cardNumber' in patch && String(patch.cardNumber || '') !== String(existing.cardNumber)) return error('A card number cannot be changed after it is entered', 409);
     if ('cardNumber' in patch) {
       try { patch.cardNumber = appointmentCardNumber(patch.cardNumber); } catch (cause: any) { return error(cause.message, 400); }
@@ -940,9 +955,9 @@ export const handler = router({
     const isCancellation = patch.status === 'cancelled' || patch.status === 'no-show';
     const isStatusOnlyChange = Object.keys(patch).length === 1 && 'status' in patch;
     if (context.role === 'barber' && existing.staffId !== context.staffId) return error('You can only update appointments assigned to you', 403);
-    if (!isCancellation && !isStatusOnlyChange && !['owner', 'admin', 'receptionist'].includes(context.role)) return error('Only the owner, administrator or receptionist can edit appointment details', 403);
+    if (!isCancellation && !isStatusOnlyChange && !['owner', 'admin', 'manager', 'receptionist'].includes(context.role)) return error('Only the owner, administrator, manager or receptionist can edit appointment details', 403);
     const editsDetails = patch.date || patch.time || patch.serviceId || patch.durationMin || 'staffId' in patch;
-    if (editsDetails && !['owner', 'admin', 'receptionist'].includes(currentContext()?.role || '')) return error('Only the owner, administrator or receptionist can edit appointment details', 403);
+    if (editsDetails && !['owner', 'admin', 'manager', 'receptionist'].includes(currentContext()?.role || '')) return error('Only the owner, administrator, manager or receptionist can edit appointment details', 403);
     if (!canManageClosedAppointments && ['completed', 'cancelled', 'no-show'].includes(existing.status) && (patch.date || patch.time || patch.serviceId || 'staffId' in patch)) return error('Completed or closed appointments can only be edited by the owner or administrator', 409);
     const nextDate = patch.date || existing.date;
     const nextTime = patch.time || existing.time;
@@ -1139,7 +1154,7 @@ export const handler = router({
     if (!context) return error('Please log in.', 401);
     const appointmentId = String(query.appointmentId || '');
     const { items } = await db.list('pos_drafts', { limit: 5000 });
-    const draft = (items as any[]).find(item => item.accountId === context.accountId && String(item.appointmentId || '') === appointmentId && String(item.branchId || '') === String(context.branchId || ''));
+    const draft = (items as any[]).find(item => !item.deletedAt && item.accountId === context.accountId && String(item.appointmentId || '') === appointmentId && String(item.branchId || '') === String(context.branchId || ''));
     return json({ item: draft || null });
   }],
   'POST /api/pos-drafts': [async ({ body }) => {
@@ -1149,7 +1164,7 @@ export const handler = router({
     if (!Array.isArray(draft.cart) || !draft.cart.length) return error('Add a service or product before saving a draft', 400);
     const appointmentId = String(draft.appointmentId || '');
     const { items } = await db.list('pos_drafts', { limit: 5000 });
-    const existing = (items as any[]).filter(item => item.accountId === context.accountId && String(item.appointmentId || '') === appointmentId && String(item.branchId || '') === String(context.branchId || ''));
+    const existing = (items as any[]).filter(item => !item.deletedAt && item.accountId === context.accountId && String(item.appointmentId || '') === appointmentId && String(item.branchId || '') === String(context.branchId || ''));
     if (existing.length) await db.delete('pos_drafts', existing.map(item => item.id));
     const [id] = await db.add('pos_drafts', [{ accountId: context.accountId, appointmentId, cart: draft.cart, customerId: String(draft.customerId || ''), discountPct: Math.max(0, Number(draft.discountPct || 0)), promoCode: String(draft.promoCode || ''), redeemPoints: Math.max(0, Number(draft.redeemPoints || 0)), paymentMethod: String(draft.paymentMethod || 'M-Pesa'), savedAt: Date.now() }]);
     return json({ id });
@@ -1159,7 +1174,7 @@ export const handler = router({
     if (!context) return error('Please log in.', 401);
     const appointmentId = String(query.appointmentId || '');
     const { items } = await db.list('pos_drafts', { limit: 5000 });
-    const ids = (items as any[]).filter(item => item.accountId === context.accountId && String(item.appointmentId || '') === appointmentId && String(item.branchId || '') === String(context.branchId || '')).map(item => item.id);
+    const ids = (items as any[]).filter(item => !item.deletedAt && item.accountId === context.accountId && String(item.appointmentId || '') === appointmentId && String(item.branchId || '') === String(context.branchId || '')).map(item => item.id);
     if (ids.length) await db.delete('pos_drafts', ids);
     return json({ ok: true });
   }],
@@ -1504,23 +1519,29 @@ export const handler = router({
     const context = currentContext();
     if (!context || !['owner', 'admin'].includes(context.role)) return error('Only the owner or administrator can view payroll staff', 403);
     const { items } = await db.list('staff', { limit: 2000 });
-    const from = saturdayFridayRange().from;
-    const [{ items: orders }, { items: deletedPayoutItems }] = await Promise.all([
+    const period = sundaySaturdayRange();
+    const { from } = period;
+    const [{ items: orders }, { items: deletedPayoutItems }, { items: appointments }] = await Promise.all([
       db.list('orders', { limit: 5000 }),
       db.list('payout_items', { limit: 10000 }),
+      db.list('appointments', { limit: 5000 }),
     ]);
-    const paidEarningKeys = new Set((deletedPayoutItems as any[]).map(item => item.itemKey));
+    const paidEarningKeys = new Set((deletedPayoutItems as any[]).filter(item => !item.deletedAt).map(item => item.itemKey));
+    const appointmentsById = new Map((appointments as any[]).map(appointment => [appointment.id, appointment]));
     const totals = new Map<string, { commission: number; assistant: number }>();
     for (const order of orders as any[]) {
       if (order.deletedAt) continue;
-      if (!order.createdAt || order.createdAt < from) continue;
+      if (!order.createdAt || order.createdAt < from || order.createdAt >= period.to) continue;
       for (const [index, item] of (order.items || []).entries()) {
         if (item.type !== 'service') continue;
         const itemKey = `${order.id}:${index}`;
-        if (item.staffId && !paidEarningKeys.has(itemKey)) {
-          const total = totals.get(item.staffId) || { commission: 0, assistant: 0 };
-          total.commission += staffCommission(item, item.staffId);
-          totals.set(item.staffId, total);
+        const linkedAppointment: any = appointmentsById.get(String(order.appointmentId || ''));
+        const primaryStaffId = item.staffId || linkedAppointment?.staffId;
+        const earningItem = primaryStaffId === item.staffId ? item : { ...item, staffId: primaryStaffId, staffName: item.staffName || linkedAppointment?.staffName };
+        if (primaryStaffId && !paidEarningKeys.has(itemKey)) {
+          const total = totals.get(primaryStaffId) || { commission: 0, assistant: 0 };
+          total.commission += staffCommission(earningItem, primaryStaffId);
+          totals.set(primaryStaffId, total);
         }
         if (item.coStaffId && !paidEarningKeys.has(`${itemKey}:co-staff`)) {
           const total = totals.get(item.coStaffId) || { commission: 0, assistant: 0 };
@@ -1539,7 +1560,14 @@ export const handler = router({
         }
       }
     }
-    return json({ items: (items as any[]).map(member => ({ ...member, commissionEarned14Days: totals.get(member.id)?.commission || 0, assistantEarned14Days: totals.get(member.id)?.assistant || 0 })) });
+    return json({
+      items: (items as any[]).filter(member => !member.deletedAt).map(member => ({
+        ...member,
+        commissionEarnedWeek: totals.get(member.id)?.commission || 0,
+        assistantEarnedWeek: totals.get(member.id)?.assistant || 0,
+      })),
+      period: { from, to: Math.min(period.to - 1, Date.now()) },
+    });
   }],
   'POST /api/earnings/delete': [async ({ body }) => {
     const context = currentContext();
@@ -1567,15 +1595,17 @@ export const handler = router({
     const now = Date.now();
     let from = 0;
     if (range === 'today') { const day = new Date(); day.setHours(0, 0, 0, 0); from = day.getTime(); }
-    if (range === 'week') from = saturdayFridayRange().from;
+    if (range === 'week') from = sundaySaturdayRange().from;
     if (range === 'fortnight') from = now - 14 * DAY;
     if (range === 'month') from = now - 30 * DAY;
 
-    const [{ items: orders }, { items: staff }, { items: paidItems }] = await Promise.all([
+    const [{ items: orders }, { items: staff }, { items: paidItems }, { items: appointments }] = await Promise.all([
       db.list('orders', { limit: 5000 }),
       db.list('staff', { limit: 2000 }),
       db.list('payout_items', { limit: 10000 }),
+      db.list('appointments', { limit: 5000 }),
     ]);
+    const appointmentsById = new Map((appointments as any[]).map(appointment => [appointment.id, appointment]));
     const staffById = new Map((staff as any[]).map(member => [member.id, member]));
     const alreadyPaid = new Set((paidItems as any[]).filter(item => !item.deletedAt).map(item => item.itemKey));
     const lines: any[] = [];
@@ -1583,13 +1613,17 @@ export const handler = router({
       if (order.deletedAt) continue;
       if (!order.createdAt || order.createdAt < from || order.createdAt >= now) continue;
       (order.items || []).forEach((item: any, index: number) => {
-        if (item.type !== 'service' || !item.staffId) return;
-        const member = staffById.get(item.staffId);
-        if (!member) return;
+        if (item.type !== 'service') return;
+        const linkedAppointment: any = appointmentsById.get(String(order.appointmentId || ''));
+        const primaryStaffId = item.staffId || linkedAppointment?.staffId;
+        if (!primaryStaffId) return;
+        const earningItem = primaryStaffId === item.staffId ? item : { ...item, staffId: primaryStaffId, staffName: item.staffName || linkedAppointment?.staffName };
+        const primaryMember: any = staffById.get(primaryStaffId);
+        if (!primaryMember) return;
         const revenue = Number(item.lineTotalAfterDiscount ?? item.price * item.qty) || 0;
         const commissionBase = Math.max(0, Number(item.commissionBase ?? (revenue - Number(item.productCost || 0) - Number(item.assistantPayment ?? item.helperDeduction ?? 0))) || 0);
-        const commission = serviceCommission(item);
-        if (!alreadyPaid.has(`${order.id}:${index}`)) lines.push({ itemKey: `${order.id}:${index}`, orderId: order.id, serviceName: item.name || 'Service', staffId: item.staffId, staffName: item.staffName || member.name, revenue, commissionBase, helperDeduction: Number(item.helperDeduction || 0), productCost: Number(item.productCost || 0), commission, currency: item.currency || 'KES', branchId: order.branchId || context.branchId || null, createdAt: now });
+        const commission = staffCommission(earningItem, primaryStaffId);
+        if (!alreadyPaid.has(`${order.id}:${index}`)) lines.push({ itemKey: `${order.id}:${index}`, orderId: order.id, serviceName: item.name || 'Service', staffId: primaryStaffId, staffName: item.staffName || linkedAppointment?.staffName || primaryMember.name, revenue, commissionBase, helperDeduction: Number(item.helperDeduction || 0), productCost: Number(item.productCost || 0), commission, currency: item.currency || 'KES', branchId: order.branchId || context.branchId || null, createdAt: now });
         if (item.coStaffId && !alreadyPaid.has(`${order.id}:${index}:co-staff`)) {
           const coStaff = staffById.get(item.coStaffId);
           if (coStaff) lines.push({ itemKey: `${order.id}:${index}:co-staff`, orderId: order.id, serviceName: item.name || 'Service', staffId: item.coStaffId, staffName: item.coStaffName || coStaff.name, revenue, commissionBase, helperDeduction: Number(item.helperDeduction || 0), productCost: Number(item.productCost || 0), commission: Number(item.coStaffCommission ?? 0), currency: item.currency || 'KES', branchId: order.branchId || context.branchId || null, createdAt: now, role: 'co-staff' });
@@ -1663,7 +1697,7 @@ export const handler = router({
     const [ordersResult, expensesResult, staffResult, productsResult, appointmentsResult, queueResult, customersResult] = await Promise.all([
       db.list('orders', { limit: 5000 }),
       db.list('expenses', { limit: 500 }),
-      db.list('staff', { limit: 200 }),
+      db.list('staff', { limit: 2000 }),
       db.list('products', { limit: 500 }),
       db.list('appointments', { limit: 1000 }),
       db.list('queue', { limit: 200 }),
@@ -1679,6 +1713,7 @@ export const handler = router({
 
     const staffById = new Map(staffAll.map((s: any) => [s.id, s]));
     const productById = new Map(productsAll.map((p: any) => [p.id, p]));
+    const appointmentById = new Map(appts.map((appointment: any) => [appointment.id, appointment]));
 
     const rangeOrders = (orders as any[]).filter(o => !o.deletedAt && o.createdAt >= cutoff);
     const paymentMethodTotals: Record<'Cash' | 'Card' | 'M-Pesa', number> = { Cash: 0, Card: 0, 'M-Pesa': 0 };
@@ -1693,6 +1728,21 @@ export const handler = router({
     let productCost = 0;
     const commissionsByCurrency: Record<string, number> = {};
     const staffRevenue = new Map<string, { name: string; currency: string; revenue: number; commission: number; helperDeductions: number; count: number }>();
+    const staffEarnings = new Map<string, { staffId: string; name: string; currency: string; revenue: number; commission: number; assistantEarnings: number; helperDeductions: number; count: number }>();
+    const addStaffEarning = (staffId: unknown, currency: string, values: { revenue?: number; commission?: number; assistantEarnings?: number; helperDeductions?: number; count?: number }) => {
+      if (!staffId) return;
+      const id = String(staffId);
+      const member: any = staffById.get(id);
+      const key = `${id}|${currency}`;
+      const entry = staffEarnings.get(key) || { staffId: id, name: member?.name || 'Unknown', currency, revenue: 0, commission: 0, assistantEarnings: 0, helperDeductions: 0, count: 0 };
+      entry.revenue += values.revenue || 0;
+      entry.commission += values.commission || 0;
+      entry.assistantEarnings += values.assistantEarnings || 0;
+      entry.helperDeductions += values.helperDeductions || 0;
+      entry.count += values.count || 0;
+      staffEarnings.set(key, entry);
+    };
+    for (const member of staffAll as any[]) addStaffEarning(member.id, 'KES', {});
     const serviceRevenue = new Map<string, { name: string; currency: string; revenue: number; count: number }>();
     const commissionByClient: any[] = [];
     for (const o of rangeOrders) {
@@ -1702,17 +1752,22 @@ export const handler = router({
           const p: any = productById.get(it.refId);
           if (p) productCost += (p.cost || 0) * it.qty;
         } else if (it.type === 'service') {
-          const staff: any = it.staffId ? staffById.get(it.staffId) : null;
+          const linkedAppointment: any = appointmentById.get(String(o.appointmentId || ''));
+          const primaryStaffId = it.staffId || linkedAppointment?.staffId || null;
+          const primaryStaffName = it.staffName || (primaryStaffId === linkedAppointment?.staffId ? linkedAppointment?.staffName : '') || '';
+          const earningItem = primaryStaffId === it.staffId ? it : { ...it, staffId: primaryStaffId, staffName: primaryStaffName };
+          const staff: any = primaryStaffId ? staffById.get(primaryStaffId) : null;
           const serviceRevenueAfterDiscount = it.lineTotalAfterDiscount ?? it.price * it.qty;
-          const comm = staffCommission(it, it.staffId);
+          const comm = staffCommission(earningItem, primaryStaffId);
           const assistantAmount = Number(it.assistantPayment ?? it.helperDeduction ?? 0);
-          commissionsByCurrency[cur] = (commissionsByCurrency[cur] || 0) + comm;
-          if (it.staffId) {
-            const key = `${it.staffId}|${cur}`;
-            const entry = staffRevenue.get(key) || { name: it.staffName || 'Unknown', currency: cur, revenue: 0, commission: 0, helperDeductions: 0, count: 0 };
+          commissionsByCurrency[cur] = (commissionsByCurrency[cur] || 0) + comm + assistantAmount;
+          if (primaryStaffId) {
+            const key = `${primaryStaffId}|${cur}`;
+            const entry = staffRevenue.get(key) || { name: primaryStaffName || staff?.name || 'Unknown', currency: cur, revenue: 0, commission: 0, helperDeductions: 0, count: 0 };
             entry.revenue += serviceRevenueAfterDiscount; entry.commission += comm; entry.helperDeductions += assistantAmount; entry.count += it.qty;
             staffRevenue.set(key, entry);
-            commissionByClient.push({ clientId: o.customerId || null, clientName: o.customerName || 'Walk-in Customer', staffName: it.staffName || staff.name, serviceName: it.name, revenue: serviceRevenueAfterDiscount, assistantPayment: assistantAmount, commission: comm, currency: cur, createdAt: o.createdAt });
+            addStaffEarning(primaryStaffId, cur, { revenue: serviceRevenueAfterDiscount, commission: comm, helperDeductions: assistantAmount, count: Number(it.qty || 1) });
+            commissionByClient.push({ clientId: o.customerId || null, clientName: o.customerName || 'Walk-in Customer', staffName: primaryStaffName || staff?.name || 'Unknown', serviceName: it.name, revenue: serviceRevenueAfterDiscount, assistantPayment: assistantAmount, commission: comm, currency: cur, createdAt: o.createdAt });
           }
           if (it.coStaffId) {
             const coStaff: any = staffById.get(it.coStaffId);
@@ -1722,6 +1777,7 @@ export const handler = router({
             const entry = staffRevenue.get(key) || { name: it.coStaffName || coStaff?.name || 'Unknown', currency: cur, revenue: 0, commission: 0, helperDeductions: 0, count: 0 };
             entry.revenue += serviceRevenueAfterDiscount; entry.commission += coStaffCommission; entry.count += it.qty;
             staffRevenue.set(key, entry);
+            addStaffEarning(it.coStaffId, cur, { revenue: serviceRevenueAfterDiscount, commission: coStaffCommission, count: Number(it.qty || 1) });
             commissionByClient.push({ clientId: o.customerId || null, clientName: o.customerName || 'Walk-in Customer', staffName: it.coStaffName || coStaff?.name || 'Unknown', serviceName: it.name, revenue: serviceRevenueAfterDiscount, assistantPayment: 0, commission: coStaffCommission, currency: cur, createdAt: o.createdAt });
           }
           if (it.thirdStaffId) {
@@ -1732,8 +1788,10 @@ export const handler = router({
             const entry = staffRevenue.get(key) || { name: it.thirdStaffName || thirdStaff?.name || 'Unknown', currency: cur, revenue: 0, commission: 0, helperDeductions: 0, count: 0 };
             entry.revenue += serviceRevenueAfterDiscount; entry.commission += thirdStaffCommission; entry.count += it.qty;
             staffRevenue.set(key, entry);
+            addStaffEarning(it.thirdStaffId, cur, { revenue: serviceRevenueAfterDiscount, commission: thirdStaffCommission, count: Number(it.qty || 1) });
             commissionByClient.push({ clientId: o.customerId || null, clientName: o.customerName || 'Walk-in Customer', staffName: it.thirdStaffName || thirdStaff?.name || 'Unknown', serviceName: it.name, revenue: serviceRevenueAfterDiscount, assistantPayment: 0, commission: thirdStaffCommission, currency: cur, createdAt: o.createdAt });
           }
+          if (it.helperStaffId) addStaffEarning(it.helperStaffId, cur, { assistantEarnings: assistantAmount, count: Number(it.qty || 1) });
           const skey = `${it.name}|${cur}`;
           const s = serviceRevenue.get(skey) || { name: it.name, currency: cur, revenue: 0, count: 0 };
           s.revenue += serviceRevenueAfterDiscount; s.count += it.qty;
@@ -1775,6 +1833,7 @@ export const handler = router({
       customersCount: customersAll.length,
       customers: customersAll.slice(0, 10),
       commissionByClient,
+      staffEarnings: Array.from(staffEarnings.values()).sort((a, b) => a.name.localeCompare(b.name) || a.currency.localeCompare(b.currency)),
       topStaff: Array.from(staffRevenue.values()).sort((a, b) => b.revenue - a.revenue).slice(0, 8),
       topServices: Array.from(serviceRevenue.values()).sort((a, b) => b.revenue - a.revenue).slice(0, 8),
       trend,

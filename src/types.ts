@@ -15,8 +15,8 @@ export interface Staff {
   employmentStatus?: 'active' | 'laid-off';
   branchId?: string;
   branchName?: string;
-  commissionEarned14Days?: number;
-  assistantEarned14Days?: number;
+  commissionEarnedWeek?: number;
+  assistantEarnedWeek?: number;
 }
 
 export interface Branch {
@@ -197,6 +197,7 @@ export interface DashboardData {
   customers: Customer[];
   topStaff: { name: string; currency: Currency; revenue: number; commission: number; helperDeductions: number; count: number }[];
   commissionByClient: { clientId: string | null; clientName: string; staffName: string; serviceName: string; revenue: number; assistantPayment: number; commission: number; currency: Currency; createdAt: number }[];
+  staffEarnings: { staffId: string; name: string; currency: Currency; revenue: number; commission: number; assistantEarnings: number; helperDeductions: number; count: number }[];
   topServices: { name: string; currency: Currency; revenue: number; count: number }[];
   trend: { date: string; revenue: number }[];
 }

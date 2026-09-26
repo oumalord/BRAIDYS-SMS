@@ -96,18 +96,23 @@ export const db = {
     return updates.map(() => true);
   },
   async delete(collection: string, ids: string[]) {
-    await init();
     if (!ids.length) return true;
     const context = currentContext();
-    if (context?.role === 'admin') await sql`DELETE FROM app_records WHERE collection = ${collection} AND id = ANY(${ids})`;
-    else await sql`DELETE FROM app_records WHERE collection = ${collection} AND (tenant_id = ${context?.tenantId || null} OR record->>'tenantId' = ${context?.tenantId || null}) AND id = ANY(${ids})`;
+    const records = await this.get(collection, ids);
+    const deletedAt = Date.now();
+    const updates = records.flatMap(record => record && !record.deletedAt
+      ? [{ id: record.id, record: { ...record, deletedAt, deletedBy: context?.name || 'system' } }]
+      : []);
+    if (updates.length) await this.update(collection, updates);
     return true;
   },
   async deleteOlderThan(collection: string, timestamp: number) {
-    await init();
     const context = currentContext();
-    if (context?.role === 'admin') await sql`DELETE FROM app_records WHERE collection = ${collection} AND COALESCE((record->>'createdAt')::bigint, 0) < ${timestamp}`;
-    else await sql`DELETE FROM app_records WHERE collection = ${collection} AND (tenant_id = ${context?.tenantId || null} OR record->>'tenantId' = ${context?.tenantId || null}) AND COALESCE((record->>'createdAt')::bigint, 0) < ${timestamp}`;
+    const { items } = await this.list(collection, { limit: 5000 });
+    const deletedAt = Date.now();
+    const updates = items.filter(record => !record.deletedAt && Number(record.createdAt || 0) < timestamp)
+      .map(record => ({ id: record.id, record: { ...record, deletedAt, deletedBy: context?.name || 'retention policy' } }));
+    if (updates.length) await this.update(collection, updates);
     return true;
   },
 };

@@ -37,11 +37,12 @@ function OwnerReport({ range }: { range: Range }) {
   const profitKES = data.estimatedProfitByCurrency.KES || 0;
 
   const commissionStatement = staff.map(s => {
-    const perf = data.topStaff.filter(t => t.name === s.name);
-    const commission = perf.reduce((sum, p) => sum + (p.currency === 'KES' ? p.commission : 0), 0);
-    const serviceRevenue = perf.reduce((sum, p) => sum + (p.currency === 'KES' ? p.revenue : 0), 0);
-    const helperDeductions = perf.reduce((sum, p) => sum + (p.currency === 'KES' ? p.helperDeductions : 0), 0);
-    return { name: s.name, role: s.role, serviceRevenue, helperDeductions, commission };
+    const earnings = data.staffEarnings.filter(item => item.staffId === s.id && item.currency === 'KES');
+    const commission = earnings.reduce((sum, item) => sum + item.commission, 0);
+    const assistantEarnings = earnings.reduce((sum, item) => sum + item.assistantEarnings, 0);
+    const serviceRevenue = earnings.reduce((sum, item) => sum + item.revenue, 0);
+    const helperDeductions = earnings.reduce((sum, item) => sum + item.helperDeductions, 0);
+    return { name: s.name, role: s.role, serviceRevenue, helperDeductions, commission, assistantEarnings };
   });
 
   const handleDownload = () => {
@@ -54,12 +55,12 @@ function OwnerReport({ range }: { range: Range }) {
       ['Card payments (KES)', data.paymentMethodTotals.Card],
       ['M-Pesa payments (KES)', data.paymentMethodTotals['M-Pesa']],
       ['Product Cost (KES)', data.productCost],
-      ['Commissions (KES)', commissionsKES],
+      ['Staff earnings (KES)', commissionsKES],
       ['Expenses (KES)', data.expenseTotal],
       ['Net Profit after commission and expenses (KES)', profitKES],
       [],
-      ['Staff', 'Role', 'Service Revenue (KES)', 'Assistant Payments (KES)', 'Commission Rate', 'Expected Income (KES)'],
-      ...commissionStatement.map(p => [p.name, p.role, Math.round(p.serviceRevenue), Math.round(p.helperDeductions), '50%', Math.round(p.commission)]),
+      ['Staff', 'Role', 'Service Revenue (KES)', 'Assistant Fees Deducted (KES)', 'Commission (KES)', 'Assistant Earnings (KES)', 'Expected Income (KES)'],
+      ...commissionStatement.map(p => [p.name, p.role, Math.round(p.serviceRevenue), Math.round(p.helperDeductions), Math.round(p.commission), Math.round(p.assistantEarnings), Math.round(p.commission + p.assistantEarnings)]),
     ];
     downloadCSV(`safigroom-owner-report-${range}.csv`, rows);
   };
@@ -69,7 +70,7 @@ function OwnerReport({ range }: { range: Range }) {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard label="Revenue" value={fmtMoney(revenueKES, 'KES')} icon={TrendingUp} tone="success" />
         <StatCard label="Commission Rate" value="50%" sub="After product and helper deductions" icon={Users} />
-        <StatCard label="Commissions" value={fmtMoney(commissionsKES, 'KES')} icon={Users} />
+        <StatCard label="Staff Earnings" value={fmtMoney(commissionsKES, 'KES')} icon={Users} />
         <StatCard label="Net Profit" value={fmtMoney(profitKES, 'KES')} icon={TrendingUp} tone={profitKES >= 0 ? 'success' : 'danger'} />
       </div>
 
@@ -77,12 +78,12 @@ function OwnerReport({ range }: { range: Range }) {
         <h2 className="font-semibold mb-4">Payment Methods</h2>
         <div className="grid sm:grid-cols-3 gap-3 mb-6">{(['Cash', 'Card', 'M-Pesa'] as const).map(method => <div key={method} className="rounded-2xl bg-black/[0.03] p-4"><p className="text-xs text-[#6E6E73]">{method}</p><p className="text-xl font-semibold mt-1">{fmtMoney(data.paymentMethodTotals[method], 'KES')}</p></div>)}</div>
         <div className="flex items-center justify-between mb-4">
-          <h2 className="font-semibold">Staff Commission Statement</h2>
+          <h2 className="font-semibold">Staff Earnings Statement</h2>
           <Button variant="secondary" size="sm" onClick={handleDownload}><Download size={14} aria-hidden="true" />Download CSV</Button>
         </div>
         <table className="w-full text-sm">
           <caption className="sr-only">Staff commission statement</caption>
-          <thead><tr className="text-left text-xs text-[#6E6E73] border-b border-black/5"><th className="pb-2">Staff</th><th className="pb-2">Role</th><th className="pb-2">Service Revenue</th><th className="pb-2">Assistant Payments</th><th className="pb-2">Expected Income</th></tr></thead>
+          <thead><tr className="text-left text-xs text-[#6E6E73] border-b border-black/5"><th className="pb-2">Staff</th><th className="pb-2">Role</th><th className="pb-2">Service Revenue</th><th className="pb-2">Assistant Fees Deducted</th><th className="pb-2">Commission</th><th className="pb-2">Assistant Earnings</th><th className="pb-2">Expected Income</th></tr></thead>
           <tbody>
             {commissionStatement.map(p => (
               <tr key={p.name} className="border-b border-black/5 last:border-0">
@@ -91,11 +92,13 @@ function OwnerReport({ range }: { range: Range }) {
                 <td className="py-2">{fmtMoney(p.serviceRevenue, 'KES')}</td>
                 <td className="py-2">-{fmtMoney(p.helperDeductions, 'KES')}</td>
                 <td className="py-2">{fmtMoney(p.commission, 'KES')}</td>
+                <td className="py-2">{fmtMoney(p.assistantEarnings, 'KES')}</td>
+                <td className="py-2">{fmtMoney(p.commission + p.assistantEarnings, 'KES')}</td>
               </tr>
             ))}
           </tbody>
         </table>
-        <p className="text-xs text-[#6E6E73] mt-3">Employees receive 50% of service revenue after assistant payments. The owner controls commission corrections.</p>
+        <p className="text-xs text-[#6E6E73] mt-3">Expected income combines each employee’s service commission and assistant compensation. The owner controls commission corrections.</p>
       </Card>
     </div>
   );

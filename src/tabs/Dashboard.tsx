@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { DollarSign, Calendar, Users, AlertTriangle, TrendingUp, Sparkles } from 'lucide-react';
 import { Card, StatCard, LoadingState, EmptyState, toast } from '../components/ui';
-import { DashboardApi, RebookingApi, fmtMoney } from '../lib/api';
-import type { DashboardData, RebookingItem } from '../types';
+import { DashboardApi, RebookingApi, PayrollApi, fmtMoney } from '../lib/api';
+import type { DashboardData, RebookingItem, Staff } from '../types';
 
 type Range = 'today' | 'week' | 'month' | 'all';
 
@@ -10,13 +10,15 @@ function Dashboard() {
   const [range, setRange] = useState<Range>('today');
   const [data, setData] = useState<DashboardData | null>(null);
   const [rebooking, setRebooking] = useState<RebookingItem[]>([]);
+  const [ownerStaffEarnings, setOwnerStaffEarnings] = useState<Staff[]>([]);
+  const [earningsPeriod, setEarningsPeriod] = useState<{ from: number; to: number } | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let alive = true;
     setLoading(true);
-    Promise.all([DashboardApi.get(range), RebookingApi.list()])
-      .then(([d, r]) => { if (alive) { setData(d); setRebooking(r); } })
+    Promise.all([DashboardApi.get(range), RebookingApi.list(), PayrollApi.staff()])
+      .then(([d, r, payroll]) => { if (alive) { setData(d); setRebooking(r); setOwnerStaffEarnings(payroll.items); setEarningsPeriod(payroll.period); } })
       .catch(() => toast('Could not load dashboard data.', 'error'))
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
@@ -29,6 +31,9 @@ function Dashboard() {
   const revenueKES = data.revenueByCurrency.KES || 0;
   const revenueUSD = data.revenueByCurrency.USD || 0;
   const profitKES = data.estimatedProfitByCurrency.KES || 0;
+  const earningsDateRange = earningsPeriod
+    ? `${new Date(earningsPeriod.from).toLocaleDateString()} – ${new Date(earningsPeriod.to).toLocaleDateString()}`
+    : 'Sunday–Saturday';
 
   return (
     <div className="space-y-6">
@@ -53,6 +58,11 @@ function Dashboard() {
         <StatCard label="Active Staff" value={`${data.activeStaffCount}/${data.totalStaffCount}`} sub="currently on shift" icon={Users} />
         <StatCard label="Registered Customers" value={String(data.customersCount)} sub="all customer profiles" icon={Users} />
       </div>
+
+      <Card className="p-4 sm:p-6">
+        <div className="mb-4"><h2 className="font-semibold">Staff Earnings · Sunday–Saturday</h2><p className="text-xs text-[#6E6E73]">Unpaid earnings from {earningsDateRange}. Includes commission and assistant-only earnings for every staff member.</p></div>
+        {ownerStaffEarnings.length === 0 ? <p className="text-sm text-[#6E6E73]">No staff records are available.</p> : <div className="space-y-2">{[...ownerStaffEarnings].sort((first, second) => ((second.commissionEarnedWeek || 0) + (second.assistantEarnedWeek || 0)) - ((first.commissionEarnedWeek || 0) + (first.assistantEarnedWeek || 0))).map(member => { const commission = member.commissionEarnedWeek || 0; const assistant = member.assistantEarnedWeek || 0; return <div key={member.id} className="flex items-center justify-between gap-3 border-b border-black/5 pb-2 last:border-0"><div><p className="text-sm font-medium">{member.name}</p><p className="text-xs text-[#6E6E73]">Commission {fmtMoney(commission, 'KES')} · assistant earnings {fmtMoney(assistant, 'KES')}</p></div><p className="shrink-0 text-sm font-semibold">{fmtMoney(commission + assistant, 'KES')}</p></div>; })}</div>}
+      </Card>
 
       <div className="grid grid-cols-1 gap-4">
         <Card className="p-4 sm:p-6">

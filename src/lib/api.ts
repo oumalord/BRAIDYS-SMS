@@ -158,7 +158,7 @@ export const PayoutsApi = {
 };
 
 export const PayrollApi = {
-  staff: () => api.get('/api/payroll/staff').then(r => r.data.items as Staff[]),
+  staff: () => api.get('/api/payroll/staff').then(r => ({ items: r.data.items as Staff[], period: r.data.period as { from: number; to: number } })),
   send: (recipients: { staffId: string; amountKES: number; phone: string }[]) => api.post('/api/payroll/send', { recipients }),
 };
 

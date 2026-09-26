@@ -12,6 +12,7 @@ function Finance() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [payouts, setPayouts] = useState<PayoutBatch[]>([]);
   const [staff, setStaff] = useState<Staff[]>([]);
+  const [payrollPeriod, setPayrollPeriod] = useState<{ from: number; to: number } | null>(null);
   const [payrollSending, setPayrollSending] = useState(false);
   const [paying, setPaying] = useState(false);
   const [deletingEarnings, setDeletingEarnings] = useState(false);
@@ -23,7 +24,7 @@ function Finance() {
 
   const load = () => {
     setLoading(true);
-    Promise.all([DashboardApi.get(range), ExpensesApi.list(), PayoutsApi.list(), PayrollApi.staff()]).then(([d, e, p, s]) => { setData(d); setExpenses(e); setPayouts(p); setStaff(s); }).finally(() => setLoading(false));
+    Promise.all([DashboardApi.get(range), ExpensesApi.list(), PayoutsApi.list(), PayrollApi.staff()]).then(([d, e, p, payroll]) => { setData(d); setExpenses(e); setPayouts(p); setStaff(payroll.items); setPayrollPeriod(payroll.period); }).finally(() => setLoading(false));
   };
   useEffect(() => {
     load();
@@ -54,7 +55,7 @@ function Finance() {
   };
 
   const sendPayroll = async () => {
-    const recipients = staff.map(member => ({ staffId: member.id, amountKES: (member.commissionEarned14Days || 0) + (member.assistantEarned14Days || 0), phone: member.phone })).filter(recipient => recipient.amountKES > 0);
+    const recipients = staff.map(member => ({ staffId: member.id, amountKES: (member.commissionEarnedWeek || 0) + (member.assistantEarnedWeek || 0), phone: member.phone })).filter(recipient => recipient.amountKES > 0);
     if (!recipients.length) { toast('Enter a salary amount for at least one employee.', 'error'); return; }
     if (recipients.some(recipient => !/^(?:\+?254|0)[17]\d{8}$/.test(recipient.phone.replace(/\s+/g, '')))) { toast('Every selected employee needs a valid Kenyan phone number.', 'error'); return; }
     if (!window.confirm(`Send ${fmtMoney(recipients.reduce((sum, recipient) => sum + recipient.amountKES, 0), 'KES')} to ${recipients.length} employees now?`)) return;
@@ -91,8 +92,11 @@ function Finance() {
   if (loading && !data) return <LoadingState label="Loading finance data…" />;
 
   const revenueKES = data?.revenueByCurrency.KES || 0;
-  const commissionsKES = data?.commissionsByCurrency.KES || 0;
+  const staffEarningsKES = data?.commissionsByCurrency.KES || 0;
   const profitKES = data?.estimatedProfitByCurrency.KES || 0;
+  const payrollDateRange = payrollPeriod
+    ? `${new Date(payrollPeriod.from).toLocaleDateString()} – ${new Date(payrollPeriod.to).toLocaleDateString()}`
+    : 'Sunday–Saturday';
 
   return (
     <div className="space-y-6">
@@ -113,7 +117,7 @@ function Finance() {
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             <StatCard label="Revenue" value={fmtMoney(revenueKES, 'KES')} icon={Receipt} tone="success" />
             <StatCard label="Product Cost" value={fmtMoney(data.productCost, 'KES')} icon={Receipt} />
-            <StatCard label="Commissions Owed" value={fmtMoney(commissionsKES, 'KES')} icon={Receipt} />
+            <StatCard label="Staff Earnings Owed" value={fmtMoney(staffEarningsKES, 'KES')} icon={Receipt} />
             <StatCard label="Commission Rate" value="50%" sub="After product and helper deductions" icon={Receipt} tone="warning" />
           </div>
           <Card className="p-6">
@@ -121,11 +125,11 @@ function Finance() {
             <div className="space-y-2 text-sm max-w-md">
               <div className="flex justify-between"><span className="text-[#6E6E73]">Revenue</span><span>{fmtMoney(revenueKES, 'KES')}</span></div>
               <div className="flex justify-between"><span className="text-[#6E6E73]">− Product cost (inventory consumed)</span><span>-{fmtMoney(data.productCost, 'KES')}</span></div>
-              <div className="flex justify-between"><span className="text-[#6E6E73]">− Staff commissions</span><span>-{fmtMoney(commissionsKES, 'KES')}</span></div>
+              <div className="flex justify-between"><span className="text-[#6E6E73]">− Staff earnings</span><span>-{fmtMoney(staffEarningsKES, 'KES')}</span></div>
               <div className="flex justify-between"><span className="text-[#6E6E73]">− Recorded expenses</span><span>-{fmtMoney(data.expenseTotal, 'KES')}</span></div>
               <div className="flex justify-between font-semibold text-base border-t border-black/5 pt-2 mt-2"><span>Net Profit</span><span className={profitKES >= 0 ? 'text-[#1c7c34]' : 'text-[#b0201a]'}>{fmtMoney(profitKES, 'KES')}</span></div>
             </div>
-            <p className="text-xs text-[#6E6E73] mt-3">Commission is 50% of each employee's service amount after assistant payments.</p>
+            <p className="text-xs text-[#6E6E73] mt-3">Staff earnings include service commissions and separately recorded assistant compensation.</p>
           </Card>
           <Card className="p-6">
             <h2 className="font-semibold mb-4">Payment Methods</h2>
@@ -134,27 +138,30 @@ function Finance() {
             </div>
           </Card>
           <Card className="p-6">
-            <h2 className="font-semibold mb-4">Commission Statement (by staff)</h2>
-            {data.topStaff.length === 0 ? <p className="text-sm text-[#6E6E73]">No commission activity for this range.</p> : (
-              <table className="w-full text-sm">
-                <caption className="sr-only">Commission owed per staff member</caption>
-                <thead><tr className="text-left text-xs text-[#6E6E73] border-b border-black/5"><th className="pb-2">Staff</th><th className="pb-2">Services Sold</th><th className="pb-2">Revenue</th><th className="pb-2">Assistants</th><th className="pb-2">Expected income</th></tr></thead>
-                <tbody>
-                  {data.topStaff.map(s => (
-                    <tr key={`${s.name}-${s.currency}`} className="border-b border-black/5 last:border-0">
-                      <td className="py-2">{s.name}</td><td className="py-2">{s.count}</td><td className="py-2">{fmtMoney(s.revenue, s.currency)}</td><td className="py-2">-{fmtMoney(s.helperDeductions, s.currency)}</td><td className="py-2 font-medium">{fmtMoney(s.commission, s.currency)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <h2 className="font-semibold mb-1">Staff Earnings (by staff)</h2>
+            <p className="text-xs text-[#6E6E73] mb-4">Includes every staff member and earnings from completed services linked to them, including assistant-only work.</p>
+            {data.staffEarnings.length === 0 ? <p className="text-sm text-[#6E6E73]">No staff records are available.</p> : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <caption className="sr-only">Commission and assistant earnings per staff member</caption>
+                  <thead><tr className="text-left text-xs text-[#6E6E73] border-b border-black/5"><th className="pb-2 pr-3">Staff</th><th className="pb-2 pr-3">Services</th><th className="pb-2 pr-3">Service revenue</th><th className="pb-2 pr-3">Assistant fees deducted</th><th className="pb-2 pr-3">Commission</th><th className="pb-2 pr-3">Assistant earnings</th><th className="pb-2">Total earnings</th></tr></thead>
+                  <tbody>
+                    {data.staffEarnings.map(member => (
+                      <tr key={`${member.staffId}-${member.currency}`} className="border-b border-black/5 last:border-0">
+                        <td className="py-2 pr-3">{member.name}</td><td className="py-2 pr-3">{member.count}</td><td className="py-2 pr-3">{fmtMoney(member.revenue, member.currency)}</td><td className="py-2 pr-3">{fmtMoney(member.helperDeductions, member.currency)}</td><td className="py-2 pr-3">{fmtMoney(member.commission, member.currency)}</td><td className="py-2 pr-3">{fmtMoney(member.assistantEarnings, member.currency)}</td><td className="py-2 font-medium">{fmtMoney(member.commission + member.assistantEarnings, member.currency)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </Card>
         </>
       )}
 
       <Card className="p-6">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4"><div><h2 className="font-semibold">Payroll</h2><p className="text-xs text-[#6E6E73]">Calculated from each employee's current Saturday-Friday service commissions and assistant payments.</p></div><Button onClick={sendPayroll} disabled={payrollSending}>{payrollSending ? 'Sending…' : 'Send payroll batch'}</Button></div>
-        <div className="space-y-2">{staff.filter(member => member.employmentStatus !== 'laid-off').map(member => { const calculated = (member.commissionEarned14Days || 0) + (member.assistantEarned14Days || 0); return <div key={member.id} className="flex items-center justify-between gap-3 border-b border-black/5 pb-2"><div><p className="text-sm font-medium">{member.name}</p><p className="text-xs text-[#6E6E73]">{member.phone || 'No phone number'} · {member.branchName || member.branch}</p><p className="text-xs text-[#6E6E73]">Weekly commission {fmtMoney(member.commissionEarned14Days || 0, 'KES')} + assistant compensation {fmtMoney(member.assistantEarned14Days || 0, 'KES')}</p></div><p className="font-semibold text-sm">{fmtMoney(calculated, 'KES')}</p></div>; })}</div>
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4"><div><h2 className="font-semibold">Payroll</h2><p className="text-xs text-[#6E6E73]">Unpaid commissions and assistant earnings from {payrollDateRange}.</p></div><Button onClick={sendPayroll} disabled={payrollSending}>{payrollSending ? 'Sending…' : 'Send payroll batch'}</Button></div>
+        <div className="space-y-2">{staff.filter(member => member.employmentStatus !== 'laid-off').map(member => { const commission = member.commissionEarnedWeek || 0; const assistant = member.assistantEarnedWeek || 0; const calculated = commission + assistant; return <div key={member.id} className="flex items-center justify-between gap-3 border-b border-black/5 pb-2"><div><p className="text-sm font-medium">{member.name}</p><p className="text-xs text-[#6E6E73]">{member.phone || 'No phone number'} · {member.branchName || member.branch}</p><p className="text-xs text-[#6E6E73]">Commission {fmtMoney(commission, 'KES')} + assistant compensation {fmtMoney(assistant, 'KES')}</p></div><p className="font-semibold text-sm">{fmtMoney(calculated, 'KES')}</p></div>; })}</div>
       </Card>
 
       {earningsDeleteOpen && <Modal title="Clear paid staff earnings" onClose={() => setEarningsDeleteOpen(false)} footer={<><Button variant="secondary" onClick={() => setEarningsDeleteOpen(false)}>Cancel</Button><Button variant="danger" onClick={deletePaidEarnings} disabled={deletingEarnings}>{deletingEarnings ? 'Clearing…' : 'Clear earnings'}</Button></>}>

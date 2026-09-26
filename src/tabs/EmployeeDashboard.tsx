@@ -60,7 +60,7 @@ function EmployeeDashboard({ account, onAddService }: { account: { name?: string
       </div>
 
       <Card className="p-5">
-        <p className="text-xs text-[#6E6E73]">My Saturday-Friday Earnings</p>
+          <p className="text-xs text-[#6E6E73]">My Sunday-Saturday Earnings</p>
         <p className="text-xl font-semibold mt-1">{fmtExactKES(fortnightEarnings)}</p>
       </Card>
 

@@ -106,8 +106,12 @@ function Appointments({ role }: { role: Role }) {
     }
   };
   const setStatus = async (a: Appointment, status: AppointmentStatus) => {
-    await AppointmentsApi.update(a.id, { status });
-    reload();
+    try {
+      await AppointmentsApi.update(a.id, { status });
+      reload();
+    } catch (cause: any) {
+      toast(cause?.message || `Could not mark as ${status.replace('-', ' ')}.`, 'error');
+    }
   };
   const deleteCancelled = async () => {
     const cancelledCount = appts.filter(appointment => appointment.status === 'cancelled').length;
@@ -234,7 +238,9 @@ function Appointments({ role }: { role: Role }) {
   let account: { staffId?: string } | null = null;
   try { account = JSON.parse(window.localStorage.getItem('safigroom_account') || 'null'); } catch { account = null; }
   const assignableStaff = staff.filter(canAssignStaff);
-  const canBookAppointments = ['owner', 'admin', 'receptionist'].includes(role);
+  const canBookAppointments = ['owner', 'admin', 'manager', 'receptionist'].includes(role);
+  const canEditAppointments = ['owner', 'admin', 'manager', 'receptionist'].includes(role);
+  const canEditClosedAppointments = ['owner', 'admin'].includes(role);
 
   return (
     <div className="space-y-6">
@@ -262,8 +268,8 @@ function Appointments({ role }: { role: Role }) {
                   <p className="text-sm text-[#6E6E73]">{a.serviceName} · {a.staffName || 'Awaiting employee assignment'} · {fmtKES(a.price)}{a.cardNumber ? ` · Card ${a.cardNumber}` : ''}</p>
               </div>
               <Badge tone={STATUS_TONE[a.status]}>{a.status.replace('-', ' ')}</Badge>
-              {(role === 'owner' || role === 'admin' || role === 'receptionist' || (role === 'barber' && a.staffId === account?.staffId)) && <div className="flex flex-wrap gap-2">
-                {(role === 'owner' || role === 'admin') && <Button size="sm" variant="secondary" onClick={() => beginEdit(a)}><Pencil size={14} aria-hidden="true" />Edit</Button>}
+              {(canEditAppointments || (role === 'barber' && a.staffId === account?.staffId)) && <div className="flex flex-wrap gap-2">
+                {canEditAppointments && (canEditClosedAppointments || !['completed', 'cancelled', 'no-show'].includes(a.status)) && <Button size="sm" variant="secondary" onClick={() => beginEdit(a)}><Pencil size={14} aria-hidden="true" />Edit</Button>}
                 {(role === 'owner' || role === 'admin' || (role === 'barber' && a.staffId === account?.staffId)) && a.status === 'completed' && <Button size="sm" variant="secondary" onClick={() => showCompletionSummary(a)}>Deal summary</Button>}
                 {(role === 'owner' || role === 'admin') && a.status === 'completed' && <Button size="sm" variant="secondary" onClick={() => beginCompletionEdit(a)}><Pencil size={14} aria-hidden="true" />Adjust completion</Button>}
                 {(role === 'owner' || role === 'admin') && a.status === 'completed' && <Button size="sm" variant="danger" onClick={() => reopenCompletedDeal(a)} disabled={saving}>Undo completed deal</Button>}
@@ -322,7 +328,7 @@ function Appointments({ role }: { role: Role }) {
             <p className="text-sm text-[#6E6E73]">Editing {editing.customerName}'s appointment.</p>
             <Field label="Service" htmlFor="edit-appt-service"><Select id="edit-appt-service" value={editForm.serviceId} onChange={e => setEditForm(current => ({ ...current, serviceId: e.target.value }))}>{services.map(service => <option key={service.id} value={service.id}>{service.name} — {fmtKES(service.price)} ({service.durationMin} min)</option>)}</Select></Field>
             <Field label="Employee" htmlFor="edit-appt-staff"><Select id="edit-appt-staff" value={editForm.staffId} onChange={e => setEditForm(current => ({ ...current, staffId: e.target.value }))}><option value="">Assign later</option>{assignableStaff.map(member => <option key={member.id} value={member.id}>{member.name} — {member.role}</option>)}</Select></Field>
-            <Field label="Card number" htmlFor="edit-appt-card-number"><Input id="edit-appt-card-number" inputMode="numeric" pattern="[0-9]*" value={editForm.cardNumber} disabled={Boolean(editing.cardNumber)} onChange={e => setEditForm(current => ({ ...current, cardNumber: e.target.value.replace(/\D/g, '') }))} placeholder="Enter once; unique for this day" /></Field>
+            <Field label="Card number" htmlFor="edit-appt-card-number"><Input id="edit-appt-card-number" inputMode="numeric" pattern="[0-9]*" value={editForm.cardNumber} disabled={Boolean(editing.cardNumber) || !['owner', 'admin', 'receptionist'].includes(role)} onChange={e => setEditForm(current => ({ ...current, cardNumber: e.target.value.replace(/\D/g, '') }))} placeholder="Enter once; unique for this day" /></Field>
             <div className="grid sm:grid-cols-2 gap-4"><Field label="Date" htmlFor="edit-appt-date"><Input id="edit-appt-date" type="date" value={editForm.date} onChange={e => setEditForm(current => ({ ...current, date: e.target.value }))} /></Field><Field label="Time" htmlFor="edit-appt-time"><Input id="edit-appt-time" type="time" value={editForm.time} onChange={e => setEditForm(current => ({ ...current, time: e.target.value }))} /></Field></div>
           </div>
         </Modal>
