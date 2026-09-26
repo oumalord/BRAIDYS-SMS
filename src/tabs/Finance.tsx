@@ -27,12 +27,18 @@ function Finance() {
   const [breakdown, setBreakdown] = useState<WeeklyStaffWorkReport | null>(null);
   const [breakdownLoading, setBreakdownLoading] = useState(false);
   const [breakdownError, setBreakdownError] = useState('');
+  const [weeklyReports, setWeeklyReports] = useState<Record<string, WeeklyStaffWorkReport>>({});
 
   const loadPayroll = () => {
     setPayrollLoading(true);
     setPayrollError('');
     PayrollApi.staff()
-      .then(payroll => { setStaff(payroll.items); setPayrollPeriod(payroll.period); })
+      .then(async payroll => {
+        setStaff(payroll.items);
+        setPayrollPeriod(payroll.period);
+        const reports = await Promise.all(payroll.items.filter(member => member.employmentStatus !== 'laid-off').map(async member => [member.id, await AppointmentsApi.staffWeeklyWork(member.id)] as const));
+        setWeeklyReports(Object.fromEntries(reports));
+      })
       .catch((cause: any) => setPayrollError(cause?.message || 'Could not load this week’s payroll data.'))
       .finally(() => setPayrollLoading(false));
   };
@@ -104,6 +110,15 @@ function Finance() {
     ? `${new Date(payrollPeriod.from).toLocaleDateString()} – ${new Date(payrollPeriod.to).toLocaleDateString()}`
     : 'Sunday–Saturday';
   const payrollStaff = staff.filter(member => member.employmentStatus !== 'laid-off');
+  const weeklyStaffEarnings = payrollStaff.map(member => {
+    const report = weeklyReports[member.id];
+    const lines = report?.services.flatMap(service => service.distribution.filter(line => line.staffId === member.id).map(line => ({ service, line }))) || [];
+    const commission = lines.filter(({ line }) => line.role !== 'assistant').reduce((sum, item) => sum + item.line.amount, 0);
+    const assistantEarnings = lines.filter(({ line }) => line.role === 'assistant').reduce((sum, item) => sum + item.line.amount, 0);
+    const revenue = lines.reduce((sum, item) => sum + item.service.serviceRevenue, 0);
+    const helperDeductions = lines.reduce((sum, item) => sum + item.service.assistantFee, 0);
+    return { member, count: lines.length, revenue, helperDeductions, commission, assistantEarnings };
+  });
   const openBreakdown = async (member: Staff) => {
     setBreakdownStaff(member);
     setBreakdown(null);
@@ -185,15 +200,15 @@ function Finance() {
           <Card className="p-6">
             <h2 className="font-semibold mb-1">Staff Earnings (by staff)</h2>
             <p className="text-xs text-[#6E6E73] mb-4">Includes every staff member and earnings from completed services linked to them, including assistant-only work.</p>
-            {data.staffEarnings.length === 0 ? <p className="text-sm text-[#6E6E73]">No staff records are available.</p> : (
+            {payrollLoading ? <p className="text-sm text-[#6E6E73]">Loading appointment-linked earnings…</p> : weeklyStaffEarnings.length === 0 ? <p className="text-sm text-[#6E6E73]">No staff records are available.</p> : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <caption className="sr-only">Commission and assistant earnings per staff member</caption>
                   <thead><tr className="text-left text-xs text-[#6E6E73] border-b border-black/5"><th className="pb-2 pr-3">Staff</th><th className="pb-2 pr-3">Services</th><th className="pb-2 pr-3">Service revenue</th><th className="pb-2 pr-3">Assistant fees deducted</th><th className="pb-2 pr-3">Commission</th><th className="pb-2 pr-3">Assistant earnings</th><th className="pb-2 pr-3">Total earnings</th><th className="pb-2">Breakdown</th></tr></thead>
                   <tbody>
-                    {data.staffEarnings.map(member => (
-                      <tr key={`${member.staffId}-${member.currency}`} className="border-b border-black/5 last:border-0">
-                        <td className="py-2 pr-3">{member.name}</td><td className="py-2 pr-3">{member.count}</td><td className="py-2 pr-3">{fmtMoney(member.revenue, member.currency)}</td><td className="py-2 pr-3">{fmtMoney(member.helperDeductions, member.currency)}</td><td className="py-2 pr-3">{fmtMoney(member.commission, member.currency)}</td><td className="py-2 pr-3">{fmtMoney(member.assistantEarnings, member.currency)}</td><td className="py-2 pr-3 font-medium">{fmtMoney(member.commission + member.assistantEarnings, member.currency)}</td><td className="py-2"><Button size="sm" variant="secondary" onClick={() => openBreakdown(staff.find(item => item.id === member.staffId) || { id: member.staffId, name: member.name } as Staff)}><Search size={14} aria-hidden="true" />Open</Button></td>
+                    {weeklyStaffEarnings.map(({ member, count, revenue, helperDeductions, commission, assistantEarnings }) => (
+                      <tr key={member.id} className="border-b border-black/5 last:border-0">
+                        <td className="py-2 pr-3">{member.name}</td><td className="py-2 pr-3">{count}</td><td className="py-2 pr-3">{fmtMoney(revenue, 'KES')}</td><td className="py-2 pr-3">{fmtMoney(helperDeductions, 'KES')}</td><td className="py-2 pr-3">{fmtMoney(commission, 'KES')}</td><td className="py-2 pr-3">{fmtMoney(assistantEarnings, 'KES')}</td><td className="py-2 pr-3 font-medium">{fmtMoney(commission + assistantEarnings, 'KES')}</td><td className="py-2"><Button size="sm" variant="secondary" onClick={() => openBreakdown(member)}><Search size={14} aria-hidden="true" />Open</Button></td>
                       </tr>
                     ))}
                   </tbody>
