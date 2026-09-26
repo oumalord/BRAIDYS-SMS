@@ -113,8 +113,10 @@ function Finance() {
   const weeklyStaffEarnings = payrollStaff.map(member => {
     const report = weeklyReports[member.id];
     const lines = report?.services.flatMap(service => service.distribution.filter(line => line.staffId === member.id).map(line => ({ service, line }))) || [];
-    const commission = lines.filter(({ line }) => line.role !== 'assistant').reduce((sum, item) => sum + item.line.amount, 0);
-    const assistantEarnings = lines.filter(({ line }) => line.role === 'assistant').reduce((sum, item) => sum + item.line.amount, 0);
+    const reportCommission = lines.filter(({ line }) => line.role !== 'assistant').reduce((sum, item) => sum + item.line.amount, 0);
+    const reportAssistant = lines.filter(({ line }) => line.role === 'assistant').reduce((sum, item) => sum + item.line.amount, 0);
+    const commission = lines.length ? reportCommission : (member.commissionEarnedWeek || 0);
+    const assistantEarnings = lines.length ? reportAssistant : (member.assistantEarnedWeek || 0);
     const revenue = lines.reduce((sum, item) => sum + item.service.serviceRevenue, 0);
     const helperDeductions = lines.reduce((sum, item) => sum + item.service.assistantFee, 0);
     return { member, count: lines.length, revenue, helperDeductions, commission, assistantEarnings };
