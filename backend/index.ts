@@ -492,9 +492,10 @@ export const handler = router({
       db.list('appointments', { limit: 5000 }),
     ]);
     const unpaidEarnings = calculateUnpaidStaffEarnings(orders as any[], payoutItems as any[], appointments as any[], weekFrom, now);
+    const orderCreatedAtById = new Map((orders as any[]).map(order => [String(order.id), Number(order.createdAt || 0)]));
     const paidHistory = (payoutItems as any[])
       .filter(item => !item.deletedAt && item.staffId === context.staffId)
-      .map(item => ({ serviceName: item.serviceName || item.orderId || 'Paid earning', createdAt: item.createdAt, role: item.role === 'assistant' ? 'assistant' : 'commission', amount: Number(item.commission || 0) }));
+      .map(item => ({ serviceName: item.serviceName || item.orderId || 'Paid earning', createdAt: Number(item.orderCreatedAt || orderCreatedAtById.get(String(item.orderId || '')) || item.createdAt || 0), paidAt: Number(item.createdAt || 0), role: item.role === 'assistant' ? 'assistant' : 'commission', amount: Number(item.commission || 0) }));
     let todayCommission = 0;
     let todayAssistant = 0;
     let fortnightCommission = 0;

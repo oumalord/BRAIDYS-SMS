@@ -92,7 +92,7 @@ export const StaffApi = {
   update: (id: string, patch: Partial<Staff> & { pin?: string }) => api.put(`/api/staff/${id}`, patch).then(r => { invalidate('staff'); return r; }),
   permanentlyDelete: (id: string) => api.delete(`/api/staff/${id}/permanent`).then(r => { invalidate('staff'); return r; }),
   changeMyPin: (pin: string) => api.post('/api/staff/me/pin', { pin }),
-  myEarnings: () => api.get('/api/staff/me/earnings').then(r => r.data as { today: { commission: number; assistant: number; total: number }; fortnight: { commission: number; assistant: number; total: number }; completedWork: { serviceName: string; createdAt: number; role: 'commission' | 'assistant'; amount: number }[] }),
+  myEarnings: () => api.get('/api/staff/me/earnings').then(r => r.data as { today: { commission: number; assistant: number; total: number }; fortnight: { commission: number; assistant: number; total: number }; completedWork: { serviceName: string; createdAt: number; role: 'commission' | 'assistant'; amount: number }[]; paidHistory: { serviceName: string; createdAt: number; paidAt?: number; role: 'commission' | 'assistant'; amount: number }[] }),
 };
 
 export const ServicesApi = {
