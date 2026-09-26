@@ -17,7 +17,6 @@ function Finance() {
   const [payrollError, setPayrollError] = useState('');
   const [financeDataError, setFinanceDataError] = useState('');
   const [payrollSending, setPayrollSending] = useState(false);
-  const [paying, setPaying] = useState(false);
   const [deletingEarnings, setDeletingEarnings] = useState(false);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
@@ -57,19 +56,6 @@ function Finance() {
     setOpen(false);
     setForm({ category: 'Supplies', amount: 0, note: '', date: new Date().toISOString().slice(0, 10) });
     load();
-  };
-
-  const recordPayout = async () => {
-    setPaying(true);
-    try {
-      const { data } = await PayoutsApi.record('week');
-      toast(`${data.employeeCount} employees marked paid: ${fmtMoney(data.totalKES, 'KES')}. No money was sent.`, 'success');
-      load();
-    } catch (cause: any) {
-      toast(cause?.message || 'Could not record the payout.', 'error');
-    } finally {
-      setPaying(false);
-    }
   };
 
   const sendPayroll = async () => {
@@ -146,7 +132,6 @@ function Finance() {
             <option value="today">Today</option><option value="week">This Week</option><option value="month">This Month</option><option value="all">All Time</option>
           </Select>
           <Button onClick={() => setOpen(true)}><Plus size={16} aria-hidden="true" />Add Expense</Button>
-          <Button variant="secondary" onClick={recordPayout} disabled={paying}>{paying ? 'Recording…' : 'Mark weekly earnings paid'}</Button>
           <Button variant="danger" onClick={() => setEarningsDeleteOpen(true)}>Clear paid earnings</Button>
         </div>
       </div>
@@ -213,8 +198,8 @@ function Finance() {
       </Modal>}
 
       <Card className="p-6">
-        <div className="flex items-center justify-between mb-4"><div><h2 className="font-semibold">Recorded payouts</h2><p className="text-xs text-[#6E6E73]">This records internal payment completion only. It does not send money.</p></div></div>
-        {payouts.length === 0 ? <p className="text-sm text-[#6E6E73]">No payout batches recorded yet.</p> : <div className="space-y-2">{payouts.slice(0, 5).map(payout => <div key={payout.id} className="flex items-center justify-between border-b border-black/5 pb-2 text-sm"><span className="capitalize">{payout.range} · {payout.employeeCount} employees</span><span className="font-medium">{fmtMoney(payout.totalKES, 'KES')} · recorded</span></div>)}</div>}
+        <div className="flex items-center justify-between mb-4"><div><h2 className="font-semibold">Payout audit history</h2><p className="text-xs text-[#6E6E73]">Historical internal markers are shown for audit. Markers are not money transfers and no longer reduce outstanding earnings.</p></div></div>
+        {payouts.length === 0 ? <p className="text-sm text-[#6E6E73]">No payout audit records yet.</p> : <div className="space-y-2">{payouts.slice(0, 5).map(payout => <div key={payout.id} className="flex items-center justify-between border-b border-black/5 pb-2 text-sm"><span className="capitalize">{payout.range} · {payout.employeeCount} employees</span><span className={`font-medium ${payout.status === 'reversed' ? 'text-amber-700' : ''}`}>{fmtMoney(payout.totalKES, 'KES')} · {payout.status === 'reversed' ? 'reversed' : 'legacy marker'}</span></div>)}</div>}
       </Card>
 
       <Card className="p-6">

@@ -186,7 +186,10 @@ export interface PayoutBatch {
   totalKES: number;
   employeeCount: number;
   itemCount: number;
-  status: 'recorded';
+  status: 'recorded' | 'reversed';
+  reversedAt?: number;
+  reversedBy?: string;
+  reversalReason?: string;
   createdAt: number;
 }
 

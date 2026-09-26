@@ -1583,39 +1583,9 @@ export const handler = router({
     await audit('deleted paid staff earnings', 'payout_items', { from, to, itemCount: matching.length, totalKES }, context.name);
     return json({ deleted: matching.length, totalKES, from, to });
   }],
-  'POST /api/payouts': [async ({ body }) => {
-    const context = currentContext();
-    if (!context || !['owner', 'admin'].includes(context.role)) return error('Only the owner or administrator can record payouts', 403);
-    const range = body?.range === 'today' || body?.range === 'week' || body?.range === 'fortnight' || body?.range === 'month' || body?.range === 'all' ? body.range : 'fortnight';
-    const now = Date.now();
-    let from = 0;
-    if (range === 'today') { const day = new Date(); day.setHours(0, 0, 0, 0); from = day.getTime(); }
-    if (range === 'week') from = sundaySaturdayRange().from;
-    if (range === 'fortnight') from = now - 14 * DAY;
-    if (range === 'month') from = now - 30 * DAY;
-
-    const [{ items: orders }, { items: staff }, { items: paidItems }, { items: appointments }] = await Promise.all([
-      db.list('orders', { limit: 5000 }),
-      db.list('staff', { limit: 2000 }),
-      db.list('payout_items', { limit: 10000 }),
-      db.list('appointments', { limit: 5000 }),
-    ]);
-    const staffById = new Map((staff as any[]).map(member => [member.id, member]));
-    const lines = calculateUnpaidStaffEarnings(orders as any[], paidItems as any[], appointments as any[], from, now)
-      .filter(earning => staffById.has(earning.staffId))
-      .map(earning => ({
-        ...earning,
-        staffName: staffById.get(earning.staffId)?.name || 'Unknown staff',
-        commission: earning.amount,
-        branchId: earning.branchId || context.branchId || null,
-        createdAt: now,
-      }));
-    if (!lines.length) return error('There are no unpaid commissions in this period.', 409);
-    const totalKES = lines.filter(line => line.currency === 'KES').reduce((sum, line) => sum + line.commission, 0);
-    const [batchId] = await db.add('payout_batches', [{ range, from, to: now, totalKES, employeeCount: new Set(lines.map(line => line.staffId)).size, itemCount: lines.length, status: 'recorded', createdAt: now }]);
-    await db.add('payout_items', lines.map(line => ({ ...line, batchId })));
-    await audit('recorded', 'payout_batch', { id: batchId, range, totalKES, employeeCount: new Set(lines.map(line => line.staffId)).size, itemCount: lines.length }, 'owner');
-    return json({ id: batchId, range, totalKES, employeeCount: new Set(lines.map(line => line.staffId)).size, itemCount: lines.length, status: 'recorded', message: 'Payout recorded internally. No money was sent.' });
+  'POST /api/payouts': [async () => {
+    requireOwner();
+    return error('Internal paid markers are disabled. Earnings are marked paid only after a verified payment transfer.', 410);
   }],
   'POST /api/payroll/send': [async ({ body }) => {
     const context = currentContext();
