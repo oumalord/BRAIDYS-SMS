@@ -28,6 +28,15 @@ function currentSundayThroughYesterdayRange(date = new Date()) {
   return { from: nairobiMidnight(currentSunday), to: nairobiMidnight(today) };
 }
 
+function nairobiDayRange(date: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  const [year, month, day] = date.split('-').map(Number);
+  const calendarDay = new Date(Date.UTC(year, month - 1, day));
+  if (calendarDay.toISOString().slice(0, 10) !== date) return null;
+  const from = Date.UTC(year, month - 1, day) - 3 * 60 * 60 * 1000;
+  return { from, to: from + DAY };
+}
+
 function passwordHash(password: string, salt = randomBytes(16).toString('hex')) {
   return `${salt}:${scryptSync(password, salt, 64).toString('hex')}`;
 }
@@ -829,7 +838,10 @@ export const handler = router({
     const search = String(query.name || '').trim().toLowerCase();
     const requestedStaffId = String(query.staffId || '').trim();
     if (!search && !requestedStaffId) return error('Enter a staff name to search', 400);
-    const period = currentSundayThroughYesterdayRange();
+    const selectedDate = String(query.date || '').trim();
+    const selectedDay = selectedDate ? nairobiDayRange(selectedDate) : null;
+    if (selectedDate && !selectedDay) return error('Choose a valid earnings date', 400);
+    const period = selectedDay || currentSundayThroughYesterdayRange();
     const [{ items: staffRows }, { items: orders }, { items: appointmentRows }, { items: payoutItems }] = await Promise.all([
       db.list('staff', { limit: 2000 }),
       db.list('orders', { limit: 5000 }),

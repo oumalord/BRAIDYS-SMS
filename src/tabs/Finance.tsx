@@ -5,9 +5,11 @@ import { AppointmentsApi, DashboardApi, downloadCSV, ExpensesApi, PayrollApi, Pa
 import type { DashboardData, Expense, PayoutBatch, Staff, WeeklyStaffWorkReport } from '../types';
 
 type Range = 'today' | 'week' | 'month' | 'all';
+const localDateValue = (date = new Date()) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 
 function Finance() {
   const [range, setRange] = useState<Range>('month');
+  const [earningsDate, setEarningsDate] = useState(() => localDateValue());
   const [data, setData] = useState<DashboardData | null>(null);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [payouts, setPayouts] = useState<PayoutBatch[]>([]);
@@ -28,19 +30,29 @@ function Finance() {
   const [breakdownLoading, setBreakdownLoading] = useState(false);
   const [breakdownError, setBreakdownError] = useState('');
   const [weeklyReports, setWeeklyReports] = useState<Record<string, WeeklyStaffWorkReport>>({});
+  const [dailyReportsError, setDailyReportsError] = useState('');
+  const [dailyReportsLoading, setDailyReportsLoading] = useState(false);
+  const staffIdsKey = staff.filter(member => member.employmentStatus !== 'laid-off').map(member => member.id).join('|');
 
   const loadPayroll = () => {
     setPayrollLoading(true);
     setPayrollError('');
     PayrollApi.staff()
-      .then(async payroll => {
-        setStaff(payroll.items);
-        setPayrollPeriod(payroll.period);
-        const reports = await Promise.all(payroll.items.filter(member => member.employmentStatus !== 'laid-off').map(async member => [member.id, await AppointmentsApi.staffWeeklyWork(member.id)] as const));
-        setWeeklyReports(Object.fromEntries(reports));
-      })
+      .then(payroll => { setStaff(payroll.items); setPayrollPeriod(payroll.period); })
       .catch((cause: any) => setPayrollError(cause?.message || 'Could not load this week’s payroll data.'))
       .finally(() => setPayrollLoading(false));
+  };
+  const loadDailyReports = (members = staff) => {
+    setDailyReportsLoading(true);
+    setDailyReportsError('');
+    Promise.allSettled(members.filter(member => member.employmentStatus !== 'laid-off').map(async member => [member.id, await AppointmentsApi.staffWeeklyWork(member.id, earningsDate)] as const))
+      .then(reports => {
+        const successfulReports = reports.flatMap(report => report.status === 'fulfilled' ? [report.value] : []);
+        setWeeklyReports(Object.fromEntries(successfulReports));
+        const failedCount = reports.filter(report => report.status === 'rejected').length;
+        setDailyReportsError(failedCount ? `Could not load daily appointment earnings for ${failedCount} staff member${failedCount === 1 ? '' : 's'}. Refresh to retry.` : '');
+      })
+      .finally(() => setDailyReportsLoading(false));
   };
   const load = () => {
     setLoading(true);
@@ -58,6 +70,10 @@ function Finance() {
     const refresh = window.setInterval(load, 15000);
     return () => window.clearInterval(refresh);
   }, [range]);
+
+  useEffect(() => {
+    if (staffIdsKey) loadDailyReports(staff);
+  }, [staffIdsKey, earningsDate]);
 
   const addExpense = async () => {
     if (!form.category.trim() || form.amount <= 0) { toast('Enter a category and amount greater than zero.', 'error'); return; }
@@ -108,15 +124,16 @@ function Finance() {
   const profitKES = data?.estimatedProfitByCurrency.KES || 0;
   const payrollDateRange = payrollPeriod
     ? `${new Date(payrollPeriod.from).toLocaleDateString()} – ${new Date(payrollPeriod.to).toLocaleDateString()}`
-    : 'Sunday–Saturday';
+    : 'Sunday through yesterday';
+  const selectedEarningsLabel = new Date(`${earningsDate}T12:00:00`).toLocaleDateString();
   const payrollStaff = staff.filter(member => member.employmentStatus !== 'laid-off');
   const weeklyStaffEarnings = payrollStaff.map(member => {
     const report = weeklyReports[member.id];
     const lines = report?.services.flatMap(service => service.distribution.filter(line => line.staffId === member.id).map(line => ({ service, line }))) || [];
     const reportCommission = lines.filter(({ line }) => line.role !== 'assistant').reduce((sum, item) => sum + item.line.amount, 0);
     const reportAssistant = lines.filter(({ line }) => line.role === 'assistant').reduce((sum, item) => sum + item.line.amount, 0);
-    const commission = lines.length ? reportCommission : (member.commissionEarnedWeek || 0);
-    const assistantEarnings = lines.length ? reportAssistant : (member.assistantEarnedWeek || 0);
+    const commission = reportCommission;
+    const assistantEarnings = reportAssistant;
     const revenue = lines.reduce((sum, item) => sum + item.service.serviceRevenue, 0);
     const helperDeductions = lines.reduce((sum, item) => sum + item.service.assistantFee, 0);
     return { member, count: lines.length, revenue, helperDeductions, commission, assistantEarnings };
@@ -126,7 +143,7 @@ function Finance() {
     setBreakdown(null);
     setBreakdownError('');
     setBreakdownLoading(true);
-    try { setBreakdown(await AppointmentsApi.staffWeeklyWork(member.id)); }
+    try { setBreakdown(await AppointmentsApi.staffWeeklyWork(member.id, earningsDate)); }
     catch (cause: any) { setBreakdownError(cause?.message || 'Could not load this staff member’s appointment earnings.'); }
     finally { setBreakdownLoading(false); }
   };
@@ -136,6 +153,13 @@ function Finance() {
     .map(line => ({ service, line }))) || [];
   const breakdownCommission = breakdownLines.filter(({ line }) => line.role !== 'assistant').reduce((sum, item) => sum + item.line.amount, 0);
   const breakdownAssistant = breakdownLines.filter(({ line }) => line.role === 'assistant').reduce((sum, item) => sum + item.line.amount, 0);
+  const dailyTotals = weeklyStaffEarnings.reduce((totals, row) => ({
+    count: totals.count + row.count,
+    revenue: totals.revenue + row.revenue,
+    helperDeductions: totals.helperDeductions + row.helperDeductions,
+    commission: totals.commission + row.commission,
+    assistantEarnings: totals.assistantEarnings + row.assistantEarnings,
+  }), { count: 0, revenue: 0, helperDeductions: 0, commission: 0, assistantEarnings: 0 });
   const downloadPayroll = () => {
     const startDate = payrollPeriod ? new Date(payrollPeriod.from) : new Date();
     const endDate = payrollPeriod ? new Date(payrollPeriod.to) : new Date();
@@ -200,13 +224,13 @@ function Finance() {
             </div>
           </Card>
           <Card className="p-6">
-            <h2 className="font-semibold mb-1">Staff Earnings (by staff)</h2>
-            <p className="text-xs text-[#6E6E73] mb-4">Includes every staff member and earnings from completed services linked to them, including assistant-only work.</p>
-            {payrollLoading ? <p className="text-sm text-[#6E6E73]">Loading appointment-linked earnings…</p> : weeklyStaffEarnings.length === 0 ? <p className="text-sm text-[#6E6E73]">No staff records are available.</p> : (
+            <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="font-semibold mb-1">Staff Earnings by Date</h2><p className="text-xs text-[#6E6E73]">Completed appointment commissions and assistant earnings for {selectedEarningsLabel}.</p></div><Field label="Earnings date" htmlFor="staff-earnings-date"><Input id="staff-earnings-date" type="date" value={earningsDate} onChange={event => setEarningsDate(event.target.value)} /></Field></div>
+            {dailyReportsError && <p role="alert" className="mb-3 text-sm text-amber-700">{dailyReportsError}</p>}
+            {payrollLoading || dailyReportsLoading ? <p className="text-sm text-[#6E6E73]">Loading appointment-linked earnings…</p> : weeklyStaffEarnings.length === 0 ? <p className="text-sm text-[#6E6E73]">No staff records are available.</p> : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
-                  <caption className="sr-only">Commission and assistant earnings per staff member</caption>
-                  <thead><tr className="text-left text-xs text-[#6E6E73] border-b border-black/5"><th className="pb-2 pr-3">Staff</th><th className="pb-2 pr-3">Services</th><th className="pb-2 pr-3">Service revenue</th><th className="pb-2 pr-3">Assistant fees deducted</th><th className="pb-2 pr-3">Commission</th><th className="pb-2 pr-3">Assistant earnings</th><th className="pb-2 pr-3">Total earnings</th><th className="pb-2">Breakdown</th></tr></thead>
+                  <caption className="sr-only">Commission and assistant earnings by staff for {selectedEarningsLabel}</caption>
+                  <thead><tr className="text-left text-xs text-[#6E6E73] border-b border-black/5"><th className="pb-2 pr-3">Staff</th><th className="pb-2 pr-3">Earning lines</th><th className="pb-2 pr-3">Service revenue</th><th className="pb-2 pr-3">Assistant fees deducted</th><th className="pb-2 pr-3">Commission</th><th className="pb-2 pr-3">Assistant earnings</th><th className="pb-2 pr-3">Total earnings</th><th className="pb-2">Breakdown</th></tr></thead>
                   <tbody>
                     {weeklyStaffEarnings.map(({ member, count, revenue, helperDeductions, commission, assistantEarnings }) => (
                       <tr key={member.id} className="border-b border-black/5 last:border-0">
@@ -214,6 +238,7 @@ function Finance() {
                       </tr>
                     ))}
                   </tbody>
+                  <tfoot><tr className="border-t-2 border-black/10 font-semibold"><td className="py-3 pr-3">TOTAL</td><td className="py-3 pr-3">{dailyTotals.count}</td><td className="py-3 pr-3">{fmtMoney(dailyTotals.revenue, 'KES')}</td><td className="py-3 pr-3">{fmtMoney(dailyTotals.helperDeductions, 'KES')}</td><td className="py-3 pr-3">{fmtMoney(dailyTotals.commission, 'KES')}</td><td className="py-3 pr-3">{fmtMoney(dailyTotals.assistantEarnings, 'KES')}</td><td className="py-3 pr-3">{fmtMoney(dailyTotals.commission + dailyTotals.assistantEarnings, 'KES')}</td><td /></tr></tfoot>
                 </table>
               </div>
             )}
@@ -222,13 +247,13 @@ function Finance() {
       )}
 
       <Card className="p-6">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4"><div><h2 className="font-semibold">Unpaid payroll</h2><p className="text-xs text-[#6E6E73]">Sunday through yesterday: {payrollDateRange}. Today’s sales are excluded.</p></div><div className="flex flex-wrap gap-2"><Button variant="secondary" onClick={downloadPayroll} disabled={payrollLoading || !payrollStaff.length}><Download size={16} aria-hidden="true" />Download payroll CSV</Button><Button variant="secondary" onClick={loadPayroll} disabled={payrollLoading}>{payrollLoading ? 'Refreshing…' : 'Refresh payroll'}</Button><Button onClick={sendPayroll} disabled={payrollSending || payrollLoading}>{payrollSending ? 'Sending…' : 'Send payroll batch'}</Button></div></div>
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4"><div><h2 className="font-semibold">Unpaid payroll</h2><p className="text-xs text-[#6E6E73]">Sunday through yesterday: {payrollDateRange}. Today’s sales are excluded.</p></div><div className="flex flex-wrap gap-2"><Button variant="secondary" onClick={downloadPayroll} disabled={payrollLoading || !payrollStaff.length}><Download size={16} aria-hidden="true" />Download payroll CSV</Button><Button variant="secondary" onClick={() => { loadPayroll(); loadDailyReports(); }} disabled={payrollLoading || dailyReportsLoading}>{payrollLoading || dailyReportsLoading ? 'Refreshing…' : 'Refresh payroll'}</Button><Button onClick={sendPayroll} disabled={payrollSending || payrollLoading}>{payrollSending ? 'Sending…' : 'Send payroll batch'}</Button></div></div>
         {payrollLoading ? <p className="text-sm text-[#6E6E73]">Loading staff payroll…</p> : payrollError ? <p role="alert" className="text-sm text-amber-700">{payrollError} Use “Refresh payroll” to try again.</p> : payrollStaff.length === 0 ? <p className="text-sm text-[#6E6E73]">No active staff records were returned for payroll.</p> : <div className="space-y-2">{payrollStaff.map(member => { const commission = member.commissionEarnedWeek || 0; const assistant = member.assistantEarnedWeek || 0; const calculated = commission + assistant; return <div key={member.id} className="flex items-center justify-between gap-3 border-b border-black/5 pb-2"><div><p className="text-sm font-medium">{member.name}</p><p className="text-xs text-[#6E6E73]">{member.phone || 'No phone number'} · {member.branchName || member.branch}</p><p className="text-xs text-[#6E6E73]">Commission {fmtMoney(commission, 'KES')} + assistant compensation {fmtMoney(assistant, 'KES')}</p></div><p className="font-semibold text-sm">{fmtMoney(calculated, 'KES')}</p></div>; })}</div>}
       </Card>
 
       {breakdownStaff && <Modal title={`${breakdownStaff.name} appointment earnings`} onClose={closeBreakdown} footer={<Button variant="secondary" onClick={closeBreakdown}>Close</Button>}>
         <div className="space-y-4">
-          <p className="text-sm text-[#6E6E73]">Completed appointments linked to this staff member for {payrollDateRange}. Amounts come from recorded service commissions and assistant compensation.</p>
+          <p className="text-sm text-[#6E6E73]">Completed appointments linked to this staff member for {selectedEarningsLabel}. Amounts come from recorded service commissions and assistant compensation.</p>
           {breakdownLoading ? <LoadingState label="Loading appointment earnings…" /> : breakdownError ? <p role="alert" className="text-sm text-amber-700">{breakdownError}</p> : !breakdownLines.length ? <p className="text-sm text-[#6E6E73]">No completed appointment earnings were found.</p> : <>
             <div className="grid grid-cols-3 gap-3"><div className="rounded-xl bg-black/[0.03] p-3"><p className="text-xs text-[#6E6E73]">Appointments</p><p className="text-lg font-semibold">{breakdownLines.length}</p></div><div className="rounded-xl bg-black/[0.03] p-3"><p className="text-xs text-[#6E6E73]">Commission</p><p className="text-lg font-semibold">{fmtMoney(breakdownCommission, 'KES')}</p></div><div className="rounded-xl bg-black/[0.03] p-3"><p className="text-xs text-[#6E6E73]">Assistant</p><p className="text-lg font-semibold">{fmtMoney(breakdownAssistant, 'KES')}</p></div></div>
             <div className="max-h-[55vh] overflow-y-auto divide-y divide-black/5">{breakdownLines.map(({ service, line }, index) => <div key={`${service.orderId}-${line.itemKey}-${index}`} className="py-3"><div className="flex items-start justify-between gap-3"><div><p className="text-sm font-medium">{service.serviceName} · {service.customerName}</p><p className="text-xs text-[#6E6E73]">{service.appointmentDate || 'No appointment date'}{service.appointmentTime ? ` at ${service.appointmentTime}` : ''} · {line.role.replace('-', ' ')} · {service.appointmentStatus || 'completed'}</p></div><p className="shrink-0 text-sm font-semibold">{fmtMoney(line.amount, 'KES')}</p></div><p className="mt-1 text-xs text-[#6E6E73]">Revenue {fmtMoney(service.serviceRevenue, 'KES')} · commission base {fmtMoney(service.commissionBase, 'KES')} · order {service.orderId.slice(0, 8)}</p></div>)}</div>
