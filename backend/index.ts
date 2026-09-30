@@ -499,32 +499,43 @@ export const handler = router({
       db.list('payout_items', { limit: 10000 }),
       db.list('appointments', { limit: 5000 }),
     ]);
-    const unpaidEarnings = calculateUnpaidStaffEarnings(orders as any[], payoutItems as any[], appointments as any[], weekFrom, weekTo);
     const currentPeriodEarnings = calculateUnpaidStaffEarnings(orders as any[], payoutItems as any[], appointments as any[], weekFrom, now + 1);
+    const ownCurrentPeriodEarnings = currentPeriodEarnings.filter(line => line.staffId === String(context.staffId));
     const orderCreatedAtById = new Map((orders as any[]).map(order => [String(order.id), Number(order.createdAt || 0)]));
+    const ordersById = new Map((orders as any[]).map(order => [String(order.id), order]));
+    const appointmentsById = new Map((appointments as any[]).filter(appointment => !appointment.deletedAt).map(appointment => [String(appointment.id), appointment]));
     const paidHistory = (payoutItems as any[])
       .filter(item => !item.deletedAt && item.staffId === context.staffId)
       .map(item => ({ serviceName: item.serviceName || item.orderId || 'Paid earning', createdAt: Number(item.orderCreatedAt || orderCreatedAtById.get(String(item.orderId || '')) || item.createdAt || 0), paidAt: Number(item.createdAt || 0), role: item.role === 'assistant' ? 'assistant' : 'commission', amount: Number(item.commission || 0) }));
     let todayCommission = 0;
     let todayAssistant = 0;
-    let fortnightCommission = 0;
-    let fortnightAssistant = 0;
-    const ownEarnings = unpaidEarnings.filter(line => line.staffId === String(context.staffId));
-    const completedWork = currentPeriodEarnings
-      .filter(line => line.staffId === String(context.staffId))
-      .map(line => ({ serviceName: line.serviceName, createdAt: line.createdAt, role: line.role, amount: line.amount }));
-    for (const earning of currentPeriodEarnings.filter(line => line.staffId === String(context.staffId) && line.createdAt >= weekTo)) {
+    let weekCommission = 0;
+    let weekAssistant = 0;
+    const completedWork = ownCurrentPeriodEarnings.map(line => {
+      const order: any = ordersById.get(line.orderId);
+      const appointment: any = appointmentsById.get(String(order?.appointmentId || ''));
+      return {
+        serviceName: line.serviceName,
+        customerName: order?.customerName || appointment?.customerName || 'Client',
+        appointmentDate: appointment?.date || null,
+        appointmentTime: appointment?.time || null,
+        appointmentId: appointment?.id || order?.appointmentId || null,
+        createdAt: line.createdAt,
+        role: line.role,
+        amount: line.amount,
+      };
+    });
+    for (const earning of ownCurrentPeriodEarnings) {
       const amountField = earning.role === 'assistant' ? 'assistant' : 'commission';
-      if (amountField === 'assistant') todayAssistant += earning.amount;
-      else todayCommission += earning.amount;
-    }
-    for (const earning of ownEarnings) {
-      const amountField = earning.role === 'assistant' ? 'assistant' : 'commission';
-      if (amountField === 'assistant') fortnightAssistant += earning.amount;
-      else fortnightCommission += earning.amount;
+      if (amountField === 'assistant') weekAssistant += earning.amount;
+      else weekCommission += earning.amount;
+      if (earning.createdAt >= weekTo) {
+        if (amountField === 'assistant') todayAssistant += earning.amount;
+        else todayCommission += earning.amount;
+      }
     }
 
-    const weekly = { commission: fortnightCommission, assistant: fortnightAssistant, total: fortnightCommission + fortnightAssistant };
+    const weekly = { commission: weekCommission, assistant: weekAssistant, total: weekCommission + weekAssistant };
     return json({
       today: { commission: todayCommission, assistant: todayAssistant, total: todayCommission + todayAssistant },
       week: weekly,

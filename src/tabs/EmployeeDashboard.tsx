@@ -10,10 +10,10 @@ const fmtExactKES = (n: number) => `KES ${(n || 0).toLocaleString('en-KE', { min
 function EmployeeDashboard({ account, onAddService }: { account: { name?: string; staffId?: string }; onAddService: (appointment: Appointment) => void }) {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [dailyEarnings, setDailyEarnings] = useState(0);
-  const [fortnightEarnings, setFortnightEarnings] = useState(0);
+  const [weekToDateEarnings, setWeekToDateEarnings] = useState(0);
   const [dailyCommission, setDailyCommission] = useState(0);
   const [dailyAssistant, setDailyAssistant] = useState(0);
-  const [completedWork, setCompletedWork] = useState<{ serviceName: string; createdAt: number; role: 'commission' | 'assistant'; amount: number }[]>([]);
+  const [completedWork, setCompletedWork] = useState<{ serviceName: string; customerName: string; appointmentDate: string | null; appointmentTime: string | null; appointmentId: string | null; createdAt: number; role: 'commission' | 'assistant'; amount: number }[]>([]);
   const [paidHistory, setPaidHistory] = useState<{ serviceName: string; createdAt: number; paidAt?: number; role: 'commission' | 'assistant'; amount: number }[]>([]);
   const [waitingClients, setWaitingClients] = useState<Appointment[]>([]);
   const [earningsLoading, setEarningsLoading] = useState(true);
@@ -44,7 +44,7 @@ function EmployeeDashboard({ account, onAddService }: { account: { name?: string
       if (!active) return;
       setEarningsError('');
       setDailyEarnings(earnings.today.total || 0);
-      setFortnightEarnings((earnings.week || earnings.fortnight).total || 0);
+      setWeekToDateEarnings((earnings.week || earnings.fortnight).total || 0);
       setDailyCommission(earnings.today.commission || 0);
       setDailyAssistant(earnings.today.assistant || 0);
       setCompletedWork(earnings.completedWork || []);
@@ -56,8 +56,16 @@ function EmployeeDashboard({ account, onAddService }: { account: { name?: string
       if (active) setEarningsLoading(false);
     });
     loadEarnings();
-    const earningsRefresh = window.setInterval(loadEarnings, 15000);
-    return () => { active = false; window.clearInterval(earningsRefresh); };
+    const refreshWhenVisible = () => { if (document.visibilityState === 'visible') loadEarnings(); };
+    const earningsRefresh = window.setInterval(refreshWhenVisible, 10000);
+    window.addEventListener('focus', refreshWhenVisible);
+    document.addEventListener('visibilitychange', refreshWhenVisible);
+    return () => {
+      active = false;
+      window.clearInterval(earningsRefresh);
+      window.removeEventListener('focus', refreshWhenVisible);
+      document.removeEventListener('visibilitychange', refreshWhenVisible);
+    };
   }, [account.staffId]);
 
   if (loading) return <LoadingState label="Loading your assigned clients..." />;
@@ -80,13 +88,13 @@ function EmployeeDashboard({ account, onAddService }: { account: { name?: string
       </div>
 
       <Card className="p-5">
-          <p className="text-xs text-[#6E6E73]">My Sunday-to-yesterday Earnings</p>
-          {earningsLoading ? <p className="mt-1 text-sm text-[#6E6E73]">Loading…</p> : earningsError ? <p role="status" className="mt-1 text-sm text-amber-700">{earningsError}</p> : <p className="text-xl font-semibold mt-1">{fmtExactKES(fortnightEarnings)}</p>}
+          <p className="text-xs text-[#6E6E73]">My Sunday-to-today Earnings</p>
+          {earningsLoading ? <p className="mt-1 text-sm text-[#6E6E73]">Loading…</p> : earningsError ? <p role="status" className="mt-1 text-sm text-amber-700">{earningsError}</p> : <p className="text-xl font-semibold mt-1">{fmtExactKES(weekToDateEarnings)}</p>}
       </Card>
 
       <Card className="p-5">
         <h2 className="font-semibold mb-3">Completed Services</h2>
-        {earningsLoading ? <p className="text-sm text-[#6E6E73]">Loading completed service earnings…</p> : earningsError ? <p className="text-sm text-amber-700">{earningsError}</p> : completedWork.length === 0 ? <p className="text-sm text-[#6E6E73]">Completed services and their earnings will appear here.</p> : <div className="space-y-2">{completedWork.map((work, index) => <div key={`${work.createdAt}-${work.serviceName}-${index}`} className="flex items-center justify-between gap-3 border-b border-black/5 pb-2 last:border-0"><div><p className="text-sm font-medium">{work.serviceName}</p><p className="text-xs text-[#6E6E73]">{new Date(work.createdAt).toLocaleString()} · {work.role === 'assistant' ? 'Assistant fee' : 'Commission'}</p></div><p className="shrink-0 text-sm font-semibold">{fmtExactKES(work.amount)}</p></div>)}</div>}
+        {earningsLoading ? <p className="text-sm text-[#6E6E73]">Loading completed service earnings…</p> : earningsError ? <p className="text-sm text-amber-700">{earningsError}</p> : completedWork.length === 0 ? <p className="text-sm text-[#6E6E73]">Completed services and their earnings will appear here.</p> : <div className="space-y-2">{completedWork.map((work, index) => <div key={`${work.appointmentId || work.createdAt}-${work.serviceName}-${index}`} className="flex items-center justify-between gap-3 border-b border-black/5 pb-2 last:border-0"><div><p className="text-sm font-medium">{work.serviceName} · {work.customerName}</p><p className="text-xs text-[#6E6E73]">{work.appointmentDate || new Date(work.createdAt).toLocaleDateString()}{work.appointmentTime ? ` at ${work.appointmentTime}` : ''} · {work.role === 'assistant' ? 'Assistant earnings' : 'Commission'}</p></div><p className="shrink-0 text-sm font-semibold">{fmtExactKES(work.amount)}</p></div>)}</div>}
       </Card>
 
       <Card className="p-5">
