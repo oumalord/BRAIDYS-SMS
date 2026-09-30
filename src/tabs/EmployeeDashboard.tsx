@@ -78,7 +78,7 @@ function EmployeeDashboard({ account, onAddService }: { account: { name?: string
       </div>
 
       <Card className="p-5">
-          <p className="text-xs text-[#6E6E73]">My Saturday-Friday Earnings (up to yesterday)</p>
+          <p className="text-xs text-[#6E6E73]">My Sunday-to-yesterday Earnings</p>
           {earningsLoading ? <p className="mt-1 text-sm text-[#6E6E73]">Loading…</p> : earningsError ? <p role="status" className="mt-1 text-sm text-amber-700">{earningsError}</p> : <p className="text-xl font-semibold mt-1">{fmtExactKES(fortnightEarnings)}</p>}
       </Card>
 

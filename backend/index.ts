@@ -16,19 +16,16 @@ function saturdayFridayRange(date = new Date()) {
   return { from: fromDate.getTime(), to: toDate.getTime() };
 }
 
-function completedSaturdayFridayRange(date = new Date()) {
+function currentSundayThroughYesterdayRange(date = new Date()) {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Africa/Nairobi', year: 'numeric', month: '2-digit', day: '2-digit',
   }).formatToParts(date);
   const part = (type: string) => Number(parts.find(value => value.type === type)?.value);
   const today = new Date(Date.UTC(part('year'), part('month') - 1, part('day')));
-  const daysSinceSaturday = (today.getUTCDay() + 1) % 7;
-  const currentSaturday = new Date(today);
-  currentSaturday.setUTCDate(today.getUTCDate() - daysSinceSaturday);
-  const previousSaturday = new Date(currentSaturday);
-  previousSaturday.setUTCDate(currentSaturday.getUTCDate() - 7);
+  const currentSunday = new Date(today);
+  currentSunday.setUTCDate(today.getUTCDate() - today.getUTCDay());
   const nairobiMidnight = (day: Date) => Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate()) - 3 * 60 * 60 * 1000;
-  return { from: nairobiMidnight(previousSaturday), to: nairobiMidnight(currentSaturday) };
+  return { from: nairobiMidnight(currentSunday), to: nairobiMidnight(today) };
 }
 
 function passwordHash(password: string, salt = randomBytes(16).toString('hex')) {
@@ -489,7 +486,7 @@ export const handler = router({
     const dayStart = new Date();
     dayStart.setHours(0, 0, 0, 0);
     const todayFrom = dayStart.getTime();
-    const { from: weekFrom, to: weekTo } = completedSaturdayFridayRange();
+    const { from: weekFrom, to: weekTo } = currentSundayThroughYesterdayRange();
 
     const [{ items: orders }, { items: payoutItems }, { items: appointments }] = await Promise.all([
       db.list('orders', { limit: 5000 }),
@@ -832,7 +829,7 @@ export const handler = router({
     const search = String(query.name || '').trim().toLowerCase();
     const requestedStaffId = String(query.staffId || '').trim();
     if (!search && !requestedStaffId) return error('Enter a staff name to search', 400);
-    const period = completedSaturdayFridayRange();
+    const period = currentSundayThroughYesterdayRange();
     const [{ items: staffRows }, { items: orders }, { items: appointmentRows }, { items: payoutItems }] = await Promise.all([
       db.list('staff', { limit: 2000 }),
       db.list('orders', { limit: 5000 }),
@@ -1544,7 +1541,7 @@ export const handler = router({
     if (!context || !['owner', 'admin'].includes(context.role)) return error('Only the owner or administrator can view payroll staff', 403);
     const now = Date.now();
     const { items } = await db.list('staff', { limit: 2000 });
-    const period = completedSaturdayFridayRange();
+    const period = currentSundayThroughYesterdayRange();
     const { from } = period;
     const [{ items: orders }, { items: deletedPayoutItems }, { items: appointments }] = await Promise.all([
       db.list('orders', { limit: 5000 }),
