@@ -491,11 +491,8 @@ export const handler = router({
   'GET /api/staff/me/earnings': [async () => {
     const context = currentContext();
     if (!context?.staffId || !['barber', 'receptionist'].includes(context.role)) return error('Only an employee can view this earnings summary', 403);
-    const now = Date.now();
-    const dayStart = new Date();
-    dayStart.setHours(0, 0, 0, 0);
-    const todayFrom = dayStart.getTime();
     const { from: weekFrom, to: weekTo } = currentSundayThroughYesterdayRange();
+    const now = Date.now();
 
     const [{ items: orders }, { items: payoutItems }, { items: appointments }] = await Promise.all([
       db.list('orders', { limit: 5000 }),
@@ -503,6 +500,7 @@ export const handler = router({
       db.list('appointments', { limit: 5000 }),
     ]);
     const unpaidEarnings = calculateUnpaidStaffEarnings(orders as any[], payoutItems as any[], appointments as any[], weekFrom, weekTo);
+    const currentPeriodEarnings = calculateUnpaidStaffEarnings(orders as any[], payoutItems as any[], appointments as any[], weekFrom, now + 1);
     const orderCreatedAtById = new Map((orders as any[]).map(order => [String(order.id), Number(order.createdAt || 0)]));
     const paidHistory = (payoutItems as any[])
       .filter(item => !item.deletedAt && item.staffId === context.staffId)
@@ -512,14 +510,16 @@ export const handler = router({
     let fortnightCommission = 0;
     let fortnightAssistant = 0;
     const ownEarnings = unpaidEarnings.filter(line => line.staffId === String(context.staffId));
-    const completedWork = ownEarnings.map(line => ({ serviceName: line.serviceName, createdAt: line.createdAt, role: line.role, amount: line.amount }));
-    for (const earning of ownEarnings) {
-      const isToday = earning.createdAt >= todayFrom;
+    const completedWork = currentPeriodEarnings
+      .filter(line => line.staffId === String(context.staffId))
+      .map(line => ({ serviceName: line.serviceName, createdAt: line.createdAt, role: line.role, amount: line.amount }));
+    for (const earning of currentPeriodEarnings.filter(line => line.staffId === String(context.staffId) && line.createdAt >= weekTo)) {
       const amountField = earning.role === 'assistant' ? 'assistant' : 'commission';
-      if (isToday) {
-        if (amountField === 'assistant') todayAssistant += earning.amount;
-        else todayCommission += earning.amount;
-      }
+      if (amountField === 'assistant') todayAssistant += earning.amount;
+      else todayCommission += earning.amount;
+    }
+    for (const earning of ownEarnings) {
+      const amountField = earning.role === 'assistant' ? 'assistant' : 'commission';
       if (amountField === 'assistant') fortnightAssistant += earning.amount;
       else fortnightCommission += earning.amount;
     }

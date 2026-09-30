@@ -4,7 +4,7 @@ import { AppointmentsApi, StaffApi, fmtKES } from '../lib/api';
 import { Badge, Button, Card, EmptyState, LoadingState, toast } from '../components/ui';
 import type { Appointment } from '../types';
 
-function todayStr() { return new Date().toISOString().slice(0, 10); }
+function todayStr() { return new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Nairobi', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()); }
 const fmtExactKES = (n: number) => `KES ${(n || 0).toLocaleString('en-KE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 function EmployeeDashboard({ account, onAddService }: { account: { name?: string; staffId?: string }; onAddService: (appointment: Appointment) => void }) {
@@ -40,8 +40,9 @@ function EmployeeDashboard({ account, onAddService }: { account: { name?: string
     }).finally(() => {
       if (active) setLoading(false);
     });
-    StaffApi.myEarnings().then(earnings => {
+    const loadEarnings = () => StaffApi.myEarnings().then(earnings => {
       if (!active) return;
+      setEarningsError('');
       setDailyEarnings(earnings.today.total || 0);
       setFortnightEarnings((earnings.week || earnings.fortnight).total || 0);
       setDailyCommission(earnings.today.commission || 0);
@@ -51,11 +52,12 @@ function EmployeeDashboard({ account, onAddService }: { account: { name?: string
     }).catch((cause: any) => {
       if (!active) return;
       setEarningsError(cause?.message || 'Earnings are temporarily unavailable.');
-      toast('Could not load earnings. Your assigned appointments are still available.', 'error');
     }).finally(() => {
       if (active) setEarningsLoading(false);
     });
-    return () => { active = false; };
+    loadEarnings();
+    const earningsRefresh = window.setInterval(loadEarnings, 15000);
+    return () => { active = false; window.clearInterval(earningsRefresh); };
   }, [account.staffId]);
 
   if (loading) return <LoadingState label="Loading your assigned clients..." />;
