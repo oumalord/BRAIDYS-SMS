@@ -17,13 +17,18 @@ function saturdayFridayRange(date = new Date()) {
 }
 
 function completedSaturdayFridayRange(date = new Date()) {
-  const today = new Date(date);
-  today.setHours(0, 0, 0, 0);
-  const daysSinceSaturday = (today.getDay() + 1) % 7;
-  const toDate = new Date(today);
-  const fromDate = new Date(today);
-  fromDate.setDate(today.getDate() - (daysSinceSaturday || 7));
-  return { from: fromDate.getTime(), to: toDate.getTime() };
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Africa/Nairobi', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(date);
+  const part = (type: string) => Number(parts.find(value => value.type === type)?.value);
+  const today = new Date(Date.UTC(part('year'), part('month') - 1, part('day')));
+  const daysSinceSaturday = (today.getUTCDay() + 1) % 7;
+  const currentSaturday = new Date(today);
+  currentSaturday.setUTCDate(today.getUTCDate() - daysSinceSaturday);
+  const previousSaturday = new Date(currentSaturday);
+  previousSaturday.setUTCDate(currentSaturday.getUTCDate() - 7);
+  const nairobiMidnight = (day: Date) => Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate()) - 3 * 60 * 60 * 1000;
+  return { from: nairobiMidnight(previousSaturday), to: nairobiMidnight(currentSaturday) };
 }
 
 function passwordHash(password: string, salt = randomBytes(16).toString('hex')) {
@@ -883,7 +888,7 @@ export const handler = router({
       }
     }
     services.sort((first, second) => second.createdAt - first.createdAt);
-    return json({ period: { from: period.from, to: Math.min(period.to - 1, now) }, staff: matchedStaff, services });
+    return json({ period: { from: period.from, to: period.to - 1 }, staff: matchedStaff, services });
   }],
   'POST /api/appointments': [async ({ body }) => {
     const b: any = body;
