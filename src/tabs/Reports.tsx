@@ -10,11 +10,11 @@ function cutoffMs(range: Range) {
   const now = Date.now();
   if (range === 'today') { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime(); }
   if (range === 'week') {
-    const current = new Date();
-    const daysSinceSaturday = (current.getDay() + 1) % 7;
-    current.setDate(current.getDate() - daysSinceSaturday);
-    current.setHours(0, 0, 0, 0);
-    return current.getTime();
+    const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Nairobi', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
+    const part = (type: string) => Number(parts.find(value => value.type === type)?.value);
+    const sunday = new Date(Date.UTC(part('year'), part('month') - 1, part('day')));
+    sunday.setUTCDate(sunday.getUTCDate() - sunday.getUTCDay());
+    return Date.UTC(sunday.getUTCFullYear(), sunday.getUTCMonth(), sunday.getUTCDate()) - 3 * 60 * 60 * 1000;
   }
   if (range === 'month') return now - 30 * 24 * 3600 * 1000;
   return 0;
@@ -175,7 +175,7 @@ function ReceptionistReport({ range }: { range: Range }) {
 }
 
 function Reports({ role }: { role: Role }) {
-  const [range, setRange] = useState<Range>('month');
+  const [range, setRange] = useState<Range>('week');
 
   return (
     <div className="space-y-6">

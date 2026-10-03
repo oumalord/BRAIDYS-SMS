@@ -28,6 +28,18 @@ function currentSundayThroughYesterdayRange(date = new Date()) {
   return { from: nairobiMidnight(currentSunday), to: nairobiMidnight(today) };
 }
 
+function currentSundayThroughNowRange(date = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Africa/Nairobi', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(date);
+  const part = (type: string) => Number(parts.find(value => value.type === type)?.value);
+  const today = new Date(Date.UTC(part('year'), part('month') - 1, part('day')));
+  const currentSunday = new Date(today);
+  currentSunday.setUTCDate(today.getUTCDate() - today.getUTCDay());
+  const from = Date.UTC(currentSunday.getUTCFullYear(), currentSunday.getUTCMonth(), currentSunday.getUTCDate()) - 3 * 60 * 60 * 1000;
+  return { from, to: date.getTime() + 1 };
+}
+
 function nairobiDayRange(date: string) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
   const [year, month, day] = date.split('-').map(Number);
@@ -852,7 +864,7 @@ export const handler = router({
     const selectedDate = String(query.date || '').trim();
     const selectedDay = selectedDate ? nairobiDayRange(selectedDate) : null;
     if (selectedDate && !selectedDay) return error('Choose a valid earnings date', 400);
-    const period = selectedDay || currentSundayThroughYesterdayRange();
+    const period = selectedDay || currentSundayThroughNowRange();
     const [{ items: staffRows }, { items: orders }, { items: appointmentRows }, { items: payoutItems }] = await Promise.all([
       db.list('staff', { limit: 2000 }),
       db.list('orders', { limit: 5000 }),
@@ -1655,7 +1667,7 @@ export const handler = router({
     const now = Date.now();
     let cutoff = 0;
     if (range === 'today') { const d = new Date(); d.setHours(0, 0, 0, 0); cutoff = d.getTime(); }
-    else if (range === 'week') cutoff = saturdayFridayRange().from;
+    else if (range === 'week') cutoff = currentSundayThroughNowRange().from;
     else if (range === 'month') cutoff = now - 30 * DAY;
     else cutoff = 0;
 

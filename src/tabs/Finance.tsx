@@ -5,11 +5,10 @@ import { AppointmentsApi, DashboardApi, downloadCSV, ExpensesApi, PayrollApi, Pa
 import type { DashboardData, Expense, PayoutBatch, Staff, WeeklyStaffWorkReport } from '../types';
 
 type Range = 'today' | 'week' | 'month' | 'all';
-const localDateValue = (date = new Date()) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 
 function Finance() {
-  const [range, setRange] = useState<Range>('month');
-  const [earningsDate, setEarningsDate] = useState(() => localDateValue());
+  const [range, setRange] = useState<Range>('week');
+  const [earningsDate, setEarningsDate] = useState('');
   const [data, setData] = useState<DashboardData | null>(null);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [payouts, setPayouts] = useState<PayoutBatch[]>([]);
@@ -45,7 +44,7 @@ function Finance() {
   const loadDailyReports = (members = staff) => {
     setDailyReportsLoading(true);
     setDailyReportsError('');
-    Promise.allSettled(members.filter(member => member.employmentStatus !== 'laid-off').map(async member => [member.id, await AppointmentsApi.staffWeeklyWork(member.id, earningsDate)] as const))
+    Promise.allSettled(members.filter(member => member.employmentStatus !== 'laid-off').map(async member => [member.id, await AppointmentsApi.staffWeeklyWork(member.id, earningsDate || undefined)] as const))
       .then(reports => {
         const successfulReports = reports.flatMap(report => report.status === 'fulfilled' ? [report.value] : []);
         setWeeklyReports(Object.fromEntries(successfulReports));
@@ -125,7 +124,7 @@ function Finance() {
   const payrollDateRange = payrollPeriod
     ? `${new Date(payrollPeriod.from).toLocaleDateString()} – ${new Date(payrollPeriod.to).toLocaleDateString()}`
     : 'Sunday through yesterday';
-  const selectedEarningsLabel = new Date(`${earningsDate}T12:00:00`).toLocaleDateString();
+  const selectedEarningsLabel = earningsDate ? new Date(`${earningsDate}T12:00:00`).toLocaleDateString() : 'Sunday through today';
   const payrollStaff = staff.filter(member => member.employmentStatus !== 'laid-off');
   const weeklyStaffEarnings = payrollStaff.map(member => {
     const report = weeklyReports[member.id];
@@ -143,7 +142,7 @@ function Finance() {
     setBreakdown(null);
     setBreakdownError('');
     setBreakdownLoading(true);
-    try { setBreakdown(await AppointmentsApi.staffWeeklyWork(member.id, earningsDate)); }
+    try { setBreakdown(await AppointmentsApi.staffWeeklyWork(member.id, earningsDate || undefined)); }
     catch (cause: any) { setBreakdownError(cause?.message || 'Could not load this staff member’s appointment earnings.'); }
     finally { setBreakdownLoading(false); }
   };
@@ -224,7 +223,7 @@ function Finance() {
             </div>
           </Card>
           <Card className="p-6">
-            <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="font-semibold mb-1">Staff Earnings by Date</h2><p className="text-xs text-[#6E6E73]">Completed appointment commissions and assistant earnings for {selectedEarningsLabel}.</p></div><Field label="Earnings date" htmlFor="staff-earnings-date"><Input id="staff-earnings-date" type="date" value={earningsDate} onChange={event => setEarningsDate(event.target.value)} /></Field></div>
+            <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="font-semibold mb-1">Staff Earnings</h2><p className="text-xs text-[#6E6E73]">Completed appointment commissions and assistant earnings for {selectedEarningsLabel}.</p></div><Field label="Earnings date (optional)" htmlFor="staff-earnings-date"><Input id="staff-earnings-date" type="date" value={earningsDate} onChange={event => setEarningsDate(event.target.value)} /></Field></div>
             {dailyReportsError && <p role="alert" className="mb-3 text-sm text-amber-700">{dailyReportsError}</p>}
             {payrollLoading || dailyReportsLoading ? <p className="text-sm text-[#6E6E73]">Loading appointment-linked earnings…</p> : weeklyStaffEarnings.length === 0 ? <p className="text-sm text-[#6E6E73]">No staff records are available.</p> : (
               <div className="overflow-x-auto">
