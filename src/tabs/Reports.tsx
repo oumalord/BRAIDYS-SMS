@@ -47,7 +47,7 @@ function OwnerReport({ range }: { range: Range }) {
 
   const handleDownload = () => {
     const rows: (string | number)[][] = [
-      ['SafiGroom OS - Owner Business Report'],
+      ['BRAIDY SALON - Owner Business Report'],
       ['Range', range],
       [],
       ['Revenue (KES)', revenueKES],
@@ -62,7 +62,7 @@ function OwnerReport({ range }: { range: Range }) {
       ['Staff', 'Role', 'Service Revenue (KES)', 'Assistant Fees Deducted (KES)', 'Commission (KES)', 'Assistant Earnings (KES)', 'Expected Income (KES)'],
       ...commissionStatement.map(p => [p.name, p.role, Math.round(p.serviceRevenue), Math.round(p.helperDeductions), Math.round(p.commission), Math.round(p.assistantEarnings), Math.round(p.commission + p.assistantEarnings)]),
     ];
-    downloadCSV(`safigroom-owner-report-${range}.csv`, rows);
+    downloadCSV(`braidy-salon-owner-report-${range}.csv`, rows);
   };
 
   return (
@@ -128,7 +128,7 @@ function ReceptionistReport({ range }: { range: Range }) {
 
   const handleDownload = () => {
     const rows: (string | number)[][] = [
-      ['SafiGroom OS - Front Desk Performance Report'],
+      ['BRAIDY SALON - Front Desk Performance Report'],
       ['Range', range],
       [],
       ['Appointments Booked', inRangeAppts.length],
@@ -143,7 +143,7 @@ function ReceptionistReport({ range }: { range: Range }) {
       ['Card payments (KES)', data.paymentMethodTotals.Card],
       ['M-Pesa payments (KES)', data.paymentMethodTotals['M-Pesa']],
     ];
-    downloadCSV(`safigroom-front-desk-report-${range}.csv`, rows);
+    downloadCSV(`braidy-salon-front-desk-report-${range}.csv`, rows);
   };
 
   return (

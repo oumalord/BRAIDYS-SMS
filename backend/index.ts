@@ -173,10 +173,10 @@ async function notifyCustomer(email: string | undefined, subject: string, messag
 
 async function notifyEmployee(staff: any, employmentStatus: 'active' | 'laid-off', initialPassword?: string) {
   if (!staff.accountEmail) return;
-  const subject = employmentStatus === 'laid-off' ? 'SafiGroom employment update' : 'Welcome back to SafiGroom';
+  const subject = employmentStatus === 'laid-off' ? 'BRAIDY SALON employment update' : 'Welcome back to BRAIDY SALON';
   const message = employmentStatus === 'laid-off'
-    ? `Hello ${staff.name},\n\nThis email confirms that your employment with SafiGroom has ended, effective immediately. Please contact the business owner if you have questions about your final commission statement.`
-    : `Hello ${staff.name},\n\nThis email confirms that you are employed by SafiGroom again. Your compensation is 50% commission after product and helper deductions.${initialPassword ? `\n\nLogin email: ${staff.accountEmail}\nTemporary password: ${initialPassword}\nPlease change this password after signing in.` : ''}`;
+    ? `Hello ${staff.name},\n\nThis email confirms that your employment with BRAIDY SALON has ended, effective immediately. Please contact the business owner if you have questions about your final commission statement.`
+    : `Hello ${staff.name},\n\nThis email confirms that you are employed by BRAIDY SALON again. Your compensation is 50% commission after product and helper deductions.${initialPassword ? `\n\nLogin email: ${staff.accountEmail}\nTemporary password: ${initialPassword}\nPlease change this password after signing in.` : ''}`;
   await notifyCustomer(staff.accountEmail, subject, message, staff.id);
 }
 
@@ -507,7 +507,7 @@ export const handler = router({
     await db.add('salons', [{ id: salonId, name, status: 'active', createdAt: Date.now() }]);
     await db.add('branches', [{ id: branchId, salonId, name: body.branchName || 'Main Branch', status: 'active', createdAt: Date.now() }]);
     await db.add('accounts', [{ id: accountId, tenantId: salonId, salonName: name, branchId, name: ownerName, email: ownerEmail, phone: body.ownerPhone || '', role: 'owner', status: 'active', passwordHash: passwordHash(ownerPassword), createdAt: Date.now() }]);
-    await notifyCustomer(ownerEmail, `Your SafiGroom owner account for ${name}`, `Salon: ${name}\nLogin email: ${ownerEmail}\nTemporary password: ${ownerPassword}\nPlease change the password after signing in.`, accountId);
+    await notifyCustomer(ownerEmail, `Your BRAIDY SALON owner account for ${name}`, `Salon: ${name}\nLogin email: ${ownerEmail}\nTemporary password: ${ownerPassword}\nPlease change the password after signing in.`, accountId);
     return json({ salonId, branchId, accountId, ownerEmail });
   }],
   'POST /api/admin/branches': [async ({ body }) => {
@@ -526,7 +526,7 @@ export const handler = router({
     if (!account) return error('Account not found', 404);
     if (newPassword.length < 8) return error('Password must be at least 8 characters', 400);
     await db.update('accounts', [{ id: account.id, record: { ...account, passwordHash: passwordHash(newPassword), passwordResetAt: Date.now() } }]);
-    await notifyCustomer(account.email, 'Your SafiGroom password was reset', `Your password was reset by the platform administrator.\nLogin email: ${account.email}\nNew temporary password: ${newPassword}`, account.id);
+    await notifyCustomer(account.email, 'Your BRAIDY SALON password was reset', `Your password was reset by the platform administrator.\nLogin email: ${account.email}\nNew temporary password: ${newPassword}`, account.id);
     return json({ ok: true, email: account.email });
   }],
   'POST /api/staff/me/pin': [async ({ body }) => {
@@ -1097,7 +1097,7 @@ export const handler = router({
       branchId: branch.id, branchName: branch.name,
       position: activeQueue.filter((q: any) => q.status !== 'completed').length + 1, ticketNumber,
     }]);
-    await notifyCustomer(customerEmail, `Booking request received: ticket ${ticketNumber}`, `Your SafiGroom booking request was received. Reception will confirm the exact service and time. Ticket: ${ticketNumber}.`, id);
+    await notifyCustomer(customerEmail, `Booking request received: ticket ${ticketNumber}`, `Your BRAIDY SALON booking request was received. Reception will confirm the exact service and time. Ticket: ${ticketNumber}.`, id);
     await audit('created', 'appointment', { id, customerId, customerName, customerPhone, serviceName, staffId: items[0].staffId || null, staffName: staffNames.join(', ') || null, date: appointmentDate, time: appointmentTime, ticketNumber }, b.actor || 'customer');
     return json({ id, queueId, ticketNumber, date: b.date || null, time: b.time || null, customerId, customerName, customerPhone, customerVisits: Number(matchedCustomer?.visits || 0) });
   }],
@@ -1286,7 +1286,7 @@ export const handler = router({
     const ticketNumber = b.ticketNumber || createTicketNumber(new Date().toISOString().slice(0, 10));
     const [id] = await db.add('queue', [{ customerId: b.customerId || null, appointmentId: b.appointmentId || null, customerEmail: b.customerEmail || '', customerName: b.customerName, serviceName: b.serviceName || '', staffId: b.staffId || null, staffName: b.staffName || null, status: 'waiting', joinedAt: Date.now(), position, ticketNumber }]);
     if (!id) return error('Failed to join queue', 500);
-    await notifyCustomer(b.customerEmail, `Queue ticket ${ticketNumber}`, `You are now in the SafiGroom queue. Your ticket is ${ticketNumber}.`, id);
+    await notifyCustomer(b.customerEmail, `Queue ticket ${ticketNumber}`, `You are now in the BRAIDY SALON queue. Your ticket is ${ticketNumber}.`, id);
     await audit('created', 'queue', { id, customerName: b.customerName, serviceName: b.serviceName || '', staffName: b.staffName || null, ticketNumber }, b.actor || 'receptionist');
     return json({ id, position, ticketNumber });
   }],
@@ -1302,7 +1302,7 @@ export const handler = router({
     const updated = { ...existing, ...patch, ...(patch.status === 'in-service' ? { calledAt: Date.now() } : {}) };
     const [ok] = await db.update('queue', [{ id: params.id, record: updated }]);
     if (!ok) return error('Update failed', 500);
-    if (patch.status === 'in-service') await notifyCustomer(existing.customerEmail, `Now serving ticket ${existing.ticketNumber || ''}`, `Your SafiGroom ticket ${existing.ticketNumber || ''} has been called. Please proceed to ${existing.staffName || 'the assigned employee'}.`, params.id);
+    if (patch.status === 'in-service') await notifyCustomer(existing.customerEmail, `Now serving ticket ${existing.ticketNumber || ''}`, `Your BRAIDY SALON ticket ${existing.ticketNumber || ''} has been called. Please proceed to ${existing.staffName || 'the assigned employee'}.`, params.id);
     await audit(`status:${patch.status || 'updated'}`, 'queue', updated, patch.actor || existing.staffName || 'staff');
     return json({ ok: true });
   }],
@@ -1751,7 +1751,7 @@ export const handler = router({
       if (!tokenResponse.ok || !tokenBody.access_token) throw new Error(tokenBody.errorMessage || 'Could not authenticate with Safaricom');
       const results: any[] = [];
       for (const recipient of cleanRecipients) {
-        const response = await fetch(`${baseUrl}/mpesa/b2c/v1/paymentrequest`, { method: 'POST', headers: { Authorization: `Bearer ${tokenBody.access_token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ InitiatorName: initiator, SecurityCredential: securityCredential, CommandID: process.env.MPESA_B2C_COMMAND_ID || 'BusinessPayment', Amount: recipient.amountKES, PartyA: shortcode, PartyB: recipient.phone, Remarks: `SafiGroom payroll ${batchId}`, QueueTimeOutURL: timeoutUrl, ResultURL: resultUrl, Occasion: 'Payroll' }) });
+        const response = await fetch(`${baseUrl}/mpesa/b2c/v1/paymentrequest`, { method: 'POST', headers: { Authorization: `Bearer ${tokenBody.access_token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ InitiatorName: initiator, SecurityCredential: securityCredential, CommandID: process.env.MPESA_B2C_COMMAND_ID || 'BusinessPayment', Amount: recipient.amountKES, PartyA: shortcode, PartyB: recipient.phone, Remarks: `BRAIDY SALON payroll ${batchId}`, QueueTimeOutURL: timeoutUrl, ResultURL: resultUrl, Occasion: 'Payroll' }) });
         const bodyResult: any = await response.json();
         const [itemId] = await db.add('payroll_items', [{ batchId, ...recipient, status: response.ok ? 'submitted' : 'failed', conversationId: bodyResult.ConversationID || null, response: bodyResult, createdAt: now }]);
         results.push({ id: itemId, staffId: recipient.staffId, status: response.ok ? 'submitted' : 'failed', response: bodyResult });
@@ -2048,7 +2048,7 @@ export const handler = router({
     }
 
     if (q.includes('salary') || q.includes('salaries') || q.includes('payroll')) {
-      return json({ answer: 'SafiGroom has no salary payroll. Employees are paid 50% of service revenue after product cost and helper deductions.', grounded: true });
+      return json({ answer: 'BRAIDY SALON has no salary payroll. Employees are paid 50% of service revenue after product cost and helper deductions.', grounded: true });
     }
 
     return json({ answer: "I can only answer from your actual recorded data right now \u2014 try asking about revenue (today/this week/this month), top staff, low stock, inactive customers, busiest hours, staff commissions, or expenses.", grounded: false });
@@ -2114,8 +2114,8 @@ export const handler = router({
     const recipients = (customers as any[]).filter(customer => customer.email && customer.email.includes('@'));
     if (recipients.length === 0) return error('No customers have an email address on their profile', 409);
     const message = `${promotion.title}\n\n${promotion.description || 'A special offer is available for you.'}\n\nDiscount: ${promotion.discountPct}%\nCode: ${promotion.code}\n${promotion.endDate ? `Offer ends: ${promotion.endDate}` : ''}`;
-    await Promise.all(recipients.map(customer => notifyCustomer(customer.email, `${promotion.title} - SafiGroom offer`, message, promotion.id)));
-    await db.update('promotions', [{ id: params.id, record: { ...promotion, lastEmailedAt: Date.now(), lastEmailedCount: recipients.length, emailSubject: (body as any)?.subject || `${promotion.title} - SafiGroom offer` } }]);
+    await Promise.all(recipients.map(customer => notifyCustomer(customer.email, `${promotion.title} - BRAIDY SALON offer`, message, promotion.id)));
+    await db.update('promotions', [{ id: params.id, record: { ...promotion, lastEmailedAt: Date.now(), lastEmailedCount: recipients.length, emailSubject: (body as any)?.subject || `${promotion.title} - BRAIDY SALON offer` } }]);
     await audit('emailed', 'promotion', { ...promotion, recipientCount: recipients.length, recipientNames: recipients.map(customer => customer.name) }, (body as any)?.actor || 'owner');
     return json({ sent: recipients.length, delivery: process.env.RESEND_API_KEY ? 'sent' : 'queued' });
   }],
@@ -2180,7 +2180,7 @@ export const handler = router({
       const password = Buffer.from(`${shortcode}${passkey}${timestamp}`).toString('base64');
       const pushResponse = await fetch(`${baseUrl}/mpesa/stkpush/v1/processrequest`, {
         method: 'POST', headers: { Authorization: `Bearer ${tokenBody.access_token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ BusinessShortCode: shortcode, Password: password, Timestamp: timestamp, TransactionType: 'CustomerPayBillOnline', Amount: Math.round(amountKES), PartyA: phone.replace(/^0/, '254').replace(/^\+/, ''), PartyB: shortcode, PhoneNumber: phone.replace(/^0/, '254').replace(/^\+/, ''), CallBackURL: callbackUrl, AccountReference: `SG-${id.slice(0, 8)}`, TransactionDesc: b.purpose || 'SafiGroom payment' }),
+        body: JSON.stringify({ BusinessShortCode: shortcode, Password: password, Timestamp: timestamp, TransactionType: 'CustomerPayBillOnline', Amount: Math.round(amountKES), PartyA: phone.replace(/^0/, '254').replace(/^\+/, ''), PartyB: shortcode, PhoneNumber: phone.replace(/^0/, '254').replace(/^\+/, ''), CallBackURL: callbackUrl, AccountReference: `SG-${id.slice(0, 8)}`, TransactionDesc: b.purpose || 'BRAIDY SALON payment' }),
       });
       const pushBody: any = await pushResponse.json();
       if (!pushResponse.ok || !pushBody.CheckoutRequestID) throw new Error(pushBody.errorMessage || pushBody.ResponseDescription || 'Safaricom rejected the STK push');

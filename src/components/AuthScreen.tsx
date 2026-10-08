@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Building2, LogIn, UserPlus } from 'lucide-react';
+import { LogIn, UserPlus } from 'lucide-react';
 import { AuthApi, PublicApi } from '../lib/api';
 import { Button, Card, Field, Input, Select, ToastHost, toast } from './ui';
+import InstallAppButton from './InstallAppButton';
 
 interface SalonOption { id: string; name: string; }
 interface BranchOption { id: string; name: string; }
@@ -69,8 +70,8 @@ export default function AuthScreen({ onAuthenticated }: { onAuthenticated: (acco
       <div className="relative z-10 flex min-h-screen items-center justify-center p-3 sm:p-4">
         <Card className="w-full max-w-[92vw] border border-white/70 bg-white/95 p-4 text-[#1D1D1F] shadow-2xl shadow-[#040b1c]/50 backdrop-blur-md sm:max-w-md sm:p-7">
           <div className="text-center mb-6">
-            <div className="mx-auto w-12 h-12 rounded-2xl bg-gradient-to-br from-[#2F6BFF] to-[#00A6D6] text-white flex items-center justify-center"><Building2 size={23} aria-hidden="true" /></div>
-            <h1 className="text-2xl font-semibold mt-4 text-[#1D1D1F]">SafiGroom OS</h1>
+            <img src="/icons/app-icon-192.png" alt="Braidy Salon" className="mx-auto h-16 w-16 rounded-xl object-cover" />
+            <h1 className="text-2xl font-semibold mt-4 text-[#1D1D1F]">BRAIDY SALON</h1>
             <p className="text-sm text-[#6E6E73]">Salon operations and customer care</p>
           </div>
           <div className="flex gap-1 bg-black/5 rounded-full p-1 mb-5 border border-black/10">
@@ -88,6 +89,7 @@ export default function AuthScreen({ onAuthenticated }: { onAuthenticated: (acco
             <Field label={mode === 'login' ? 'Password or PIN' : 'Create 4-digit PIN'} htmlFor="auth-pin"><Input className="border-black/20 text-[#1D1D1F] placeholder:text-[#6E6E73] focus-visible:ring-[#2F6BFF]" id="auth-pin" name="auth-pin" autoComplete="new-password" inputMode={mode === 'signup' ? 'numeric' : undefined} maxLength={mode === 'signup' ? 4 : undefined} pattern={mode === 'signup' ? '[0-9]{4}' : undefined} readOnly={activeField !== 'pin'} type="password" value={form.pin} onFocus={() => setActiveField('pin')} onChange={e => setForm({ ...form, pin: mode === 'signup' ? e.target.value.replace(/\D/g, '').slice(0, 4) : e.target.value })} /></Field>
             <Button type="submit" className="w-full" disabled={busy}>{busy ? 'Please wait...' : mode === 'login' ? 'Log in' : 'Create client account'}</Button>
           </form>
+          <InstallAppButton className="mt-3 w-full" />
         </Card>
         <ToastHost />
       </div>

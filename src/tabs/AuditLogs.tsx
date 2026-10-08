@@ -12,7 +12,7 @@ function AuditLogs() {
     setLoading(true);
     AuditApi.list().then(setLogs).catch(() => toast('Could not load audit logs.', 'error')).finally(() => setLoading(false));
   };
-  const downloadLogs = () => downloadCSV(`safigroom-audit-log-${new Date().toISOString().slice(0, 10)}.csv`, [
+  const downloadLogs = () => downloadCSV(`braidy-salon-audit-log-${new Date().toISOString().slice(0, 10)}.csv`, [
     ['Time', 'Action', 'Area', 'Actor', 'Details'],
     ...logs.map(log => [new Date(log.createdAt).toISOString(), log.action, log.collection, log.actor, log.summary]),
   ]);
@@ -30,7 +30,7 @@ function AuditLogs() {
         <Card className="p-5 overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <caption className="sr-only">Complete SafiGroom audit trail</caption>
+              <caption className="sr-only">Complete BRAIDY SALON audit trail</caption>
               <thead><tr className="text-left text-xs text-[#6E6E73] border-b border-black/5"><th className="pb-2 pr-4">Time</th><th className="pb-2 pr-4">Action</th><th className="pb-2 pr-4">Area</th><th className="pb-2 pr-4">Actor</th><th className="pb-2">Readable details</th></tr></thead>
               <tbody>
                 {logs.map(log => (

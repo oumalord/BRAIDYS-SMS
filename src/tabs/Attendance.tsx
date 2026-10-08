@@ -84,7 +84,7 @@ function Attendance({ role }: { role: Role }) {
       setMine(today.item);
       setClients(today.clients);
     }).catch(() => {});
-    const intervalId = window.setInterval(refreshClients, 15000);
+    const intervalId = window.setInterval(refreshClients, 3000);
     return () => window.clearInterval(intervalId);
   }, [mine?.checkInAt, mine?.checkOutAt]);
 

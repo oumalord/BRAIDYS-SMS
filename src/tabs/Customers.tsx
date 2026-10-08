@@ -78,7 +78,7 @@ function CustomersTab({ role }: { role: string }) {
   const normalizedQuery = query.trim().toLowerCase();
   const filtered = customers.filter(c => [c.name, c.phone, c.email, c.notes, c.id].some(value => String(value || '').toLowerCase().includes(normalizedQuery)));
   const downloadCustomers = () => {
-    downloadCSV(`safigroom-customers-${new Date().toISOString().slice(0, 10)}.csv`, [
+    downloadCSV(`braidy-salon-customers-${new Date().toISOString().slice(0, 10)}.csv`, [
       ['Name', 'Phone', 'Email', 'Loyalty Points', 'Visits', 'Total Spent (KES)', 'Membership', 'Last Visit', 'Notes'],
       ...customers.map(customer => [
         customer.name,

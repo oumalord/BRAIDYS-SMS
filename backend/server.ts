@@ -72,7 +72,7 @@ export { app };
 
 if (process.env.VERCEL !== '1') {
   ensurePlatformAdmin().then(() => {
-    app.listen(port, () => console.log(`SafiGroom API listening on http://localhost:${port}`));
+    app.listen(port, () => console.log(`BRAIDY SALON API listening on http://localhost:${port}`));
   }).catch(cause => {
     console.error('Could not initialize platform admin account', cause);
     process.exitCode = 1;

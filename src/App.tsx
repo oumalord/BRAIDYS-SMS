@@ -24,6 +24,7 @@ import Admin from './tabs/Admin';
 import Reviews from './tabs/Reviews';
 import PublicReview from './components/PublicReview';
 import Attendance from './tabs/Attendance';
+import InstallAppButton from './components/InstallAppButton';
 
 type TabKey = 'dashboard' | 'appointments' | 'attendance' | 'messages' | 'staff' | 'customers' | 'pos' | 'services' | 'memberships' | 'promotions' | 'reviews' | 'reports' | 'finance' | 'ai' | 'booking' | 'logs' | 'admin';
 
@@ -139,8 +140,8 @@ function App() {
       {isOwner && (
         <aside className="hidden md:flex md:flex-col md:w-64 md:flex-shrink-0 bg-black/45 backdrop-blur-2xl border-r border-white/10 md:h-screen md:sticky md:top-0">
           <div className="flex items-center gap-2 px-5 h-16 border-b border-white/10 flex-shrink-0">
-            <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-[#2F6BFF] to-[#00A6D6] flex items-center justify-center text-white font-semibold shadow-lg shadow-[#00A6D6]/20">S</div>
-            <span className="font-semibold tracking-tight text-lg text-white">SafiGroom <span className="bg-gradient-to-r from-[#8bb7ff] to-[#61e6ff] bg-clip-text text-transparent">OS</span></span>
+            <img src="/icons/app-icon-192.png" alt="" className="h-8 w-8 rounded-lg object-cover shadow-lg" />
+            <span className="font-semibold tracking-tight text-lg text-white">BRAIDY SALON</span>
           </div>
           <nav aria-label="Main sections" className="flex-1 overflow-y-auto px-3 py-4 space-y-1">
             {visibleTabs.map(t => {
@@ -171,14 +172,15 @@ function App() {
         <header className="sticky top-0 z-40 border-b border-white/10 bg-black/40 backdrop-blur-2xl">
           <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-2 px-3 sm:px-6">
             <div className={`flex min-w-0 items-center gap-2 ${isOwner ? 'md:hidden' : ''}`}>
-              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-[#2F6BFF] to-[#00A6D6] text-sm font-semibold text-white shadow-lg shadow-[#00A6D6]/20">S</div>
-              <span className="truncate text-base font-semibold tracking-tight text-white sm:text-lg">SafiGroom <span className="bg-gradient-to-r from-[#8bb7ff] to-[#61e6ff] bg-clip-text text-transparent">OS</span></span>
+              <img src="/icons/app-icon-192.png" alt="" className="h-8 w-8 shrink-0 rounded-lg object-cover shadow-lg" />
+              <span className="truncate text-base font-semibold tracking-tight text-white sm:text-lg">BRAIDY SALON</span>
             </div>
             {isOwner && <div className="hidden md:block font-semibold text-white">{visibleTabs.find(t => t.key === tab)?.label}</div>}
             <div className={`hidden items-center gap-3 sm:flex ${isOwner ? 'md:hidden' : ''}`}>
               <span className="truncate text-[10px] text-gray-300 sm:text-xs">{account?.salonName || 'All Salons'} · {account?.name}</span><button className="text-[10px] text-gray-300 underline sm:text-xs" onClick={() => { AuthApi.logout(); setAccount(null); }}>Log out</button>
             </div>
             {isOwner && branches.length > 0 && <div className="shrink-0"><SelectBranch branches={branches} value={selectedBranchId} onChange={selectBranch} /></div>}
+            <div className="shrink-0"><InstallAppButton compact /></div>
             <button className="rounded-lg p-2 text-white hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-[#4C82FF] sm:hidden" aria-label={menuOpen ? 'Close menu' : 'Open menu'} onClick={() => setMenuOpen(m => !m)}>
               {menuOpen ? <X size={20} /> : <Menu size={20} />}
             </button>
@@ -231,7 +233,7 @@ function App() {
         <main id="main-content" className="mx-auto max-w-7xl px-2 pb-24 pt-3 sm:px-6 sm:pb-8 sm:pt-8">
           <div key={selectedBranchId} className="min-h-[75vh] rounded-[20px] bg-[#F5F5F7] p-3 text-[#1D1D1F] shadow-2xl sm:rounded-[32px] sm:p-8">
             {!ready ? (
-              <div className="flex items-center justify-center py-24 text-[#6E6E73]" role="status">Loading SafiGroom OS…</div>
+              <div className="flex items-center justify-center py-24 text-[#6E6E73]" role="status">Loading BRAIDY SALON…</div>
             ) : (
               <AppErrorBoundary key={tab} onRecover={() => setTab(initialTabFor(account))}>
                 {tab === 'dashboard' && (effectiveRole === 'owner' || effectiveRole === 'admin') && <Dashboard />}

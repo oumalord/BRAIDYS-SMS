@@ -166,7 +166,7 @@ function Finance() {
     const totalCommission = payrollStaff.reduce((sum, member) => sum + (member.commissionEarnedWeek || 0), 0);
     const totalAssistant = payrollStaff.reduce((sum, member) => sum + (member.assistantEarnedWeek || 0), 0);
     const rows: (string | number)[][] = [
-      ['SafiGroom weekly payroll'],
+      ['BRAIDY SALON weekly payroll'],
       ['Earnings period', payrollDateRange],
       ['Generated', new Date().toLocaleString()],
       [],
@@ -179,7 +179,7 @@ function Finance() {
       [],
       ['TOTAL', '', '', '', '', totalCommission, totalAssistant, totalCommission + totalAssistant],
     ];
-    downloadCSV(`safigroom-payroll-${dateKey(startDate)}-to-${dateKey(endDate)}.csv`, rows);
+    downloadCSV(`braidy-salon-payroll-${dateKey(startDate)}-to-${dateKey(endDate)}.csv`, rows);
   };
 
   return (
