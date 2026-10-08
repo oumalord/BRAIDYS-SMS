@@ -4,6 +4,9 @@ import { calculateUnpaidStaffEarnings, serviceCommission, staffCommission } from
 
 const DAY = 24 * 3600 * 1000;
 const DEFAULT_STAFF_PIN = '1234';
+const ATTENDANCE_LOCATION = { latitude: -1.2154173, longitude: 36.888536 };
+const ATTENDANCE_RADIUS_METERS = 500;
+const ATTENDANCE_ROLES = ['owner', 'admin', 'manager', 'receptionist', 'barber'];
 
 function saturdayFridayRange(date = new Date()) {
   const current = new Date(date);
@@ -47,6 +50,38 @@ function nairobiDayRange(date: string) {
   if (calendarDay.toISOString().slice(0, 10) !== date) return null;
   const from = Date.UTC(year, month - 1, day) - 3 * 60 * 60 * 1000;
   return { from, to: from + DAY };
+}
+
+function nairobiDateString(date = new Date()) {
+  const parts = new Intl.DateTimeFormat('en', { timeZone: 'Africa/Nairobi', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(date);
+  const part = (type: string) => parts.find(value => value.type === type)?.value || '';
+  return `${part('year')}-${part('month')}-${part('day')}`;
+}
+
+function attendanceRecordId(accountId: string, date: string) {
+  return `attendance-${createHash('sha256').update(`${accountId}:${date}`).digest('hex')}`;
+}
+
+function attendanceDistanceMeters(latitude: number, longitude: number) {
+  const radians = (degrees: number) => degrees * Math.PI / 180;
+  const latitudeDelta = radians(latitude - ATTENDANCE_LOCATION.latitude);
+  const longitudeDelta = radians(longitude - ATTENDANCE_LOCATION.longitude);
+  const arc = Math.sin(latitudeDelta / 2) ** 2
+    + Math.cos(radians(ATTENDANCE_LOCATION.latitude)) * Math.cos(radians(latitude)) * Math.sin(longitudeDelta / 2) ** 2;
+  return 6371000 * 2 * Math.atan2(Math.sqrt(arc), Math.sqrt(1 - arc));
+}
+
+function verifiedAttendanceLocation(body: any): { ok: false; error: string } | { ok: true; distanceMeters: number } {
+  const latitude = Number(body?.latitude);
+  const longitude = Number(body?.longitude);
+  const accuracy = Number(body?.accuracy);
+  if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90 || !Number.isFinite(longitude) || longitude < -180 || longitude > 180) {
+    return { ok: false, error: 'A valid device location is required' };
+  }
+  if (!Number.isFinite(accuracy) || accuracy < 0 || accuracy > 150) return { ok: false, error: 'Location accuracy is too low. Try again outdoors.' };
+  const distanceMeters = attendanceDistanceMeters(latitude, longitude);
+  if (distanceMeters + accuracy > ATTENDANCE_RADIUS_METERS) return { ok: false, error: 'You must be within 500 meters of Braidy Saloon to record attendance.' };
+  return { ok: true, distanceMeters: Math.round(distanceMeters) };
 }
 
 function passwordHash(password: string, salt = randomBytes(16).toString('hex')) {
@@ -113,6 +148,10 @@ function appointmentCardNumber(value: unknown): string {
   const cardNumber = String(value || '').trim();
   if (cardNumber && !/^\d{1,30}$/.test(cardNumber)) throw new Error('Card number must contain digits only');
   return cardNumber;
+}
+function normalizeCustomerPhone(value: unknown) {
+  const digits = String(value || '').replace(/\D/g, '');
+  return digits.startsWith('0') ? `254${digits.slice(1)}` : digits;
 }
 
 async function notifyCustomer(email: string | undefined, subject: string, message: string, referenceId: string) {
@@ -499,6 +538,68 @@ export const handler = router({
     if (!account) return error('Employee account not found', 404);
     await db.update('accounts', [{ id: account.id, record: { ...account, pinHash: passwordHash(pin), pinChangedAt: Date.now() } }]);
     return json({ ok: true });
+  }],
+  'GET /api/attendance/me': [async () => {
+    const context = currentContext();
+    if (!context || !ATTENDANCE_ROLES.includes(context.role)) return error('Attendance is only available to salon staff and administrators', 403);
+    const date = nairobiDateString();
+    const [item] = await db.get('attendance', [attendanceRecordId(context.accountId, date)]);
+    let clients: any[] = [];
+    if (context.staffId && item?.checkInAt && !item.checkOutAt) {
+      const { items: appointments } = await db.list('appointments', { limit: 3000 });
+      clients = (appointments as any[])
+        .filter(appointment => !appointment.deletedAt && appointment.date === date && !['cancelled', 'no-show'].includes(appointment.status)
+          && [appointment.staffId, ...(Array.isArray(appointment.items) ? appointment.items.map((service: any) => service.staffId) : [])].some(staffId => String(staffId || '') === String(context.staffId)))
+        .map(appointment => ({ id: appointment.id, customerName: appointment.customerName, serviceName: appointment.serviceName, time: appointment.time }));
+    }
+    return json({ item: item || null, date, clients });
+  }],
+  'POST /api/attendance/check-in': [async ({ body }) => {
+    const context = currentContext();
+    if (!context || !ATTENDANCE_ROLES.includes(context.role)) return error('Attendance is only available to salon staff and administrators', 403);
+    const location = verifiedAttendanceLocation(body);
+    if (!location.ok) return error(location.error, 403);
+    const date = nairobiDateString();
+    const id = attendanceRecordId(context.accountId, date);
+    const [existing] = await db.get('attendance', [id]);
+    if (existing) return error('You have already checked in today', 409);
+    const [branch] = context.branchId ? await db.get('branches', [context.branchId]) : [null];
+    const item = {
+      id, accountId: context.accountId, staffId: context.staffId || null, name: context.name,
+      role: context.role, tenantId: context.tenantId, branchId: context.branchId || null,
+      branchName: branch?.name || context.salonName, date, checkInAt: Date.now(), checkOutAt: null,
+      verifiedDistanceMeters: location.distanceMeters,
+    };
+    try {
+      await db.add('attendance', [item]);
+    } catch {
+      return error('You have already checked in today', 409);
+    }
+    return json({ item });
+  }],
+  'POST /api/attendance/check-out': [async ({ body }) => {
+    const context = currentContext();
+    if (!context || !ATTENDANCE_ROLES.includes(context.role)) return error('Attendance is only available to salon staff and administrators', 403);
+    const location = verifiedAttendanceLocation(body);
+    if (!location.ok) return error(location.error, 403);
+    const date = nairobiDateString();
+    const id = attendanceRecordId(context.accountId, date);
+    const [existing] = await db.get('attendance', [id]);
+    if (!existing) return error('Check in before checking out', 409);
+    if (existing.checkOutAt) return error('You have already checked out today', 409);
+    const item = { ...existing, checkOutAt: Date.now(), checkOutDistanceMeters: location.distanceMeters };
+    await db.update('attendance', [{ id, record: item }]);
+    return json({ item });
+  }],
+  'GET /api/attendance': [async ({ query }) => {
+    const context = currentContext();
+    if (!context || !['owner', 'admin', 'receptionist'].includes(context.role)) return error('Only the owner, administrator or receptionist can view daily attendance', 403);
+    const date = String(query.date || nairobiDateString());
+    if (!nairobiDayRange(date)) return error('Choose a valid attendance date', 400);
+    const { items } = await db.list('attendance', { limit: 5000 });
+    const visible = (items as any[]).filter(item => item.date === date && (context.role !== 'receptionist' || item.role !== 'owner') && (!context.branchId || item.branchId === context.branchId));
+    visible.sort((first, second) => Number(first.checkInAt || 0) - Number(second.checkInAt || 0));
+    return json({ items: visible, date });
   }],
   'GET /api/staff/me/earnings': [async () => {
     const context = currentContext();
@@ -936,7 +1037,7 @@ export const handler = router({
     if (b.cardNumber && !['owner', 'admin', 'manager', 'receptionist'].includes(context?.role || '')) return error('Only the owner, administrator, manager or receptionist can add a card number', 403);
     let cardNumber = '';
     try { cardNumber = appointmentCardNumber(b.cardNumber); } catch (cause: any) { return error(cause.message, 400); }
-    if (!b.customerName || items.length === 0) return error('Missing required appointment fields', 400);
+    if (!b.customerName || normalizeCustomerPhone(b.customerPhone).length < 7 || items.length === 0) return error('Customer name, valid phone number, and appointment details are required', 400);
     for (const it of items) { if (!it.serviceId && !requestedCategories.length) return error('Each service needs a service selected', 400); }
 
     const { items: existing } = await db.list('appointments', { limit: 1000 });
@@ -948,31 +1049,36 @@ export const handler = router({
     const staffNames = Array.from(new Set(items.map((it: any) => it.staffName).filter(Boolean)));
     let customerId = b.customerId || null;
     let customerEmail = b.customerEmail || '';
-    const normalizedPhone = String(b.customerPhone || '').replace(/\s+/g, '');
+    const normalizedPhone = normalizeCustomerPhone(b.customerPhone);
     const { items: customers } = await db.list('customers', { limit: 2000 });
-    const findExistingCustomer = () => (customers as any[]).find(customer => (customerId && customer.id === customerId)
-      || (customerEmail && String(customer.email || '').toLowerCase() === String(customerEmail).toLowerCase())
-      || (normalizedPhone && String(customer.phone || '').replace(/\s+/g, '') === normalizedPhone));
+    const findExistingCustomer = () => (customers as any[]).find(customer => normalizedPhone && normalizeCustomerPhone(customer.phone) === normalizedPhone);
 
+    let matchedCustomer: any = null;
     if (customerId) {
       const [customer] = await db.get('customers', [customerId]);
-      if (customer) {
+      if (customer && normalizeCustomerPhone(customer.phone) === normalizedPhone) {
+        matchedCustomer = customer;
         customerEmail = customer?.email || customerEmail;
       } else {
+        customerId = null;
         const existingCustomer = findExistingCustomer();
-        if (existingCustomer) customerId = existingCustomer.id;
+        if (existingCustomer) { customerId = existingCustomer.id; matchedCustomer = existingCustomer; }
       }
     }
-    if (!customerId) {
+    if (!matchedCustomer) {
+      customerId = null;
       const existingCustomer = findExistingCustomer();
       if (existingCustomer) {
         customerId = existingCustomer.id;
+        matchedCustomer = existingCustomer;
       } else {
-        [customerId] = await db.add('customers', [{ name: b.customerName, phone: b.customerPhone || '', email: customerEmail, notes: '', loyaltyPoints: 0, totalSpent: 0, totalSpentUSD: 0, visits: 0, lastVisit: null, createdAt: Date.now(), membershipTier: 'none', membershipExpiry: null }]);
+        [customerId] = await db.add('customers', [{ name: b.customerName.trim(), phone: b.customerPhone.trim(), email: customerEmail, notes: '', loyaltyPoints: 0, totalSpent: 0, totalSpentUSD: 0, visits: 0, lastVisit: null, createdAt: Date.now(), membershipTier: 'none', membershipExpiry: null }]);
       }
     }
+    const customerName = matchedCustomer?.name || String(b.customerName).trim();
+    const customerPhone = matchedCustomer?.phone || String(b.customerPhone).trim();
     const [id] = await db.add('appointments', [{
-      customerId, customerName: b.customerName,
+      customerId, customerName, customerPhone,
       serviceId: items[0].serviceId, serviceName,
       customerEmail, staffId: items[0].staffId || null, staffName: staffNames.join(', ') || null,
       branchId: branch.id, branchName: branch.name,
@@ -986,14 +1092,14 @@ export const handler = router({
     const ticketNumber = createTicketNumber(appointmentDate);
     const [queueId] = await db.add('queue', [{
       appointmentId: id, customerId: customerId || null, customerEmail,
-      customerName: b.customerName, serviceName, staffId: items[0].staffId || null,
+      customerName, serviceName, staffId: items[0].staffId || null,
       staffName: staffNames.join(', ') || null, status: 'waiting', joinedAt: Date.now(),
       branchId: branch.id, branchName: branch.name,
       position: activeQueue.filter((q: any) => q.status !== 'completed').length + 1, ticketNumber,
     }]);
     await notifyCustomer(customerEmail, `Booking request received: ticket ${ticketNumber}`, `Your SafiGroom booking request was received. Reception will confirm the exact service and time. Ticket: ${ticketNumber}.`, id);
-    await audit('created', 'appointment', { id, customerId: b.customerId || null, customerName: b.customerName, serviceName, staffId: items[0].staffId || null, staffName: staffNames.join(', ') || null, date: appointmentDate, time: appointmentTime, ticketNumber }, b.actor || 'customer');
-    return json({ id, queueId, ticketNumber, date: b.date || null, time: b.time || null });
+    await audit('created', 'appointment', { id, customerId, customerName, customerPhone, serviceName, staffId: items[0].staffId || null, staffName: staffNames.join(', ') || null, date: appointmentDate, time: appointmentTime, ticketNumber }, b.actor || 'customer');
+    return json({ id, queueId, ticketNumber, date: b.date || null, time: b.time || null, customerId, customerName, customerPhone, customerVisits: Number(matchedCustomer?.visits || 0) });
   }],
   'PUT /api/appointments/:id': [async ({ params, body }) => {
     const context = currentContext();

@@ -56,6 +56,26 @@ export interface Customer {
   membershipPlanId?: string | null;
 }
 
+export interface AttendanceRecord {
+  id: string;
+  accountId: string;
+  staffId: string | null;
+  name: string;
+  role: Role;
+  branchId: string | null;
+  branchName: string;
+  date: string;
+  checkInAt: number;
+  checkOutAt: number | null;
+}
+
+export interface AttendanceClientAssignment {
+  id: string;
+  customerName: string;
+  serviceName: string;
+  time: string;
+}
+
 export type AppointmentStatus = 'pending' | 'confirmed' | 'checked-in' | 'in-service' | 'completed' | 'cancelled' | 'no-show';
 
 export interface AppointmentServiceLine {
@@ -73,6 +93,7 @@ export interface Appointment {
   customerId: string | null;
   customerName: string;
   phone?: string;
+  customerPhone?: string;
   serviceId: string;
   serviceName: string;
   staffId: string | null;

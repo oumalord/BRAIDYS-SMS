@@ -1,11 +1,15 @@
 import { useEffect, useState } from 'react';
 import { Plus, Calendar, Clock, Pencil, Search, Trash2 } from 'lucide-react';
 import { Card, Button, Badge, Modal, Field, Input, Select, EmptyState, LoadingState, toast } from '../components/ui';
-import { AppointmentsApi, StaffApi, ServicesApi, OrdersApi, fmtKES, fmtMoney } from '../lib/api';
+import { AppointmentsApi, CustomersApi, StaffApi, ServicesApi, OrdersApi, fmtKES, fmtMoney } from '../lib/api';
 import POS from './POS';
-import type { Appointment, Staff, ServiceItem, AppointmentStatus, Role, WeeklyStaffWorkReport } from '../types';
+import type { Appointment, Customer, Staff, ServiceItem, AppointmentStatus, Role, WeeklyStaffWorkReport } from '../types';
 
 function todayStr() { return new Date().toISOString().slice(0, 10); }
+function normalizePhone(value: string) {
+  const digits = value.replace(/\D/g, '');
+  return digits.startsWith('0') ? `254${digits.slice(1)}` : digits;
+}
 
 const STATUS_FLOW: Record<AppointmentStatus, AppointmentStatus | null> = {
   pending: 'confirmed', confirmed: 'checked-in', 'checked-in': 'in-service', 'in-service': 'completed', completed: null, cancelled: null, 'no-show': null,
@@ -36,12 +40,13 @@ function canAssignStaff(member: Staff) {
 function Appointments({ role }: { role: Role }) {
   const [date, setDate] = useState(todayStr());
   const [appts, setAppts] = useState<Appointment[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
   const [staff, setStaff] = useState<Staff[]>([]);
   const [services, setServices] = useState<ServiceItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ serviceId: '', staffId: '', date, time: '10:00', cardNumber: '' });
+  const [form, setForm] = useState({ customerName: '', customerPhone: '', serviceId: '', staffId: '', date, time: '10:00', cardNumber: '' });
   const [editing, setEditing] = useState<Appointment | null>(null);
   const [editForm, setEditForm] = useState({ serviceId: '', date: '', time: '', staffId: '', cardNumber: '' });
   const [checkoutAppointment, setCheckoutAppointment] = useState<Appointment | null>(null);
@@ -57,6 +62,7 @@ function Appointments({ role }: { role: Role }) {
 
   useEffect(() => {
     Promise.all([StaffApi.list(), ServicesApi.list()]).then(([s, sv]) => { setStaff(s); setServices(sv); });
+    CustomersApi.list().then(setCustomers).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -66,24 +72,27 @@ function Appointments({ role }: { role: Role }) {
 
   const reload = () => {
     AppointmentsApi.list(date).then(setAppts).catch(() => toast('Could not load appointments.', 'error'));
+    CustomersApi.list().then(setCustomers).catch(() => {});
   };
 
   const doCreate = async () => {
     const service = services.find(s => s.id === form.serviceId);
     const staffMember = staff.find(s => s.id === form.staffId);
     if (!service) return;
+    const returningCustomer = customers.find(customer => normalizePhone(customer.phone) === normalizePhone(form.customerPhone));
     setSaving(true);
     try {
       const { data } = await AppointmentsApi.create({
-        customerId: null,
-        customerName: 'Walk-in Customer',
+        customerId: returningCustomer?.id || null,
+        customerName: form.customerName.trim(),
+        customerPhone: form.customerPhone.trim(),
         serviceId: service.id, serviceName: service.name,
         staffId: staffMember?.id || null, staffName: staffMember?.name || null,
         date: form.date, time: form.time, durationMin: service.durationMin, price: service.price, cardNumber: form.cardNumber,
       });
       toast(`Appointment booked. Payment can be collected at the salon. Ticket ${data.ticketNumber} created.`, 'success');
       setOpen(false);
-      setForm({ serviceId: '', staffId: '', date: form.date, time: '10:00', cardNumber: '' });
+      setForm({ customerName: '', customerPhone: '', serviceId: '', staffId: '', date: form.date, time: '10:00', cardNumber: '' });
       reload();
     } catch (e: any) {
       toast(e?.message || 'Could not book the appointment.', 'error');
@@ -95,7 +104,7 @@ function Appointments({ role }: { role: Role }) {
   const handleCreate = async () => {
     const service = services.find(s => s.id === form.serviceId);
     const staffMember = staff.find(s => s.id === form.staffId);
-    if (!service || !staffMember || !form.date || !form.time || !form.cardNumber) { toast('Card number, staff, date, service, and time are required.', 'error'); return; }
+    if (!form.customerName.trim() || !form.customerPhone.trim() || !service || !staffMember || !form.date || !form.time || !form.cardNumber) { toast('Customer name, phone, card number, staff, date, service, and time are required.', 'error'); return; }
 
     await doCreate();
   };
@@ -274,6 +283,7 @@ function Appointments({ role }: { role: Role }) {
   const canBookAppointments = ['owner', 'admin', 'manager', 'receptionist'].includes(role);
   const canEditAppointments = ['owner', 'admin', 'manager', 'receptionist'].includes(role);
   const canEditClosedAppointments = ['owner', 'admin'].includes(role);
+  const returningCustomer = customers.find(customer => normalizePhone(customer.phone) === normalizePhone(form.customerPhone));
 
   return (
     <div className="space-y-6">
@@ -329,8 +339,8 @@ function Appointments({ role }: { role: Role }) {
             <Card key={a.id} className="p-4 flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-6">
               <div className="flex items-center gap-2 text-sm font-medium w-24"><Clock size={14} aria-hidden="true" className="text-[#6E6E73]" />{a.time}</div>
               <div className="flex-1">
-                <p className="font-medium">{a.customerName}</p>
-                  <p className="text-sm text-[#6E6E73]">{a.serviceName} · {a.staffName || 'Awaiting employee assignment'} · {fmtKES(a.price)}{a.cardNumber ? ` · Card ${a.cardNumber}` : ''}</p>
+                <p className="font-medium">{a.customerName}{a.customerId ? <span className="ml-2 text-xs font-normal text-[#6E6E73]">{customers.find(customer => customer.id === a.customerId)?.visits ?? 0} visits</span> : null}</p>
+                <p className="text-sm text-[#6E6E73]">{a.customerPhone ? `${a.customerPhone} · ` : ''}{a.serviceName} · {a.staffName || 'Awaiting employee assignment'} · {fmtKES(a.price)}{a.cardNumber ? ` · Card ${a.cardNumber}` : ''}</p>
               </div>
               <Badge tone={STATUS_TONE[a.status]}>{a.status.replace('-', ' ')}</Badge>
               {(canEditAppointments || (role === 'barber' && a.staffId === account?.staffId)) && <div className="flex flex-wrap gap-2">
@@ -363,6 +373,9 @@ function Appointments({ role }: { role: Role }) {
           <Button onClick={handleCreate} disabled={saving}>{saving ? 'Booking…' : 'Book Appointment'}</Button>
         </>}>
           <div className="space-y-4">
+            <Field label="Customer name" htmlFor="appt-customer-name"><Input id="appt-customer-name" autoComplete="name" value={form.customerName} onChange={event => setForm(current => ({ ...current, customerName: event.target.value }))} placeholder="Full name" /></Field>
+            <Field label="Phone number" htmlFor="appt-customer-phone"><Input id="appt-customer-phone" type="tel" autoComplete="tel" value={form.customerPhone} onChange={event => setForm(current => ({ ...current, customerPhone: event.target.value }))} placeholder="07… or +254…" /></Field>
+            {form.customerPhone.trim() && <p role="status" className="text-sm text-[#6E6E73]">{returningCustomer ? `Returning client: ${returningCustomer.name} · ${returningCustomer.visits} visits` : form.customerName.trim() ? 'New client' : 'Enter a name for this new client'}</p>}
             <Field label="Card number" htmlFor="appt-card-number"><Input id="appt-card-number" inputMode="numeric" pattern="[0-9]*" value={form.cardNumber} onChange={e => setForm(f => ({ ...f, cardNumber: e.target.value.replace(/\D/g, '') }))} placeholder="Unique for this day" /></Field>
             <Field label="Service" htmlFor="appt-service">
               <Select id="appt-service" value={form.serviceId} onChange={e => setForm(f => ({ ...f, serviceId: e.target.value }))}>

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Home, Calendar, Scissors, Contact, ShoppingCart, DollarSign, Sparkles, Menu, X, Tag, BarChart3, CreditCard, Percent, ClipboardList, Building2, KeyRound, MessageSquare } from 'lucide-react';
+import { Home, Calendar, Scissors, Contact, ShoppingCart, DollarSign, Sparkles, Menu, X, Tag, BarChart3, CreditCard, Percent, ClipboardList, Building2, KeyRound, MessageSquare, Fingerprint } from 'lucide-react';
 import { AuthApi, BranchesApi, StaffApi } from './lib/api';
 import { Button, Field, Input, Modal, ToastHost, toast } from './components/ui';
 import AppErrorBoundary from './components/AppErrorBoundary';
@@ -23,12 +23,14 @@ import AuthScreen from './components/AuthScreen';
 import Admin from './tabs/Admin';
 import Reviews from './tabs/Reviews';
 import PublicReview from './components/PublicReview';
+import Attendance from './tabs/Attendance';
 
-type TabKey = 'dashboard' | 'appointments' | 'messages' | 'staff' | 'customers' | 'pos' | 'services' | 'memberships' | 'promotions' | 'reviews' | 'reports' | 'finance' | 'ai' | 'booking' | 'logs' | 'admin';
+type TabKey = 'dashboard' | 'appointments' | 'attendance' | 'messages' | 'staff' | 'customers' | 'pos' | 'services' | 'memberships' | 'promotions' | 'reviews' | 'reports' | 'finance' | 'ai' | 'booking' | 'logs' | 'admin';
 
 const TABS: { key: TabKey; label: string; icon: any; roles: Role[] }[] = [
   { key: 'dashboard', label: 'Dashboard', icon: Home, roles: ['owner', 'barber', 'customer', 'admin'] },
   { key: 'appointments', label: 'Appointments', icon: Calendar, roles: ['owner', 'manager', 'receptionist', 'barber', 'admin'] },
+  { key: 'attendance', label: 'Attendance', icon: Fingerprint, roles: ['owner', 'manager', 'receptionist', 'barber', 'admin'] },
   { key: 'staff', label: 'Staff & Chairs', icon: Scissors, roles: ['owner', 'manager', 'receptionist', 'admin'] },
   { key: 'services', label: 'Services', icon: Tag, roles: ['owner', 'manager', 'receptionist', 'admin'] },
   { key: 'memberships', label: 'Memberships', icon: CreditCard, roles: ['owner', 'admin'] },
@@ -236,6 +238,7 @@ function App() {
                 {tab === 'dashboard' && effectiveRole === 'barber' && <EmployeeDashboard account={account} onAddService={appointment => { setPosAppointment(appointment); setTab('pos'); }} />}
                 {tab === 'dashboard' && effectiveRole === 'customer' && <CustomerDashboard account={account} onBook={() => setTab('booking')} />}
                 {tab === 'appointments' && <Appointments role={effectiveRole} />}
+                {tab === 'attendance' && <Attendance role={effectiveRole} />}
                 {tab === 'staff' && <StaffTab role={effectiveRole} />}
                 {tab === 'services' && <Services role={effectiveRole} />}
                 {tab === 'memberships' && <Memberships />}

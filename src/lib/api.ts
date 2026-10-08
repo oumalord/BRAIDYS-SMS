@@ -1,4 +1,4 @@
-import type { Staff, ServiceItem, Customer, Appointment, QueueEntry, Order, Expense, DashboardData, RebookingItem, ChatChannel, ChatMessage, Currency, MembershipPlan, Promotion, Review, AuditLog, Branch, PayoutBatch, WeeklyStaffWorkReport } from '../types';
+import type { Staff, ServiceItem, Customer, Appointment, AttendanceRecord, AttendanceClientAssignment, QueueEntry, Order, Expense, DashboardData, RebookingItem, ChatChannel, ChatMessage, Currency, MembershipPlan, Promotion, Review, AuditLog, Branch, PayoutBatch, WeeklyStaffWorkReport } from '../types';
 
 const api = {
   get: async (path: string) => ({ data: await request(path) }),
@@ -112,11 +112,18 @@ export const CustomersApi = {
 export const AppointmentsApi = {
   list: (date?: string) => api.get(date ? `/api/appointments?date=${date}` : '/api/appointments').then(r => r.data.items as Appointment[]),
   staffWeeklyWork: (staffId: string, date?: string) => api.get(`/api/appointments/staff-weekly?staffId=${encodeURIComponent(staffId)}${date ? `&date=${encodeURIComponent(date)}` : ''}`).then(r => r.data as WeeklyStaffWorkReport),
-  create: (a: unknown) => api.post('/api/appointments', a).then(r => { invalidate('dashboard'); return r; }),
+  create: (a: unknown) => api.post('/api/appointments', a).then(r => { invalidate('dashboard'); invalidate('customers'); return r; }),
   update: (id: string, patch: Partial<Appointment>) => api.put(`/api/appointments/${id}`, patch).then(r => { invalidate('dashboard'); return r; }),
   reopenCompleted: (id: string) => api.post(`/api/appointments/${id}/reopen`).then(r => { invalidate('appointments'); invalidate('customers'); invalidate('dashboard'); return r; }),
   remove: (id: string) => api.delete(`/api/appointments/${id}`).then(r => { invalidate('dashboard'); return r; }),
   deleteCancelled: () => api.delete('/api/appointments/cancelled').then(r => { invalidate('dashboard'); return r; }),
+};
+
+export const AttendanceApi = {
+  mine: () => api.get('/api/attendance/me').then(r => r.data as { item: AttendanceRecord | null; date: string; clients: AttendanceClientAssignment[] }),
+  list: (date: string) => api.get(`/api/attendance?date=${encodeURIComponent(date)}`).then(r => r.data.items as AttendanceRecord[]),
+  checkIn: (location: { latitude: number; longitude: number; accuracy: number }) => api.post('/api/attendance/check-in', location).then(r => r.data.item as AttendanceRecord),
+  checkOut: (location: { latitude: number; longitude: number; accuracy: number }) => api.post('/api/attendance/check-out', location).then(r => r.data.item as AttendanceRecord),
 };
 
 export const CustomerApi = {
