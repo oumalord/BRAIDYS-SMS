@@ -144,7 +144,7 @@ async function notifyEmployee(staff: any, employmentStatus: 'active' | 'laid-off
 async function audit(action: string, collection: string, record: any, actor = 'system') {
   await db.deleteOlderThan('audit_logs', Date.now() - 14 * DAY);
   await db.add('audit_logs', [{
-    action, collection, actor, recordId: record?.id || null,
+    action, collection, actor: currentContext()?.name || actor, recordId: record?.id || null,
     summary: `${action} ${collection}${record?.name ? `: ${record.name}` : record?.customerName ? `: ${record.customerName}` : ''}`,
     recordSnapshot: record,
     createdAt: Date.now(),
