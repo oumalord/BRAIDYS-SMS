@@ -11,6 +11,7 @@ interface AttendanceRow {
   branchName: string;
   checkInAt: number | null;
   checkOutAt: number | null;
+  clients: AttendanceClientAssignment[];
 }
 
 function nairobiDate() {
@@ -53,13 +54,13 @@ function Attendance({ role }: { role: Role }) {
     setLoading(true);
     const dailyRequest = canViewDaily
       ? Promise.all([AttendanceApi.list(date), StaffApi.list()])
-      : Promise.resolve([[], []] as [AttendanceRecord[], Staff[]]);
+      : Promise.resolve([{ items: [], date, }, []] as [{ items: AttendanceRecord[]; date: string }, Staff[]]);
     Promise.all([AttendanceApi.mine(), dailyRequest])
       .then(([today, [daily, roster]]) => {
         if (!active) return;
         setMine(today.item);
         setClients(today.clients);
-        setRecords(daily);
+        setRecords(daily.items);
         setStaff(roster);
       })
       .catch(cause => { if (active) toast(cause?.message || 'Could not load attendance.', 'error'); })
@@ -70,11 +71,11 @@ function Attendance({ role }: { role: Role }) {
   const refresh = async () => {
     const dailyRequest = canViewDaily
       ? Promise.all([AttendanceApi.list(date), StaffApi.list()])
-      : Promise.resolve([[], []] as [AttendanceRecord[], Staff[]]);
+      : Promise.resolve([{ items: [], date, }, []] as [{ items: AttendanceRecord[]; date: string }, Staff[]]);
     const [today, [daily, roster]] = await Promise.all([AttendanceApi.mine(), dailyRequest]);
     setMine(today.item);
     setClients(today.clients);
-    setRecords(daily);
+    setRecords(daily.items);
     setStaff(roster);
   };
 
@@ -114,10 +115,10 @@ function Attendance({ role }: { role: Role }) {
   const representedStaffIds = new Set(visibleStaff.map(member => String(member.id)));
   const attendanceRows: AttendanceRow[] = visibleStaff.map(member => {
     const record = attendanceByStaffId.get(String(member.id));
-    return { key: `staff:${member.id}`, name: member.name, role: member.role, branchName: member.branchName || member.branch || '', checkInAt: record?.checkInAt || null, checkOutAt: record?.checkOutAt || null };
+    return { key: `staff:${member.id}`, name: member.name, role: member.role, branchName: member.branchName || member.branch || '', checkInAt: record?.checkInAt || null, checkOutAt: record?.checkOutAt || null, clients: record?.checkOutAt ? [] : record?.clients || [] };
   });
   records.filter(record => !record.staffId || !representedStaffIds.has(String(record.staffId))).forEach(record => {
-    attendanceRows.push({ key: record.id, name: record.name, role: record.role, branchName: record.branchName || '', checkInAt: record.checkInAt || null, checkOutAt: record.checkOutAt || null });
+    attendanceRows.push({ key: record.id, name: record.name, role: record.role, branchName: record.branchName || '', checkInAt: record.checkInAt || null, checkOutAt: record.checkOutAt || null, clients: record.clients || [] });
   });
   attendanceRows.sort((first, second) => Number(first.checkInAt || Number.MAX_SAFE_INTEGER) - Number(second.checkInAt || Number.MAX_SAFE_INTEGER) || first.name.localeCompare(second.name));
   const presentCount = attendanceRows.filter(row => row.checkInAt).length;
@@ -145,7 +146,7 @@ function Attendance({ role }: { role: Role }) {
 
       {checkedIn && !checkedOut && <section className="space-y-3">
         <div className="flex items-end justify-between gap-3"><div><h2 className="text-lg font-semibold">Clients assigned today</h2><p className="text-sm text-[#6E6E73]">{clients.length} client{clients.length === 1 ? '' : 's'} · ticks reset at check-out</p></div></div>
-        {clients.length === 0 ? <Card className="p-4 text-sm text-[#6E6E73]">No clients have been assigned to you today yet.</Card> : <div className="divide-y divide-black/5 rounded-xl border border-black/10 bg-white">{clients.map(client => <div key={client.id} className="flex items-center gap-3 px-4 py-3"><span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#34C759]/10 text-[#1c7c34]"><Check size={16} strokeWidth={2.5} aria-label="Assigned" /></span><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{client.customerName}</p><p className="truncate text-xs text-[#6E6E73]">{client.serviceName}</p></div><span className="shrink-0 text-xs text-[#6E6E73]">{client.time || '—'}</span></div>)}</div>}
+        {clients.length === 0 ? <Card className="p-4 text-sm text-[#6E6E73]">No clients have been assigned to you today yet.</Card> : <div className="divide-y divide-black/5 rounded-xl border border-black/10 bg-white">{clients.map(client => <div key={client.id} className="flex items-center gap-3 px-4 py-3">{role !== 'barber' && <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#34C759]/10 text-[#1c7c34]"><Check size={16} strokeWidth={2.5} aria-label="Assigned" /></span>}<div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{client.customerName}</p><p className="truncate text-xs text-[#6E6E73]">{client.serviceName}</p></div><span className="shrink-0 text-xs text-[#6E6E73]">{client.time || '—'}</span></div>)}</div>}
       </section>}
 
       {canViewDaily && <section className="space-y-3">
@@ -155,8 +156,8 @@ function Attendance({ role }: { role: Role }) {
         </div>
         {loading ? <LoadingState label="Loading attendance…" /> : attendanceRows.length === 0 ? <Card className="p-6 text-sm text-[#6E6E73]">No active staff found for this branch.</Card> : <div className="overflow-x-auto rounded-xl border border-black/10 bg-white">
           <table className="w-full min-w-[620px] text-left text-sm">
-            <thead className="border-b border-black/5 text-xs text-[#6E6E73]"><tr><th className="px-4 py-3 font-medium">Staff member</th><th className="px-4 py-3 font-medium">Role</th><th className="px-4 py-3 font-medium">Branch</th><th className="px-4 py-3 font-medium">Status</th><th className="px-4 py-3 font-medium">Check in</th><th className="px-4 py-3 font-medium">Check out</th></tr></thead>
-            <tbody>{attendanceRows.map(row => <tr key={row.key} className="border-b border-black/5 last:border-0"><td className="px-4 py-3 font-medium">{row.name}</td><td className="px-4 py-3 capitalize">{row.role}</td><td className="px-4 py-3">{row.branchName || '—'}</td><td className="px-4 py-3"><Badge tone={row.checkOutAt ? 'success' : row.checkInAt ? 'info' : 'warning'}>{row.checkOutAt ? 'Complete' : row.checkInAt ? 'On shift' : 'Not checked in'}</Badge></td><td className="px-4 py-3"><span className="inline-flex items-center gap-1.5"><LogIn size={14} aria-hidden="true" />{formatTime(row.checkInAt)}</span></td><td className="px-4 py-3"><span className="inline-flex items-center gap-1.5"><LogOut size={14} aria-hidden="true" />{formatTime(row.checkOutAt)}</span></td></tr>)}</tbody>
+            <thead className="border-b border-black/5 text-xs text-[#6E6E73]"><tr><th className="px-4 py-3 font-medium">Staff member</th><th className="px-4 py-3 font-medium">Role</th><th className="px-4 py-3 font-medium">Branch</th><th className="px-4 py-3 font-medium">Status</th><th className="px-4 py-3 font-medium">Clients assigned</th><th className="px-4 py-3 font-medium">Check in</th><th className="px-4 py-3 font-medium">Check out</th></tr></thead>
+            <tbody>{attendanceRows.map(row => <tr key={row.key} className="border-b border-black/5 last:border-0"><td className="px-4 py-3 font-medium">{row.name}</td><td className="px-4 py-3 capitalize">{row.role}</td><td className="px-4 py-3">{row.branchName || '—'}</td><td className="px-4 py-3"><Badge tone={row.checkOutAt ? 'success' : row.checkInAt ? 'info' : 'warning'}>{row.checkOutAt ? 'Complete' : row.checkInAt ? 'On shift' : 'Not checked in'}</Badge></td><td className="px-4 py-3"><div className="flex min-w-40 flex-col gap-1">{row.clients.map(client => <span key={client.id} className="inline-flex items-center gap-1.5 text-xs"><Check size={14} className="shrink-0 text-[#1c7c34]" aria-label="Assigned" /><span className="truncate">{client.customerName}</span></span>)}{row.clients.length === 0 && <span className="text-xs text-[#6E6E73]">—</span>}</div></td><td className="px-4 py-3"><span className="inline-flex items-center gap-1.5"><LogIn size={14} aria-hidden="true" />{formatTime(row.checkInAt)}</span></td><td className="px-4 py-3"><span className="inline-flex items-center gap-1.5"><LogOut size={14} aria-hidden="true" />{formatTime(row.checkOutAt)}</span></td></tr>)}</tbody>
           </table>
         </div>}
       </section>}

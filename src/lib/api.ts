@@ -121,7 +121,7 @@ export const AppointmentsApi = {
 
 export const AttendanceApi = {
   mine: () => api.get('/api/attendance/me').then(r => r.data as { item: AttendanceRecord | null; date: string; clients: AttendanceClientAssignment[] }),
-  list: (date: string) => api.get(`/api/attendance?date=${encodeURIComponent(date)}`).then(r => r.data.items as AttendanceRecord[]),
+  list: (date: string) => api.get(`/api/attendance?date=${encodeURIComponent(date)}`).then(r => r.data as { items: AttendanceRecord[]; date: string }),
   checkIn: (location: { latitude: number; longitude: number; accuracy: number }) => api.post('/api/attendance/check-in', location).then(r => r.data.item as AttendanceRecord),
   checkOut: (location: { latitude: number; longitude: number; accuracy: number }) => api.post('/api/attendance/check-out', location).then(r => r.data.item as AttendanceRecord),
 };

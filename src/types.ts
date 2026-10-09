@@ -67,6 +67,7 @@ export interface AttendanceRecord {
   date: string;
   checkInAt: number;
   checkOutAt: number | null;
+  clients?: AttendanceClientAssignment[];
 }
 
 export interface AttendanceClientAssignment {

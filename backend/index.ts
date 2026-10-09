@@ -599,7 +599,21 @@ export const handler = router({
     const { items } = await db.list('attendance', { limit: 5000 });
     const visible = (items as any[]).filter(item => item.date === date && (context.role !== 'receptionist' || item.role !== 'owner') && (!context.branchId || item.branchId === context.branchId));
     visible.sort((first, second) => Number(first.checkInAt || 0) - Number(second.checkInAt || 0));
-    return json({ items: visible, date });
+    const activeAttendanceByStaffId = new Map(visible.filter(item => item.staffId && item.checkInAt && !item.checkOutAt).map(item => [String(item.staffId), item]));
+    const { items: appointments } = await db.list('appointments', { limit: 3000 });
+    const clientAssignments = new Map<string, any[]>();
+    for (const appointment of appointments as any[]) {
+      if (appointment.deletedAt || appointment.date !== date || ['cancelled', 'no-show'].includes(appointment.status)
+        || (context.branchId && appointment.branchId && appointment.branchId !== context.branchId)) continue;
+      const staffIds = new Set([appointment.staffId, ...(Array.isArray(appointment.items) ? appointment.items.map((service: any) => service.staffId) : [])].filter(Boolean).map(String));
+      for (const staffId of staffIds) {
+        if (!activeAttendanceByStaffId.has(staffId)) continue;
+        const assigned = clientAssignments.get(staffId) || [];
+        assigned.push({ id: appointment.id, customerName: appointment.customerName, serviceName: appointment.serviceName, time: appointment.time });
+        clientAssignments.set(staffId, assigned);
+      }
+    }
+    return json({ items: visible.map(item => ({ ...item, clients: item.staffId ? clientAssignments.get(String(item.staffId)) || [] : [] })), date });
   }],
   'GET /api/staff/me/earnings': [async () => {
     const context = currentContext();
@@ -1031,12 +1045,17 @@ export const handler = router({
     const branch = (branches as any[]).find(item => item.id === requestedBranchId && item.salonId === context?.tenantId && item.status === 'active');
     if (!branch) return error('Choose a valid branch for this appointment', 400);
     const requestedCategories = Array.isArray(b.serviceCategories) ? b.serviceCategories.slice(0, 2).filter(Boolean) : [];
-    const items = Array.isArray(b.items) && b.items.length ? b.items : b.serviceId ? [{ serviceId: b.serviceId, serviceName: b.serviceName, price: b.price || 0, currency: b.currency || 'KES', durationMin: b.durationMin || 30, staffId: b.staffId, staffName: b.staffName }] : requestedCategories.length ? [{ serviceId: null, serviceName: `Requested: ${requestedCategories.join(' + ')}`, price: 0, currency: 'KES', durationMin: 30, staffId: b.staffId, staffName: b.staffName }] : [];
+    const requestedItems = Array.isArray(b.items) && b.items.length ? b.items : b.serviceId ? [{ serviceId: b.serviceId, serviceName: b.serviceName, price: b.price || 0, currency: b.currency || 'KES', durationMin: b.durationMin || 30, staffId: b.staffId, staffName: b.staffName }] : requestedCategories.length ? [{ serviceId: null, serviceName: `Requested: ${requestedCategories.join(' + ')}`, price: 0, currency: 'KES', durationMin: 30, staffId: b.staffId, staffName: b.staffName }] : [];
+    if (context?.role === 'barber' && !context.staffId) return error('Your login is not linked to a staff profile', 403);
+    const items = context?.role === 'barber'
+      ? requestedItems.map((item: any) => ({ ...item, staffId: context.staffId, staffName: context.name }))
+      : requestedItems;
     const appointmentDate = b.date || new Date().toISOString().slice(0, 10);
     const appointmentTime = b.time || '00:00';
-    if (b.cardNumber && !['owner', 'admin', 'manager', 'receptionist'].includes(context?.role || '')) return error('Only the owner, administrator, manager or receptionist can add a card number', 403);
+    if (b.cardNumber && !['owner', 'admin', 'manager', 'receptionist', 'barber'].includes(context?.role || '')) return error('Only salon staff can add a card number', 403);
     let cardNumber = '';
     try { cardNumber = appointmentCardNumber(b.cardNumber); } catch (cause: any) { return error(cause.message, 400); }
+    if (context?.role !== 'customer' && !cardNumber) return error('A card number is required for staff-booked appointments', 400);
     if (!b.customerName || normalizeCustomerPhone(b.customerPhone).length < 7 || items.length === 0) return error('Customer name, valid phone number, and appointment details are required', 400);
     for (const it of items) { if (!it.serviceId && !requestedCategories.length) return error('Each service needs a service selected', 400); }
 
@@ -1104,6 +1123,7 @@ export const handler = router({
   'PUT /api/appointments/:id': [async ({ params, body }) => {
     const context = currentContext();
     if (!context || !['owner', 'admin', 'manager', 'receptionist', 'barber'].includes(context.role)) return error('You are not allowed to update appointments', 403);
+    if (context.role === 'receptionist') return error('Receptionists can view appointments but cannot edit them', 403);
     const [existing] = await db.get('appointments', [params.id]);
     if (!existing) return error('Appointment not found', 404);
     const patch: any = body;
@@ -1138,6 +1158,8 @@ export const handler = router({
       patch.staffName = assignedStaff.name;
       patch.status = existing.status === 'pending' ? 'confirmed' : existing.status;
     }
+    const resultingStatus = patch.status || existing.status;
+    if (['confirmed', 'checked-in', 'in-service', 'completed'].includes(resultingStatus) && !nextCardNumber) return error('Add a card number before confirming this appointment', 400);
     if (patch.serviceId) {
       const [service] = await db.get('services', [patch.serviceId]);
       if (!service) return error('Service not found', 404);

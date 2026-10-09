@@ -104,6 +104,7 @@ function Appointments({ role }: { role: Role }) {
   const handleCreate = async () => {
     const service = services.find(s => s.id === form.serviceId);
     const staffMember = staff.find(s => s.id === form.staffId);
+    if (role === 'barber' && !account?.staffId) { toast('Your login is not linked to a staff profile.', 'error'); return; }
     if (!form.customerName.trim() || !form.customerPhone.trim() || !service || !staffMember || !form.date || !form.time || !form.cardNumber) { toast('Customer name, phone, card number, staff, date, service, and time are required.', 'error'); return; }
 
     await doCreate();
@@ -280,10 +281,14 @@ function Appointments({ role }: { role: Role }) {
   let account: { staffId?: string } | null = null;
   try { account = JSON.parse(window.localStorage.getItem('safigroom_account') || 'null'); } catch { account = null; }
   const assignableStaff = staff.filter(canAssignStaff);
-  const canBookAppointments = ['owner', 'admin', 'manager', 'receptionist'].includes(role);
-  const canEditAppointments = ['owner', 'admin', 'manager', 'receptionist'].includes(role);
+  const canBookAppointments = ['owner', 'admin', 'manager', 'receptionist', 'barber'].includes(role);
+  const canEditAppointments = ['owner', 'admin', 'manager'].includes(role);
   const canEditClosedAppointments = ['owner', 'admin'].includes(role);
   const returningCustomer = customers.find(customer => normalizePhone(customer.phone) === normalizePhone(form.customerPhone));
+  const openNewAppointment = () => {
+    setForm(current => ({ ...current, date, staffId: role === 'barber' ? account?.staffId || '' : current.staffId, cardNumber: role === 'barber' ? '' : current.cardNumber }));
+    setOpen(true);
+  };
 
   return (
     <div className="space-y-6">
@@ -295,7 +300,7 @@ function Appointments({ role }: { role: Role }) {
         <div className="flex items-center gap-2">
           <Field label="Date" htmlFor="date-picker"><Input id="date-picker" type="date" value={date} onChange={e => setDate(e.target.value)} aria-label="Select date" /></Field>
           {(role === 'owner' || role === 'admin') && appts.some(appointment => appointment.status === 'cancelled') && <Button variant="danger" onClick={deleteCancelled} disabled={saving}><Trash2 size={16} aria-hidden="true" />Delete canceled</Button>}
-          {canBookAppointments && <Button onClick={() => { setForm(current => ({ ...current, date })); setOpen(true); }}><Plus size={16} aria-hidden="true" />New Appointment</Button>}
+          {canBookAppointments && <Button onClick={openNewAppointment}><Plus size={16} aria-hidden="true" />New Appointment</Button>}
         </div>
       </div>
 
@@ -332,7 +337,7 @@ function Appointments({ role }: { role: Role }) {
       </Card>}
 
       {loading ? <LoadingState label="Loading appointments…" /> : sorted.length === 0 ? (
-        <EmptyState icon={Calendar} title="No appointments" description="There are no appointments scheduled for this date yet." action={canBookAppointments ? <Button onClick={() => { setForm(current => ({ ...current, date })); setOpen(true); }}>Book an appointment</Button> : undefined} />
+        <EmptyState icon={Calendar} title="No appointments" description="There are no appointments scheduled for this date yet." action={canBookAppointments ? <Button onClick={openNewAppointment}>Book an appointment</Button> : undefined} />
       ) : (
         <div className="space-y-3">
           {sorted.map(a => (
@@ -342,7 +347,7 @@ function Appointments({ role }: { role: Role }) {
                 <p className="font-medium">{a.customerName}{a.customerId ? <span className="ml-2 text-xs font-normal text-[#6E6E73]">{customers.find(customer => customer.id === a.customerId)?.visits ?? 0} visits</span> : null}</p>
                 <p className="text-sm text-[#6E6E73]">{a.customerPhone ? `${a.customerPhone} · ` : ''}{a.serviceName} · {a.staffName || 'Awaiting employee assignment'} · {fmtKES(a.price)}{a.cardNumber ? ` · Card ${a.cardNumber}` : ''}</p>
               </div>
-              <Badge tone={STATUS_TONE[a.status]}>{a.status.replace('-', ' ')}</Badge>
+              <Badge tone={STATUS_TONE[a.status]}>{role === 'receptionist' ? a.status === 'completed' ? 'Completed' : 'Pending' : a.status.replace('-', ' ')}</Badge>
               {(canEditAppointments || (role === 'barber' && a.staffId === account?.staffId)) && <div className="flex flex-wrap gap-2">
                 {canEditAppointments && (canEditClosedAppointments || !['completed', 'cancelled', 'no-show'].includes(a.status)) && <Button size="sm" variant="secondary" onClick={() => beginEdit(a)}><Pencil size={14} aria-hidden="true" />Edit</Button>}
                 {(role === 'owner' || role === 'admin' || (role === 'barber' && a.staffId === account?.staffId)) && a.status === 'completed' && <Button size="sm" variant="secondary" onClick={() => showCompletionSummary(a)}>Deal summary</Button>}
@@ -376,15 +381,15 @@ function Appointments({ role }: { role: Role }) {
             <Field label="Customer name" htmlFor="appt-customer-name"><Input id="appt-customer-name" autoComplete="name" value={form.customerName} onChange={event => setForm(current => ({ ...current, customerName: event.target.value }))} placeholder="Full name" /></Field>
             <Field label="Phone number" htmlFor="appt-customer-phone"><Input id="appt-customer-phone" type="tel" autoComplete="tel" value={form.customerPhone} onChange={event => setForm(current => ({ ...current, customerPhone: event.target.value }))} placeholder="07… or +254…" /></Field>
             {form.customerPhone.trim() && <p role="status" className="text-sm text-[#6E6E73]">{returningCustomer ? `Returning client: ${returningCustomer.name} · ${returningCustomer.visits} visits` : form.customerName.trim() ? 'New client' : 'Enter a name for this new client'}</p>}
-            <Field label="Card number" htmlFor="appt-card-number"><Input id="appt-card-number" inputMode="numeric" pattern="[0-9]*" value={form.cardNumber} onChange={e => setForm(f => ({ ...f, cardNumber: e.target.value.replace(/\D/g, '') }))} placeholder="Unique for this day" /></Field>
+            <Field label="Card number (required)" htmlFor="appt-card-number"><Input id="appt-card-number" inputMode="numeric" pattern="[0-9]*" value={form.cardNumber} onChange={e => setForm(f => ({ ...f, cardNumber: e.target.value.replace(/\D/g, '') }))} placeholder="Unique for this day" required /></Field>
             <Field label="Service" htmlFor="appt-service">
               <Select id="appt-service" value={form.serviceId} onChange={e => setForm(f => ({ ...f, serviceId: e.target.value }))}>
                 <option value="">Select a service</option>
                 {services.map(s => <option key={s.id} value={s.id}>{s.name} — {fmtKES(s.price)} ({s.durationMin} min)</option>)}
               </Select>
             </Field>
-            <Field label="Staff" htmlFor="appt-staff">
-              <Select id="appt-staff" value={form.staffId} onChange={e => setForm(f => ({ ...f, staffId: e.target.value }))}>
+            <Field label={role === 'barber' ? 'Your staff profile' : 'Staff'} htmlFor="appt-staff">
+              <Select id="appt-staff" value={form.staffId} disabled={role === 'barber'} onChange={e => setForm(f => ({ ...f, staffId: e.target.value }))}>
                 <option value="">Select staff</option>
                 {assignableStaff.map(s => <option key={s.id} value={s.id}>{s.name} — {s.role}</option>)}
               </Select>
