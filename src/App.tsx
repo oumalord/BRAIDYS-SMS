@@ -78,7 +78,7 @@ function App() {
   const [branches, setBranches] = useState<Branch[]>([]);
   const [selectedBranchId, setSelectedBranchId] = useState(() => window.localStorage.getItem('safigroom_selected_branch') || '');
   const effectiveRole = normalizeRole(account?.role);
-  const requiresDailyCheckIn = ['barber', 'receptionist'].includes(effectiveRole);
+  const requiresDailyCheckIn = ['barber', 'receptionist'].includes(effectiveRole) && !['owner', 'admin'].includes(effectiveRole);
   const attendanceLocked = requiresDailyCheckIn && (attendanceVerifiedAccountId !== account?.id || checkedInToday !== true);
   const mustChangePin = Boolean(account?.requiresPinChange && ['barber', 'receptionist'].includes(effectiveRole));
 

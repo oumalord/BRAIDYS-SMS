@@ -557,8 +557,12 @@ export const handler = router({
   'POST /api/attendance/check-in': [async ({ body }) => {
     const context = currentContext();
     if (!context || !ATTENDANCE_ROLES.includes(context.role)) return error('Attendance is only available to salon staff and administrators', 403);
-    const location = verifiedAttendanceLocation(body);
-    if (!location.ok) return error(location.error, 403);
+    let distanceMeters: number | null = null;
+    if (context.role !== 'owner') {
+      const location = verifiedAttendanceLocation(body);
+      if (!location.ok) return error(location.error, 403);
+      distanceMeters = location.distanceMeters;
+    }
     const date = nairobiDateString();
     const id = attendanceRecordId(context.accountId, date);
     const [existing] = await db.get('attendance', [id]);
@@ -568,7 +572,7 @@ export const handler = router({
       id, accountId: context.accountId, staffId: context.staffId || null, name: context.name,
       role: context.role, tenantId: context.tenantId, branchId: context.branchId || null,
       branchName: branch?.name || context.salonName, date, checkInAt: Date.now(), checkOutAt: null,
-      verifiedDistanceMeters: location.distanceMeters,
+      verifiedDistanceMeters: distanceMeters,
     };
     try {
       await db.add('attendance', [item]);
@@ -580,14 +584,18 @@ export const handler = router({
   'POST /api/attendance/check-out': [async ({ body }) => {
     const context = currentContext();
     if (!context || !ATTENDANCE_ROLES.includes(context.role)) return error('Attendance is only available to salon staff and administrators', 403);
-    const location = verifiedAttendanceLocation(body);
-    if (!location.ok) return error(location.error, 403);
+    let distanceMeters: number | null = null;
+    if (context.role !== 'owner') {
+      const location = verifiedAttendanceLocation(body);
+      if (!location.ok) return error(location.error, 403);
+      distanceMeters = location.distanceMeters;
+    }
     const date = nairobiDateString();
     const id = attendanceRecordId(context.accountId, date);
     const [existing] = await db.get('attendance', [id]);
     if (!existing) return error('Check in before checking out', 409);
     if (existing.checkOutAt) return error('You have already checked out today', 409);
-    const item = { ...existing, checkOutAt: Date.now(), checkOutDistanceMeters: location.distanceMeters };
+    const item = { ...existing, checkOutAt: Date.now(), checkOutDistanceMeters: distanceMeters };
     await db.update('attendance', [{ id, record: item }]);
     return json({ item });
   }],
