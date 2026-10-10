@@ -38,7 +38,7 @@ function currentPosition(): Promise<{ latitude: number; longitude: number; accur
   });
 }
 
-function Attendance({ role }: { role: Role }) {
+function Attendance({ role, onCheckInComplete }: { role: Role; onCheckInComplete?: () => void }) {
   const canViewDaily = ['owner', 'admin', 'receptionist'].includes(role);
   const [date, setDate] = useState(nairobiDate);
   const [mine, setMine] = useState<AttendanceRecord | null>(null);
@@ -95,7 +95,8 @@ function Attendance({ role }: { role: Role }) {
       const location = await currentPosition();
       const item = action === 'check-in' ? await AttendanceApi.checkIn(location) : await AttendanceApi.checkOut(location);
       setMine(item);
-      await refresh();
+      await refresh().catch(() => undefined);
+      if (action === 'check-in') onCheckInComplete?.();
       setDialogOpen(false);
       toast(action === 'check-in' ? 'Check-in recorded.' : 'Check-out recorded.', 'success');
     } catch (cause: any) {
@@ -135,7 +136,7 @@ function Attendance({ role }: { role: Role }) {
           <div>
             <p className="text-sm font-medium text-[#6E6E73]">Today · {mine?.date || nairobiDate()}</p>
             <h2 className="mt-1 text-xl font-semibold">{checkedOut ? 'Shift complete' : checkedIn ? `Checked in at ${formatTime(mine?.checkInAt)}` : 'Ready to check in'}</h2>
-            <p className="mt-2 flex items-center gap-1.5 text-sm text-[#6E6E73]"><MapPin size={15} aria-hidden="true" />Braidy Saloon, Lumumba Drive · within 500 m</p>
+            <p className="mt-2 flex items-center gap-1.5 text-sm text-[#6E6E73]"><MapPin size={15} aria-hidden="true" />Braidy Saloon, Lumumba Drive · within 300 m</p>
             {checkedOut && <p className="mt-1 text-sm text-[#6E6E73]">Checked out at {formatTime(mine?.checkOutAt)}</p>}
           </div>
           <button type="button" onClick={() => setDialogOpen(true)} aria-label="Open check in or check out" className="mx-auto flex h-28 w-28 items-center justify-center rounded-full bg-[#17679a] text-white shadow-[0_0_0_12px_rgba(23,103,154,0.12),0_0_0_24px_rgba(23,103,154,0.07)] transition hover:bg-[#12547f] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#0071e3]/40 disabled:opacity-50 sm:mx-4" disabled={loading}>
@@ -164,7 +165,7 @@ function Attendance({ role }: { role: Role }) {
 
       {dialogOpen && <Modal title="Check In / Check Out" onClose={() => { if (!saving) setDialogOpen(false); }}>
         <div className="space-y-4 pb-5">
-          <p className="text-sm text-[#6E6E73]">Your device location must be within 500 meters of Braidy Saloon. Location is checked when you submit.</p>
+          <p className="text-sm text-[#6E6E73]">Your device location must be within 300 meters of Braidy Saloon. Location is checked when you submit.</p>
           <div className="grid grid-cols-2 gap-3">
             <Button onClick={() => void punch('check-in')} disabled={saving || checkedIn} className="min-h-14"><LogIn size={17} aria-hidden="true" />{saving ? 'Checking…' : 'Check In'}</Button>
             <Button variant="secondary" onClick={() => void punch('check-out')} disabled={saving || !checkedIn || checkedOut} className="min-h-14"><LogOut size={17} aria-hidden="true" />Check Out</Button>

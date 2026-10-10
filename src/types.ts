@@ -106,6 +106,7 @@ export interface Appointment {
   currency: Currency;
   items?: AppointmentServiceLine[];
   status: AppointmentStatus;
+  paymentCompleted?: boolean;
   customerEmail?: string;
   cardNumber?: string;
   createdAt?: number;

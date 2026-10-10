@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Home, Calendar, Scissors, Contact, ShoppingCart, DollarSign, Sparkles, Menu, X, Tag, BarChart3, CreditCard, Percent, ClipboardList, Building2, KeyRound, MessageSquare, Fingerprint } from 'lucide-react';
-import { AuthApi, BranchesApi, StaffApi } from './lib/api';
+import { AttendanceApi, AuthApi, BranchesApi, StaffApi } from './lib/api';
 import { Button, Field, Input, Modal, ToastHost, toast } from './components/ui';
 import AppErrorBoundary from './components/AppErrorBoundary';
 import type { Branch, Role } from './types';
@@ -29,7 +29,7 @@ import InstallAppButton from './components/InstallAppButton';
 type TabKey = 'dashboard' | 'appointments' | 'attendance' | 'messages' | 'staff' | 'customers' | 'pos' | 'services' | 'memberships' | 'promotions' | 'reviews' | 'reports' | 'finance' | 'ai' | 'booking' | 'logs' | 'admin';
 
 const TABS: { key: TabKey; label: string; icon: any; roles: Role[] }[] = [
-  { key: 'dashboard', label: 'Dashboard', icon: Home, roles: ['owner', 'barber', 'customer', 'admin'] },
+  { key: 'dashboard', label: 'Dashboard', icon: Home, roles: ['owner', 'barber', 'receptionist', 'customer', 'admin'] },
   { key: 'appointments', label: 'Appointments', icon: Calendar, roles: ['owner', 'manager', 'receptionist', 'barber', 'admin'] },
   { key: 'attendance', label: 'Attendance', icon: Fingerprint, roles: ['owner', 'manager', 'receptionist', 'barber', 'admin'] },
   { key: 'staff', label: 'Staff & Chairs', icon: Scissors, roles: ['owner', 'manager', 'receptionist', 'admin'] },
@@ -70,13 +70,48 @@ function App() {
   const [tab, setTab] = useState<TabKey>('dashboard');
   const [menuOpen, setMenuOpen] = useState(false);
   const [account, setAccount] = useState<any | null>(null);
+  const [checkedInToday, setCheckedInToday] = useState<boolean | null>(null);
+  const [attendanceVerifiedAccountId, setAttendanceVerifiedAccountId] = useState<string | null>(null);
   const [pinForm, setPinForm] = useState({ pin: '', confirm: '' });
   const [savingPin, setSavingPin] = useState(false);
   const [posAppointment, setPosAppointment] = useState<any | undefined>(undefined);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [selectedBranchId, setSelectedBranchId] = useState(() => window.localStorage.getItem('safigroom_selected_branch') || '');
   const effectiveRole = normalizeRole(account?.role);
+  const requiresDailyCheckIn = ['barber', 'receptionist'].includes(effectiveRole);
+  const attendanceLocked = requiresDailyCheckIn && (attendanceVerifiedAccountId !== account?.id || checkedInToday !== true);
   const mustChangePin = Boolean(account?.requiresPinChange && ['barber', 'receptionist'].includes(effectiveRole));
+
+  useEffect(() => {
+    if (!account || !requiresDailyCheckIn) {
+      setCheckedInToday(true);
+      setAttendanceVerifiedAccountId(account?.id || null);
+      return;
+    }
+    let active = true;
+    setCheckedInToday(null);
+    setAttendanceVerifiedAccountId(null);
+    setTab('attendance');
+    AttendanceApi.mine().then(({ item }) => {
+      if (!active) return;
+      const checkedIn = Boolean(item?.checkInAt);
+      setCheckedInToday(checkedIn);
+      setAttendanceVerifiedAccountId(account.id);
+      setTab(checkedIn ? 'dashboard' : 'attendance');
+    }).catch(() => {
+      if (!active) return;
+      setCheckedInToday(false);
+      setAttendanceVerifiedAccountId(account.id);
+      setTab('attendance');
+    });
+    return () => { active = false; };
+  }, [account?.id, requiresDailyCheckIn]);
+
+  const finishCheckIn = () => {
+    setCheckedInToday(true);
+    setAttendanceVerifiedAccountId(account?.id || null);
+    setTab('dashboard');
+  };
 
   const changeInitialPin = async () => {
     if (!/^\d{4}$/.test(pinForm.pin) || pinForm.pin !== pinForm.confirm) { toast('Enter matching 4-digit PINs.', 'error'); return; }
@@ -118,7 +153,8 @@ function App() {
     }
   }, [account, tab]);
 
-  const visibleTabs = TABS.filter(t => t.roles.includes(effectiveRole) && (t.key !== 'admin' || account?.role === 'admin'));
+  const visibleTabs = TABS.filter(t => t.roles.includes(effectiveRole) && (t.key !== 'admin' || account?.role === 'admin'))
+    .filter(t => !attendanceLocked || t.key === 'attendance');
   if (account?.role === 'admin') visibleTabs.sort((first, second) => (first.key === 'admin' ? -1 : second.key === 'admin' ? 1 : 0));
   const isOwner = effectiveRole === 'owner' || effectiveRole === 'admin';
 
@@ -232,22 +268,22 @@ function App() {
 
         <main id="main-content" className="mx-auto max-w-7xl px-2 pb-24 pt-3 sm:px-6 sm:pb-8 sm:pt-8">
           <div key={selectedBranchId} className="min-h-[75vh] rounded-[20px] bg-[#F5F5F7] p-3 text-[#1D1D1F] shadow-2xl sm:rounded-[32px] sm:p-8">
-            {!ready ? (
+            {attendanceLocked ? <Attendance role={effectiveRole} onCheckInComplete={finishCheckIn} /> : !ready ? (
               <div className="flex items-center justify-center py-24 text-[#6E6E73]" role="status">Loading BRAIDY SALON…</div>
             ) : (
               <AppErrorBoundary key={tab} onRecover={() => setTab(initialTabFor(account))}>
                 {tab === 'dashboard' && (effectiveRole === 'owner' || effectiveRole === 'admin') && <Dashboard />}
-                {tab === 'dashboard' && effectiveRole === 'barber' && <EmployeeDashboard account={account} onAddService={appointment => { setPosAppointment(appointment); setTab('pos'); }} />}
+                {tab === 'dashboard' && ['barber', 'receptionist'].includes(effectiveRole) && <EmployeeDashboard account={account} onAddService={appointment => { setPosAppointment(appointment); setTab('pos'); }} />}
                 {tab === 'dashboard' && effectiveRole === 'customer' && <CustomerDashboard account={account} onBook={() => setTab('booking')} />}
                 {tab === 'appointments' && <Appointments role={effectiveRole} />}
-                {tab === 'attendance' && <Attendance role={effectiveRole} />}
+                {tab === 'attendance' && <Attendance role={effectiveRole} onCheckInComplete={finishCheckIn} />}
                 {tab === 'staff' && <StaffTab role={effectiveRole} />}
                 {tab === 'services' && <Services role={effectiveRole} />}
                 {tab === 'memberships' && <Memberships />}
                 {tab === 'promotions' && <Promotions role={effectiveRole} />}
                 {tab === 'reviews' && <Reviews />}
                 {tab === 'customers' && <CustomersTab role={effectiveRole} />}
-                {tab === 'pos' && <POS appointment={posAppointment} currentStaffId={account?.staffId} onSaleComplete={() => { setPosAppointment(undefined); toast('Sale completed and recorded.', 'success'); }} />}
+                {tab === 'pos' && !attendanceLocked && <POS appointment={posAppointment} currentStaffId={account?.staffId} onSaleComplete={() => { setPosAppointment(undefined); toast('Sale completed and recorded.', 'success'); }} />}
                 {tab === 'finance' && <Finance />}
                 {tab === 'reports' && <Reports role={effectiveRole} />}
                 {tab === 'ai' && <AIAssistant />}

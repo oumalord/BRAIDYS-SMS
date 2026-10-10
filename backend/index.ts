@@ -5,7 +5,7 @@ import { calculateUnpaidStaffEarnings, serviceCommission, staffCommission } from
 const DAY = 24 * 3600 * 1000;
 const DEFAULT_STAFF_PIN = '1234';
 const ATTENDANCE_LOCATION = { latitude: -1.2154173, longitude: 36.888536 };
-const ATTENDANCE_RADIUS_METERS = 500;
+const ATTENDANCE_RADIUS_METERS = 300;
 const ATTENDANCE_ROLES = ['owner', 'admin', 'manager', 'receptionist', 'barber'];
 
 function saturdayFridayRange(date = new Date()) {
@@ -80,7 +80,7 @@ function verifiedAttendanceLocation(body: any): { ok: false; error: string } | {
   }
   if (!Number.isFinite(accuracy) || accuracy < 0 || accuracy > 150) return { ok: false, error: 'Location accuracy is too low. Try again outdoors.' };
   const distanceMeters = attendanceDistanceMeters(latitude, longitude);
-  if (distanceMeters + accuracy > ATTENDANCE_RADIUS_METERS) return { ok: false, error: 'You must be within 500 meters of Braidy Saloon to record attendance.' };
+  if (distanceMeters + accuracy > ATTENDANCE_RADIUS_METERS) return { ok: false, error: 'You are not at your work station so check in at your location' };
   return { ok: true, distanceMeters: Math.round(distanceMeters) };
 }
 
@@ -963,12 +963,19 @@ export const handler = router({
   }],
 
   'GET /api/appointments': [async ({ query }) => {
-    const { items } = await db.list('appointments', { limit: 1000 });
+    const [{ items }, { items: orders }] = await Promise.all([
+      db.list('appointments', { limit: 1000 }),
+      db.list('orders', { limit: 5000 }),
+    ]);
     const date = query.date;
     const context = currentContext();
     const activeItems = items.filter((appointment: any) => !appointment.deletedAt);
     const visible = context?.role === 'barber' ? activeItems.filter((a: any) => a.staffId === context.staffId) : activeItems;
-    return json({ items: date ? visible.filter((a: any) => a.date === date) : visible });
+    const paidAppointmentIds = new Set((orders as any[])
+      .filter(order => !order.deletedAt && order.appointmentId && (order.paymentMethod !== 'M-Pesa' || !(Number(order.totalByCurrency?.KES || 0) > 0) || order.mpesaReceiptNumber))
+      .map(order => String(order.appointmentId)));
+    const withPaymentStatus = visible.map((appointment: any) => ({ ...appointment, paymentCompleted: paidAppointmentIds.has(String(appointment.id)) }));
+    return json({ items: date ? withPaymentStatus.filter((a: any) => a.date === date) : withPaymentStatus });
   }],
   'GET /api/appointments/staff-weekly': [async ({ query }) => {
     const context = currentContext();
@@ -1159,6 +1166,12 @@ export const handler = router({
       patch.status = existing.status === 'pending' ? 'confirmed' : existing.status;
     }
     const resultingStatus = patch.status || existing.status;
+    if (resultingStatus === 'completed') {
+      const { items: orders } = await db.list('orders', { limit: 5000 });
+      const paidOrder = (orders as any[]).some(order => !order.deletedAt && String(order.appointmentId || '') === String(existing.id)
+        && (order.paymentMethod !== 'M-Pesa' || !(Number(order.totalByCurrency?.KES || 0) > 0) || order.mpesaReceiptNumber));
+      if (!paidOrder) return error('Record successful client payment before completing this appointment', 409);
+    }
     if (['confirmed', 'checked-in', 'in-service', 'completed'].includes(resultingStatus) && !nextCardNumber) return error('Add a card number before confirming this appointment', 400);
     if (patch.serviceId) {
       const [service] = await db.get('services', [patch.serviceId]);
