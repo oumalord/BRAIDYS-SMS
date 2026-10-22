@@ -283,7 +283,7 @@ function Appointments({ role }: { role: Role }) {
   const assignableStaff = staff.filter(canAssignStaff);
   const canBookAppointments = ['owner', 'admin', 'manager', 'receptionist', 'barber'].includes(role);
   const canEditAppointments = ['owner', 'admin', 'manager', 'receptionist'].includes(role);
-  const canEditClosedAppointments = ['owner', 'admin'].includes(role);
+  const canEditClosedAppointments = ['owner', 'admin', 'receptionist'].includes(role);
   const canDeleteAppointments = ['owner', 'admin', 'receptionist'].includes(role);
   const canManageAppointmentStatus = ['owner', 'admin', 'manager'].includes(role) || (role === 'barber' && Boolean(account?.staffId));
   const returningCustomer = customers.find(customer => normalizePhone(customer.phone) === normalizePhone(form.customerPhone));

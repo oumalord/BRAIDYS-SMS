@@ -1147,7 +1147,7 @@ export const handler = router({
     if ('cardNumber' in patch) {
       try { patch.cardNumber = appointmentCardNumber(patch.cardNumber); } catch (cause: any) { return error(cause.message, 400); }
     }
-    const canManageClosedAppointments = ['owner', 'admin'].includes(context.role);
+    const canManageClosedAppointments = ['owner', 'admin', 'receptionist'].includes(context.role);
     const isCancellation = patch.status === 'cancelled' || patch.status === 'no-show';
     const isStatusOnlyChange = Object.keys(patch).length === 1 && 'status' in patch;
     if (context.role === 'barber' && existing.staffId !== context.staffId) return error('You can only update appointments assigned to you', 403);
