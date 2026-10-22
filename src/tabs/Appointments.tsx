@@ -203,7 +203,7 @@ function Appointments({ role }: { role: Role }) {
   };
 
   const removeAppointment = async (appointment: Appointment) => {
-    if (!window.confirm(`Delete ${appointment.customerName}'s ${appointment.status} appointment?${appointment.status === 'completed' ? ' The completed deal stays in financial history.' : ''}`)) return;
+    if (!window.confirm(`Delete ${appointment.customerName}'s ${appointment.status} appointment?${appointment.status === 'completed' ? ' The linked sale will be voided and stock and customer totals adjusted.' : ''}`)) return;
     setSaving(true);
     try {
       await AppointmentsApi.remove(appointment.id);
@@ -282,8 +282,10 @@ function Appointments({ role }: { role: Role }) {
   try { account = JSON.parse(window.localStorage.getItem('safigroom_account') || 'null'); } catch { account = null; }
   const assignableStaff = staff.filter(canAssignStaff);
   const canBookAppointments = ['owner', 'admin', 'manager', 'receptionist', 'barber'].includes(role);
-  const canEditAppointments = ['owner', 'admin', 'manager'].includes(role);
+  const canEditAppointments = ['owner', 'admin', 'manager', 'receptionist'].includes(role);
   const canEditClosedAppointments = ['owner', 'admin'].includes(role);
+  const canDeleteAppointments = ['owner', 'admin', 'receptionist'].includes(role);
+  const canManageAppointmentStatus = ['owner', 'admin', 'manager'].includes(role) || (role === 'barber' && Boolean(account?.staffId));
   const returningCustomer = customers.find(customer => normalizePhone(customer.phone) === normalizePhone(form.customerPhone));
   const openNewAppointment = () => {
     setForm(current => ({ ...current, date, staffId: role === 'barber' ? account?.staffId || '' : current.staffId, cardNumber: role === 'barber' ? '' : current.cardNumber }));
@@ -348,9 +350,9 @@ function Appointments({ role }: { role: Role }) {
                 <p className="text-sm text-[#6E6E73]">{a.customerPhone ? `${a.customerPhone} · ` : ''}{a.serviceName} · {a.staffName || 'Awaiting employee assignment'} · {fmtKES(a.price)}{a.cardNumber ? ` · Card ${a.cardNumber}` : ''}</p>
               </div>
               <Badge tone={STATUS_TONE[a.status]}>{role === 'receptionist' ? a.status === 'completed' && a.paymentCompleted ? 'Completed' : 'Pending' : a.status.replace('-', ' ')}</Badge>
-              {(canEditAppointments || (role === 'barber' && a.staffId === account?.staffId)) && <div className="flex flex-wrap gap-2">
+              {(canEditAppointments || role === 'receptionist' || (role === 'barber' && a.staffId === account?.staffId)) && <div className="flex flex-wrap gap-2">
                 {canEditAppointments && (canEditClosedAppointments || !['completed', 'cancelled', 'no-show'].includes(a.status)) && <Button size="sm" variant="secondary" onClick={() => beginEdit(a)}><Pencil size={14} aria-hidden="true" />Edit</Button>}
-                {(role === 'owner' || role === 'admin' || (role === 'barber' && a.staffId === account?.staffId)) && a.status === 'completed' && <Button size="sm" variant="secondary" onClick={() => showCompletionSummary(a)}>Deal summary</Button>}
+                {(role === 'owner' || role === 'admin' || role === 'receptionist' || (role === 'barber' && a.staffId === account?.staffId)) && a.status === 'completed' && <Button size="sm" variant="secondary" onClick={() => showCompletionSummary(a)}>Deal summary</Button>}
                 {(role === 'owner' || role === 'admin') && a.status === 'completed' && <Button size="sm" variant="secondary" onClick={() => beginCompletionEdit(a)}><Pencil size={14} aria-hidden="true" />Adjust completion</Button>}
                 {(role === 'owner' || role === 'admin') && a.status === 'completed' && <Button size="sm" variant="danger" onClick={() => reopenCompletedDeal(a)} disabled={saving}>Undo completed deal</Button>}
                 {(role === 'owner' || role === 'admin') && !['completed', 'cancelled', 'no-show'].includes(a.status) && (
@@ -362,10 +364,10 @@ function Appointments({ role }: { role: Role }) {
                       {assignableStaff.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                     </Select>
                   )}
-                {STATUS_FLOW[a.status] && <Button size="sm" variant="secondary" onClick={() => advance(a)}>{STATUS_FLOW[a.status] === 'completed' ? 'Open POS & complete' : `Mark ${STATUS_FLOW[a.status]?.replace('-', ' ')}`}</Button>}
-                {!['completed', 'cancelled', 'no-show'].includes(a.status) && <Button size="sm" variant="ghost" onClick={() => setStatus(a, 'no-show')}>No-show</Button>}
-                {!['completed', 'cancelled'].includes(a.status) && <Button size="sm" variant="danger" onClick={() => setStatus(a, 'cancelled')}>Cancel</Button>}
-                {(role === 'owner' || role === 'admin') && <Button size="sm" variant="danger" onClick={() => removeAppointment(a)}><Trash2 size={14} aria-hidden="true" />Delete</Button>}
+                {canManageAppointmentStatus && STATUS_FLOW[a.status] && <Button size="sm" variant="secondary" onClick={() => advance(a)}>{STATUS_FLOW[a.status] === 'completed' ? 'Open POS & complete' : `Mark ${STATUS_FLOW[a.status]?.replace('-', ' ')}`}</Button>}
+                {canManageAppointmentStatus && !['completed', 'cancelled', 'no-show'].includes(a.status) && <Button size="sm" variant="ghost" onClick={() => setStatus(a, 'no-show')}>No-show</Button>}
+                {canManageAppointmentStatus && !['completed', 'cancelled'].includes(a.status) && <Button size="sm" variant="danger" onClick={() => setStatus(a, 'cancelled')}>Cancel</Button>}
+                {canDeleteAppointments && <Button size="sm" variant="danger" onClick={() => removeAppointment(a)}><Trash2 size={14} aria-hidden="true" />Delete</Button>}
               </div>}
             </Card>
           ))}

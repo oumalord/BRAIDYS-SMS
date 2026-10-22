@@ -1138,7 +1138,6 @@ export const handler = router({
   'PUT /api/appointments/:id': [async ({ params, body }) => {
     const context = currentContext();
     if (!context || !['owner', 'admin', 'manager', 'receptionist', 'barber'].includes(context.role)) return error('You are not allowed to update appointments', 403);
-    if (context.role === 'receptionist') return error('Receptionists can view appointments but cannot edit them', 403);
     const [existing] = await db.get('appointments', [params.id]);
     if (!existing) return error('Appointment not found', 404);
     const patch: any = body;
@@ -1205,9 +1204,7 @@ export const handler = router({
       const ownAppointment = Boolean(appointment && sameStaffIdentity(appointment.staffId, appointment.staffName, identity));
       const ownOrderItem = Boolean(order && Array.isArray(order.items) && order.items.some((item: any) => sameStaffIdentity(item.staffId, item.staffName, identity) || sameStaffIdentity(item.coStaffId, item.coStaffName, identity)));
       if (!ownAppointment && !ownOrderItem) return error('You can only view completion details for your own appointments', 403);
-    } else {
-      requireOwner();
-    }
+    } else if (!context || !['owner', 'admin', 'receptionist'].includes(context.role)) return error('Only the owner, administrator or receptionist can view appointment summaries', 403);
     if (!order) return error('No completed work was found for this appointment', 404);
     return json({ item: order });
   }],
@@ -1260,7 +1257,8 @@ export const handler = router({
     return json({ ok: true, orderVoided: Boolean(order), status: 'in-service' });
   }],
   'DELETE /api/appointments/:id': [async ({ params }) => {
-    requireOwner();
+    const context = currentContext();
+    if (!context || !['owner', 'admin', 'receptionist'].includes(context.role)) return error('Only the owner, administrator or receptionist can delete appointments', 403);
     const [appointment] = await db.get('appointments', [params.id]);
     if (!appointment || appointment.deletedAt) return error('Appointment not found', 404);
     const deletedAt = Date.now();
@@ -1282,7 +1280,7 @@ export const handler = router({
         if (productUpdates.length) await db.update('products', productUpdates);
         await db.add('stock_movements', productUpdates.map(update => ({ productId: update.id, productName: update.record.name, change: productQuantities.get(update.id) || 0, reason: `Deleted appointment: ${appointment.customerName}`, createdAt: deletedAt, actor: deletedBy })));
       }
-      await db.update('orders', [{ id: order.id, record: { ...order, deletedAt, deletedBy, voidReason: 'Owner deleted the linked appointment', payoutReversalRequired: recordedPayout } }]);
+      await db.update('orders', [{ id: order.id, record: { ...order, deletedAt, deletedBy, voidReason: 'Authorized staff deleted the linked appointment', payoutReversalRequired: recordedPayout } }]);
       if (order.customerId) {
         const [customer] = await db.get('customers', [order.customerId]);
         if (customer) {
