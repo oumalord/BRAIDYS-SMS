@@ -435,8 +435,8 @@ export const handler = router({
     const credential = String(body?.credential || body?.password || '');
     if (!identifier || !credential) return error('Email or phone and a credential are required', 400);
     const { items } = await db.list('accounts', { limit: 5000 });
-    const normalizedIdentifier = identifier.replace(/\s+/g, '');
-    const account = (items as any[]).find(item => String(item.email || '').toLowerCase() === identifier.toLowerCase() || (normalizedIdentifier && String(item.phone || '').replace(/\s+/g, '') === normalizedIdentifier));
+    const normalizedPhone = normalizeCustomerPhone(identifier);
+    const account = (items as any[]).find(item => String(item.email || '').toLowerCase() === identifier.toLowerCase() || (normalizedPhone && normalizeCustomerPhone(item.phone) === normalizedPhone));
     if (!account || account.status !== 'active') return error('Invalid login details', 401);
     const role = normalizeRole(account.role);
     const usesPassword = Boolean(account.passwordHash) || role === 'admin' || role === 'owner';

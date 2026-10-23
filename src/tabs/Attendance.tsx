@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import { CalendarDays, Check, Clock3, Fingerprint, LogIn, LogOut, MapPin, RefreshCw } from 'lucide-react';
+import { Check, LogIn, LogOut, MapPin, RefreshCw } from 'lucide-react';
 import { AttendanceApi, StaffApi } from '../lib/api';
-import { Badge, Button, Card, Field, Input, LoadingState, Modal, toast } from '../components/ui';
+import { Badge, Button, Card, Field, Input, LoadingState, toast } from '../components/ui';
 import type { AttendanceClientAssignment, AttendanceRecord, Role, Staff } from '../types';
 
 interface AttendanceRow {
@@ -27,14 +27,31 @@ function formatTime(timestamp?: number | null) {
 function currentPosition(): Promise<{ latitude: number; longitude: number; accuracy: number }> {
   return new Promise((resolve, reject) => {
     if (!navigator.geolocation) {
-      reject(new Error('This device does not provide location access.'));
+      reject(new Error('Location is unavailable in this browser. Open the app over HTTPS and enable location services.'));
       return;
     }
-    navigator.geolocation.getCurrentPosition(
-      position => resolve({ latitude: position.coords.latitude, longitude: position.coords.longitude, accuracy: position.coords.accuracy }),
-      cause => reject(new Error(cause.code === cause.PERMISSION_DENIED ? 'Allow location access to record attendance.' : cause.code === cause.TIMEOUT ? 'Could not get your location. Try again.' : 'Location is unavailable. Try again outdoors.')),
-      { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 },
-    );
+    const readPosition = (options: PositionOptions) => new Promise<GeolocationPosition>((positionResolve, positionReject) => {
+      navigator.geolocation.getCurrentPosition(positionResolve, positionReject, options);
+    });
+    const messageFor = (cause: any) => new Error(cause?.code === cause?.PERMISSION_DENIED
+      ? 'Allow location access for this site in your browser and phone settings.'
+      : cause?.code === cause?.TIMEOUT
+        ? 'Could not get your location. Turn on location services and try again.'
+        : 'Location is unavailable. Turn on location services and try again outdoors.');
+    void (async () => {
+      let position: GeolocationPosition;
+      try {
+        position = await readPosition({ enableHighAccuracy: true, maximumAge: 15000, timeout: 15000 });
+      } catch (cause: any) {
+        if (cause?.code === cause?.PERMISSION_DENIED) throw messageFor(cause);
+        try {
+          position = await readPosition({ enableHighAccuracy: false, maximumAge: 30000, timeout: 10000 });
+        } catch (fallbackCause) {
+          throw messageFor(fallbackCause);
+        }
+      }
+      resolve({ latitude: position.coords.latitude, longitude: position.coords.longitude, accuracy: position.coords.accuracy });
+    })().catch(reject);
   });
 }
 
@@ -47,7 +64,6 @@ function Attendance({ role, onCheckInComplete }: { role: Role; onCheckInComplete
   const [staff, setStaff] = useState<Staff[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [dialogOpen, setDialogOpen] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -97,7 +113,6 @@ function Attendance({ role, onCheckInComplete }: { role: Role; onCheckInComplete
       setMine(item);
       await refresh().catch(() => undefined);
       if (action === 'check-in') onCheckInComplete?.();
-      setDialogOpen(false);
       toast(action === 'check-in' ? 'Check-in recorded.' : 'Check-out recorded.', 'success');
     } catch (cause: any) {
       toast(cause?.message || 'Could not record attendance.', 'error');
@@ -139,9 +154,10 @@ function Attendance({ role, onCheckInComplete }: { role: Role; onCheckInComplete
             <p className="mt-2 flex items-center gap-1.5 text-sm text-[#6E6E73]"><MapPin size={15} aria-hidden="true" />{role === 'owner' ? 'Owner attendance · any location' : 'Braidy Saloon, Lumumba Drive · within 300 m'}</p>
             {checkedOut && <p className="mt-1 text-sm text-[#6E6E73]">Checked out at {formatTime(mine?.checkOutAt)}</p>}
           </div>
-          <button type="button" onClick={() => setDialogOpen(true)} aria-label="Open check in or check out" className="mx-auto flex h-28 w-28 items-center justify-center rounded-full bg-[#17679a] text-white shadow-[0_0_0_12px_rgba(23,103,154,0.12),0_0_0_24px_rgba(23,103,154,0.07)] transition hover:bg-[#12547f] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#0071e3]/40 disabled:opacity-50 sm:mx-4" disabled={loading}>
-            <Fingerprint size={54} strokeWidth={1.7} aria-hidden="true" />
-          </button>
+          <Button onClick={() => void punch(checkedIn ? 'check-out' : 'check-in')} disabled={loading || saving || checkedOut} className="mx-auto min-h-14 min-w-40 sm:mx-4">
+            {checkedIn ? <LogOut size={18} aria-hidden="true" /> : <LogIn size={18} aria-hidden="true" />}
+            {saving ? 'Recording…' : checkedOut ? 'Shift complete' : checkedIn ? 'Check out' : 'Check in'}
+          </Button>
         </div>
       </Card>
 
@@ -162,18 +178,6 @@ function Attendance({ role, onCheckInComplete }: { role: Role; onCheckInComplete
           </table>
         </div>}
       </section>}
-
-      {dialogOpen && <Modal title="Check In / Check Out" onClose={() => { if (!saving) setDialogOpen(false); }}>
-        <div className="space-y-4 pb-5">
-          <p className="text-sm text-[#6E6E73]">{role === 'owner' ? 'Owner attendance can be recorded from any location.' : 'Your device location must be within 300 meters of Braidy Saloon. Location is checked when you submit.'}</p>
-          <div className="grid grid-cols-2 gap-3">
-            <Button onClick={() => void punch('check-in')} disabled={saving || checkedIn} className="min-h-14"><LogIn size={17} aria-hidden="true" />{saving ? 'Checking…' : 'Check In'}</Button>
-            <Button variant="secondary" onClick={() => void punch('check-out')} disabled={saving || !checkedIn || checkedOut} className="min-h-14"><LogOut size={17} aria-hidden="true" />Check Out</Button>
-          </div>
-          {checkedIn && <p className="flex items-center gap-1.5 text-xs text-[#6E6E73]"><Clock3 size={14} aria-hidden="true" />Checked in at {formatTime(mine?.checkInAt)}{checkedOut ? ` · checked out at ${formatTime(mine?.checkOutAt)}` : ''}</p>}
-          <p className="flex items-center gap-1.5 text-xs text-[#6E6E73]"><CalendarDays size={14} aria-hidden="true" />One check-in and one check-out per Nairobi day.</p>
-        </div>
-      </Modal>}
     </div>
   );
 }
