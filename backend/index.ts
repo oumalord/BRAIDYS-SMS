@@ -989,6 +989,183 @@ export const handler = router({
     const withPaymentStatus = visible.map((appointment: any) => ({ ...appointment, paymentCompleted: paidAppointmentIds.has(String(appointment.id)) }));
     return json({ items: date ? withPaymentStatus.filter((a: any) => a.date === date) : withPaymentStatus });
   }],
+  'GET /api/reports/staff-performance': [async () => {
+    const context = currentContext();
+    if (!context || !['owner', 'manager', 'admin'].includes(context.role)) return error('Only salon management can view staff performance', 403);
+    const [year, month, day] = nairobiDateString().split('-').map(Number);
+    const currentSunday = new Date(Date.UTC(year, month - 1, day));
+    currentSunday.setUTCDate(currentSunday.getUTCDate() - currentSunday.getUTCDay());
+    const previousSunday = new Date(currentSunday);
+    previousSunday.setUTCDate(previousSunday.getUTCDate() - 7);
+    const dateKey = (date: Date) => date.toISOString().slice(0, 10);
+    const fromDate = dateKey(previousSunday);
+    const toDate = dateKey(currentSunday);
+    const from = Date.UTC(previousSunday.getUTCFullYear(), previousSunday.getUTCMonth(), previousSunday.getUTCDate()) - 3 * 60 * 60 * 1000;
+    const to = Date.UTC(currentSunday.getUTCFullYear(), currentSunday.getUTCMonth(), currentSunday.getUTCDate()) - 3 * 60 * 60 * 1000;
+    const [{ items: staffRows }, { items: orders }, { items: payoutItems }, { items: appointments }, { items: attendance }, { items: queue }, { items: reviews }] = await Promise.all([
+      db.list('staff', { limit: 2000 }),
+      db.list('orders', { limit: 5000 }),
+      db.list('payout_items', { limit: 10000 }),
+      db.list('appointments', { limit: 5000 }),
+      db.list('attendance', { limit: 5000 }),
+      db.list('queue', { limit: 5000 }),
+      db.list('reviews', { limit: 5000 }),
+    ]);
+    const visibleStaff = (staffRows as any[]).filter(member => !member.deletedAt && (!context.branchId || String(member.branchId || '') === context.branchId));
+    const staffById = new Map(visibleStaff.map(member => [String(member.id), member]));
+    const reportById = new Map<string, any>();
+    const ensureReport = (staffId: unknown, fallback: any = {}) => {
+      const id = String(staffId || '');
+      if (!id) return null;
+      let report = reportById.get(id);
+      if (!report) {
+        const member: any = staffById.get(id) || fallback;
+        report = {
+          id,
+          name: member.name || fallback.name || 'Former staff member',
+          role: member.role || fallback.role || 'Staff',
+          branchName: member.branchName || member.branch || fallback.branchName || '',
+          employmentStatus: member.employmentStatus || fallback.employmentStatus || 'unknown',
+          attendance: { days: 0, checkIns: 0, completedShifts: 0, incompleteShifts: 0, minutes: 0, shifts: [] as any[] },
+          appointments: { total: 0, completed: 0, cancelled: 0, noShow: 0, open: 0, minutes: 0, items: [] as any[] },
+          queue: { handled: 0, served: 0 },
+          services: { count: 0, units: 0, revenue: {}, productCost: {}, commissionBase: {}, commission: {}, assistant: {}, paid: {}, unpaid: {}, lines: [] as any[] },
+          reviews: { count: 0, averageRating: 0, distribution: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }, items: [] as any[] },
+          _attendanceDays: new Set<string>(),
+        };
+        reportById.set(id, report);
+      }
+      return report;
+    };
+    visibleStaff.forEach(member => ensureReport(member.id, member));
+    const inBranch = (record: any, appointment?: any) => {
+      const recordBranchId = record.branchId || appointment?.branchId || null;
+      return !context.branchId || !recordBranchId || recordBranchId === context.branchId;
+    };
+    const appointmentRows = (appointments as any[]).filter(item => !item.deletedAt);
+    const appointmentsById = new Map(appointmentRows.map(item => [String(item.id), item]));
+
+    for (const record of attendance as any[]) {
+      if (record.deletedAt || !record.staffId || record.date < fromDate || record.date >= toDate || !inBranch(record)) continue;
+      const report = ensureReport(record.staffId, record);
+      if (!report) continue;
+      report._attendanceDays.add(record.date);
+      report.attendance.checkIns += 1;
+      const checkInAt = Number(record.checkInAt || 0);
+      const checkOutAt = Number(record.checkOutAt || 0);
+      const minutes = checkOutAt > checkInAt ? Math.round((checkOutAt - checkInAt) / 60000) : 0;
+      report.attendance.minutes += minutes;
+      if (checkOutAt > checkInAt) report.attendance.completedShifts += 1;
+      else report.attendance.incompleteShifts += 1;
+      report.attendance.shifts.push({ date: record.date, checkInAt, checkOutAt: checkOutAt || null, minutes });
+    }
+
+    const weekAppointments = appointmentRows.filter(item => item.date >= fromDate && item.date < toDate && inBranch(item));
+    for (const appointment of weekAppointments) {
+      const staffIds = new Set([appointment.staffId, ...(Array.isArray(appointment.items) ? appointment.items.map((item: any) => item.staffId) : [])].filter(Boolean).map(String));
+      for (const staffId of staffIds) {
+        const services = Array.isArray(appointment.items) ? appointment.items.filter((item: any) => String(item.staffId || '') === staffId).map((item: any) => item.serviceName) : [];
+        const report = ensureReport(staffId, { name: appointment.staffName || appointment.items?.find((item: any) => String(item.staffId || '') === staffId)?.staffName });
+        if (!report) continue;
+        const status = String(appointment.status || 'pending');
+        report.appointments.total += 1;
+        report.appointments.minutes += Number(appointment.durationMin || 0);
+        if (status === 'completed') report.appointments.completed += 1;
+        else if (status === 'cancelled') report.appointments.cancelled += 1;
+        else if (status === 'no-show') report.appointments.noShow += 1;
+        else report.appointments.open += 1;
+        report.appointments.items.push({ id: appointment.id, date: appointment.date, time: appointment.time || '', customerName: appointment.customerName || 'Customer', serviceName: services.join(', ') || appointment.serviceName || 'Service', status, durationMin: Number(appointment.durationMin || 0) });
+      }
+    }
+
+    const weekOrders = (orders as any[]).filter(order => {
+      const createdAt = Number(order.createdAt || 0);
+      const appointment = appointmentsById.get(String(order.appointmentId || ''));
+      return !order.deletedAt && createdAt >= from && createdAt < to && inBranch(order, appointment);
+    });
+    const allEarningLines = calculateUnpaidStaffEarnings(weekOrders, [], appointmentRows as any[], from, to);
+    const paidKeys = new Set((payoutItems as any[]).filter(item => !item.deletedAt).map(item => String(item.itemKey || '')));
+    const linesByOrder = new Map<string, any[]>();
+    for (const line of allEarningLines) {
+      const lines = linesByOrder.get(line.orderId) || [];
+      lines.push(line);
+      linesByOrder.set(line.orderId, lines);
+    }
+    for (const order of weekOrders) {
+      for (const [itemIndex, item] of (Array.isArray(order.items) ? order.items : []).entries()) {
+        if (item.type !== 'service') continue;
+        const baseKey = `${order.id}:${itemIndex}`;
+        const earningLines = (linesByOrder.get(String(order.id)) || []).filter(line => line.itemKey === baseKey || line.itemKey.startsWith(`${baseKey}:`));
+        const linesByStaff = new Map<string, any[]>();
+        earningLines.forEach(line => {
+          const lines = linesByStaff.get(line.staffId) || [];
+          lines.push(line);
+          linesByStaff.set(line.staffId, lines);
+        });
+        const appointment = appointmentsById.get(String(order.appointmentId || ''));
+        const currency = String(item.currency || 'KES');
+        const revenue = Number(item.lineTotalAfterDiscount ?? Number(item.price || 0) * Number(item.qty || 1)) || 0;
+        const productCost = Math.max(0, Number(item.productCost || 0));
+        const commissionBase = Math.max(0, Number(item.commissionBase ?? revenue - productCost - Number(item.assistantPayment ?? item.helperDeduction ?? 0)) || 0);
+        for (const [staffId, staffLines] of linesByStaff) {
+          const report = ensureReport(staffId, { name: staffLines[0]?.staffName, branchName: appointment?.branchName || order.branchName });
+          if (!report) continue;
+          const commissionLines = staffLines.filter(line => line.role !== 'assistant');
+          const assistantLines = staffLines.filter(line => line.role === 'assistant');
+          const commission = commissionLines.reduce((sum, line) => sum + Number(line.amount || 0), 0);
+          const assistant = assistantLines.reduce((sum, line) => sum + Number(line.amount || 0), 0);
+          const paid = staffLines.filter(line => paidKeys.has(String(line.itemKey))).reduce((sum, line) => sum + Number(line.amount || 0), 0);
+          const unpaid = staffLines.filter(line => !paidKeys.has(String(line.itemKey))).reduce((sum, line) => sum + Number(line.amount || 0), 0);
+          const attributedRevenue = commissionLines.length ? revenue : 0;
+          report.services.count += 1;
+          report.services.units += Number(item.qty || 1);
+          const addCurrency = (field: string, amount: number) => { report.services[field][currency] = (report.services[field][currency] || 0) + amount; };
+          addCurrency('revenue', attributedRevenue);
+          addCurrency('productCost', commissionLines.length ? productCost : 0);
+          addCurrency('commissionBase', commissionLines.length ? commissionBase : 0);
+          addCurrency('commission', commission);
+          addCurrency('assistant', assistant);
+          addCurrency('paid', paid);
+          addCurrency('unpaid', unpaid);
+          report.services.lines.push({ lineId: baseKey, orderId: String(order.id), createdAt: Number(order.createdAt || 0), customerName: order.customerName || appointment?.customerName || 'Walk-in Customer', serviceName: item.name || 'Service', quantity: Number(item.qty || 1), currency, attributedRevenue, productCost: commissionLines.length ? productCost : 0, commission, assistant, paid, unpaid, roles: Array.from(new Set(staffLines.map(line => line.role === 'assistant' ? 'assistant' : line.itemKey.endsWith(':co-staff') ? 'co-staff' : line.itemKey.endsWith(':third-staff') ? 'third-staff' : 'primary'))) });
+        }
+      }
+    }
+
+    for (const item of queue as any[]) {
+      const joinedAt = Number(item.joinedAt || 0);
+      if (item.deletedAt || !item.staffId || joinedAt < from || joinedAt >= to || !inBranch(item)) continue;
+      const report = ensureReport(item.staffId, { name: item.staffName, branchName: item.branchName });
+      if (!report) continue;
+      report.queue.handled += 1;
+      if (item.status === 'completed') report.queue.served += 1;
+    }
+
+    for (const review of reviews as any[]) {
+      const createdAt = Number(review.createdAt || 0);
+      const appointment = appointmentsById.get(String(review.appointmentId || ''));
+      if (review.deletedAt || !review.staffId || createdAt < from || createdAt >= to || !inBranch(review, appointment)) continue;
+      const report = ensureReport(review.staffId, { name: review.staffName, branchName: appointment?.branchName });
+      if (!report) continue;
+      const rating = Math.max(1, Math.min(5, Number(review.rating || 0)));
+      report.reviews.count += 1;
+      report.reviews.averageRating += rating;
+      report.reviews.distribution[rating] += 1;
+      report.reviews.items.push({ id: review.id, rating, comment: review.comment || '', customerName: review.customerName || 'Customer', serviceName: review.serviceName || 'Service', createdAt });
+    }
+
+    const staff = Array.from(reportById.values()).map(report => {
+      report.attendance.days = report._attendanceDays.size;
+      delete report._attendanceDays;
+      if (report.reviews.count) report.reviews.averageRating /= report.reviews.count;
+      report.attendance.shifts.sort((first: any, second: any) => first.date.localeCompare(second.date) || first.checkInAt - second.checkInAt);
+      report.appointments.items.sort((first: any, second: any) => `${first.date} ${first.time}`.localeCompare(`${second.date} ${second.time}`));
+      report.services.lines.sort((first: any, second: any) => second.createdAt - first.createdAt);
+      report.reviews.items.sort((first: any, second: any) => second.createdAt - first.createdAt);
+      return report;
+    }).sort((first, second) => first.name.localeCompare(second.name));
+    return json({ period: { from, to, fromDate, toDate: dateKey(new Date(currentSunday.getTime() - DAY)) }, staff });
+  }],
   'GET /api/appointments/staff-weekly': [async ({ query }) => {
     const context = currentContext();
     if (!context || !['owner', 'admin'].includes(context.role)) return error('Only the owner or administrator can view staff commission distributions', 403);

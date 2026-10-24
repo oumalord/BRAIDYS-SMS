@@ -1,4 +1,4 @@
-import type { Staff, ServiceItem, Customer, Appointment, AttendanceRecord, AttendanceClientAssignment, QueueEntry, Order, Expense, DashboardData, RebookingItem, ChatChannel, ChatMessage, Currency, MembershipPlan, Promotion, Review, AuditLog, Branch, PayoutBatch, WeeklyStaffWorkReport } from '../types';
+import type { Staff, ServiceItem, Customer, Appointment, AttendanceRecord, AttendanceClientAssignment, QueueEntry, Order, Expense, DashboardData, RebookingItem, ChatChannel, ChatMessage, Currency, MembershipPlan, Promotion, Review, AuditLog, Branch, PayoutBatch, WeeklyStaffWorkReport, StaffPerformanceReport } from '../types';
 
 const api = {
   get: async (path: string) => ({ data: await request(path) }),
@@ -124,6 +124,10 @@ export const AttendanceApi = {
   list: (date: string) => api.get(`/api/attendance?date=${encodeURIComponent(date)}`).then(r => r.data as { items: AttendanceRecord[]; date: string }),
   checkIn: (location?: { latitude: number; longitude: number; accuracy: number }) => api.post('/api/attendance/check-in', location).then(r => r.data.item as AttendanceRecord),
   checkOut: (location?: { latitude: number; longitude: number; accuracy: number }) => api.post('/api/attendance/check-out', location).then(r => r.data.item as AttendanceRecord),
+};
+
+export const StaffPerformanceApi = {
+  lastWeek: () => api.get('/api/reports/staff-performance').then(r => r.data as StaffPerformanceReport),
 };
 
 export const CustomerApi = {

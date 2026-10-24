@@ -148,6 +148,33 @@ export interface WeeklyStaffWorkReport {
   services: WeeklyStaffServiceWork[];
 }
 
+export interface StaffPerformanceReport {
+  period: { from: number; to: number; fromDate: string; toDate: string };
+  staff: {
+    id: string;
+    name: string;
+    role: string;
+    branchName: string;
+    employmentStatus: string;
+    attendance: { days: number; checkIns: number; completedShifts: number; incompleteShifts: number; minutes: number; shifts: { date: string; checkInAt: number; checkOutAt: number | null; minutes: number }[] };
+    appointments: { total: number; completed: number; cancelled: number; noShow: number; open: number; minutes: number; items: { id: string; date: string; time: string; customerName: string; serviceName: string; status: string; durationMin: number }[] };
+    queue: { handled: number; served: number };
+    services: {
+      count: number;
+      units: number;
+      revenue: Record<string, number>;
+      productCost: Record<string, number>;
+      commissionBase: Record<string, number>;
+      commission: Record<string, number>;
+      assistant: Record<string, number>;
+      paid: Record<string, number>;
+      unpaid: Record<string, number>;
+      lines: { lineId: string; orderId: string; createdAt: number; customerName: string; serviceName: string; quantity: number; currency: string; attributedRevenue: number; productCost: number; commission: number; assistant: number; paid: number; unpaid: number; roles: string[] }[];
+    };
+    reviews: { count: number; averageRating: number; distribution: Record<1 | 2 | 3 | 4 | 5, number>; items: { id: string; rating: number; comment: string; customerName: string; serviceName: string; createdAt: number }[] };
+  }[];
+}
+
 export type QueueStatus = 'waiting' | 'in-service' | 'completed';
 
 export interface QueueEntry {
