@@ -1,6 +1,6 @@
 import { router, json, error, db, ai, storage, currentContext } from './runtime.ts';
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
-import { calculateUnpaidStaffEarnings, serviceCommission, staffCommission } from './earnings.ts';
+import { calculateUnpaidStaffEarnings, serviceCommission, staffAppointmentMinutes, staffCommission } from './earnings.ts';
 
 const DAY = 24 * 3600 * 1000;
 const DEFAULT_STAFF_PIN = '1234';
@@ -1017,6 +1017,7 @@ export const handler = router({
     const ensureReport = (staffId: unknown, fallback: any = {}) => {
       const id = String(staffId || '');
       if (!id) return null;
+      if (context.branchId && !staffById.has(id) && String(fallback.branchId || '') !== context.branchId) return null;
       let report = reportById.get(id);
       if (!report) {
         const member: any = staffById.get(id) || fallback;
@@ -1038,9 +1039,10 @@ export const handler = router({
       return report;
     };
     visibleStaff.forEach(member => ensureReport(member.id, member));
-    const inBranch = (record: any, appointment?: any) => {
-      const recordBranchId = record.branchId || appointment?.branchId || null;
-      return !context.branchId || !recordBranchId || recordBranchId === context.branchId;
+    const inBranch = (record: any, appointment?: any, assignedStaffId?: unknown) => {
+      const staffId = String(assignedStaffId || record.staffId || appointment?.staffId || '');
+      const recordBranchId = record.branchId || appointment?.branchId || staffById.get(staffId)?.branchId || null;
+      return !context.branchId || recordBranchId === context.branchId;
     };
     const appointmentRows = (appointments as any[]).filter(item => !item.deletedAt);
     const appointmentsById = new Map(appointmentRows.map(item => [String(item.id), item]));
@@ -1060,28 +1062,39 @@ export const handler = router({
       report.attendance.shifts.push({ date: record.date, checkInAt, checkOutAt: checkOutAt || null, minutes });
     }
 
-    const weekAppointments = appointmentRows.filter(item => item.date >= fromDate && item.date < toDate && inBranch(item));
+    const weekAppointments = appointmentRows.filter(item => {
+      if (item.date < fromDate || item.date >= toDate) return false;
+      const assignedStaffIds = [item.staffId, ...(Array.isArray(item.items) ? item.items.map((service: any) => service.staffId) : [])].filter(Boolean);
+      return !context.branchId || inBranch(item) || assignedStaffIds.some(staffId => inBranch(item, undefined, staffId));
+    });
     for (const appointment of weekAppointments) {
       const staffIds = new Set([appointment.staffId, ...(Array.isArray(appointment.items) ? appointment.items.map((item: any) => item.staffId) : [])].filter(Boolean).map(String));
       for (const staffId of staffIds) {
-        const services = Array.isArray(appointment.items) ? appointment.items.filter((item: any) => String(item.staffId || '') === staffId).map((item: any) => item.serviceName) : [];
-        const report = ensureReport(staffId, { name: appointment.staffName || appointment.items?.find((item: any) => String(item.staffId || '') === staffId)?.staffName });
+        if (!inBranch(appointment, undefined, staffId)) continue;
+        const assignedItems = Array.isArray(appointment.items) ? appointment.items.filter((item: any) => String(item.staffId || '') === staffId) : [];
+        const services = assignedItems.map((item: any) => item.serviceName);
+        const bookedMinutes = staffAppointmentMinutes(appointment, staffId);
+        const report = ensureReport(staffId, { name: appointment.staffName || appointment.items?.find((item: any) => String(item.staffId || '') === staffId)?.staffName, branchId: appointment.branchId });
         if (!report) continue;
         const status = String(appointment.status || 'pending');
         report.appointments.total += 1;
-        report.appointments.minutes += Number(appointment.durationMin || 0);
+        report.appointments.minutes += bookedMinutes;
         if (status === 'completed') report.appointments.completed += 1;
         else if (status === 'cancelled') report.appointments.cancelled += 1;
         else if (status === 'no-show') report.appointments.noShow += 1;
         else report.appointments.open += 1;
-        report.appointments.items.push({ id: appointment.id, date: appointment.date, time: appointment.time || '', customerName: appointment.customerName || 'Customer', serviceName: services.join(', ') || appointment.serviceName || 'Service', status, durationMin: Number(appointment.durationMin || 0) });
+        report.appointments.items.push({ id: appointment.id, date: appointment.date, time: appointment.time || '', customerName: appointment.customerName || 'Customer', serviceName: services.join(', ') || appointment.serviceName || 'Service', status, durationMin: bookedMinutes });
       }
     }
 
     const weekOrders = (orders as any[]).filter(order => {
       const createdAt = Number(order.createdAt || 0);
       const appointment = appointmentsById.get(String(order.appointmentId || ''));
-      return !order.deletedAt && createdAt >= from && createdAt < to && inBranch(order, appointment);
+      if (order.deletedAt || createdAt < from || createdAt >= to) return false;
+      const orderStaffIds = (Array.isArray(order.items) ? order.items.flatMap((item: any) => [item.staffId, item.coStaffId, item.thirdStaffId, item.helperStaffId]) : [])
+        .concat(appointment?.staffId || [], ...(Array.isArray(appointment?.items) ? appointment.items.map((item: any) => item.staffId) : []))
+        .filter(Boolean);
+      return !context.branchId || inBranch(order, appointment) || orderStaffIds.some(staffId => inBranch(order, appointment, staffId));
     });
     const allEarningLines = calculateUnpaidStaffEarnings(weekOrders, [], appointmentRows as any[], from, to);
     const paidKeys = new Set((payoutItems as any[]).filter(item => !item.deletedAt).map(item => String(item.itemKey || '')));
@@ -1108,7 +1121,8 @@ export const handler = router({
         const productCost = Math.max(0, Number(item.productCost || 0));
         const commissionBase = Math.max(0, Number(item.commissionBase ?? revenue - productCost - Number(item.assistantPayment ?? item.helperDeduction ?? 0)) || 0);
         for (const [staffId, staffLines] of linesByStaff) {
-          const report = ensureReport(staffId, { name: staffLines[0]?.staffName, branchName: appointment?.branchName || order.branchName });
+          if (!inBranch(order, appointment, staffId)) continue;
+          const report = ensureReport(staffId, { name: staffLines[0]?.staffName, branchId: order.branchId || appointment?.branchId || staffById.get(staffId)?.branchId, branchName: appointment?.branchName || order.branchName });
           if (!report) continue;
           const commissionLines = staffLines.filter(line => line.role !== 'assistant');
           const assistantLines = staffLines.filter(line => line.role === 'assistant');
@@ -1135,9 +1149,9 @@ export const handler = router({
     for (const item of queue as any[]) {
       const joinedAt = Number(item.joinedAt || 0);
       if (item.deletedAt || !item.staffId || joinedAt < from || joinedAt >= to || !inBranch(item)) continue;
-      const report = ensureReport(item.staffId, { name: item.staffName, branchName: item.branchName });
+      const report = ensureReport(item.staffId, { name: item.staffName, branchId: item.branchId || staffById.get(String(item.staffId))?.branchId, branchName: item.branchName });
       if (!report) continue;
-      report.queue.handled += 1;
+      if (item.calledAt || item.status === 'in-service' || item.status === 'completed') report.queue.handled += 1;
       if (item.status === 'completed') report.queue.served += 1;
     }
 
@@ -1145,12 +1159,13 @@ export const handler = router({
       const createdAt = Number(review.createdAt || 0);
       const appointment = appointmentsById.get(String(review.appointmentId || ''));
       if (review.deletedAt || !review.staffId || createdAt < from || createdAt >= to || !inBranch(review, appointment)) continue;
-      const report = ensureReport(review.staffId, { name: review.staffName, branchName: appointment?.branchName });
+      const report = ensureReport(review.staffId, { name: review.staffName, branchId: review.branchId || appointment?.branchId || staffById.get(String(review.staffId))?.branchId, branchName: appointment?.branchName });
       if (!report) continue;
-      const rating = Math.max(1, Math.min(5, Number(review.rating || 0)));
+      const rating = Number(review.rating);
+      if (!Number.isFinite(rating) || rating < 1 || rating > 5) continue;
       report.reviews.count += 1;
       report.reviews.averageRating += rating;
-      report.reviews.distribution[rating] += 1;
+      report.reviews.distribution[Math.round(rating)] += 1;
       report.reviews.items.push({ id: review.id, rating, comment: review.comment || '', customerName: review.customerName || 'Customer', serviceName: review.serviceName || 'Service', createdAt });
     }
 

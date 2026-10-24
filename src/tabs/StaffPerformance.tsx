@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Activity, CalendarDays, Clock3, Download, MessageSquare, RefreshCw, Search, Scissors, Star, Users } from 'lucide-react';
 import { Badge, Button, Card, Input, LoadingState, Select, StatCard } from '../components/ui';
 import { downloadCSV, fmtMoney, StaffPerformanceApi } from '../lib/api';
+import { uniqueServiceLines } from '../lib/staffPerformance';
 import type { StaffPerformanceReport } from '../types';
 
 type SortKey = 'revenue' | 'completed' | 'earnings' | 'hours' | 'rating' | 'name';
@@ -12,6 +13,12 @@ function formatDate(date: string, options: Intl.DateTimeFormatOptions = { day: '
 
 function formatTime(timestamp: number | null) {
   return timestamp ? new Intl.DateTimeFormat('en-KE', { timeZone: 'Africa/Nairobi', hour: '2-digit', minute: '2-digit' }).format(timestamp) : '—';
+}
+
+function formatDateTime(timestamp: number) {
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Nairobi', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(timestamp);
+  const value = (type: string) => parts.find(part => part.type === type)?.value || '';
+  return `${value('year')}-${value('month')}-${value('day')} ${value('hour')}:${value('minute')}`;
 }
 
 function formatHours(minutes: number) {
@@ -64,7 +71,7 @@ function StaffPerformance() {
   const staffRows = report?.staff || [];
   const selected = staffRows.find(member => member.id === selectedStaffId) || staffRows[0] || null;
   const allServiceLines = staffRows.flatMap(member => member.services.lines);
-  const uniqueServices = Array.from(new Map(allServiceLines.map(line => [line.lineId, line])).values());
+  const uniqueServices = uniqueServiceLines(allServiceLines);
   const allAppointments = Array.from(new Map(staffRows.flatMap(member => member.appointments.items).map(item => [item.id, item])).values());
   const allReviews = Array.from(new Map(staffRows.flatMap(member => member.reviews.items).map(item => [item.id, item])).values());
   const revenueTotals = uniqueServices.reduce((totals, line) => ({ ...totals, [line.currency]: (totals[line.currency] || 0) + line.attributedRevenue }), {} as Record<string, number>);
@@ -124,13 +131,13 @@ function StaffPerformance() {
       ...staffRows.map(member => [member.name, member.role, member.branchName, member.employmentStatus, member.appointments.total, member.appointments.completed, member.appointments.cancelled, member.appointments.noShow, member.queue.handled, member.queue.served, member.services.count, member.services.units, member.services.revenue.KES || 0, member.services.revenue.USD || 0, member.services.commission.KES || 0, member.services.assistant.KES || 0, member.services.paid.KES || 0, member.services.unpaid.KES || 0, member.attendance.days, member.attendance.completedShifts, Math.round(member.attendance.minutes / 60 * 10) / 10, member.reviews.count, Math.round(member.reviews.averageRating * 100) / 100]),
       [],
       ['Service detail', 'Staff', 'Date', 'Customer', 'Service', 'Quantity', 'Currency', 'Attributed revenue', 'Commission', 'Assistant earnings', 'Paid', 'Unpaid', 'Work roles'],
-      ...staffRows.flatMap(member => member.services.lines.map(line => [member.name, new Date(line.createdAt).toISOString(), line.customerName, line.serviceName, line.quantity, line.currency, line.attributedRevenue, line.commission, line.assistant, line.paid, line.unpaid, line.roles.join(', ')])),
+      ...staffRows.flatMap(member => member.services.lines.map(line => [member.name, formatDateTime(line.createdAt), line.customerName, line.serviceName, line.quantity, line.currency, line.attributedRevenue, line.commission, line.assistant, line.paid, line.unpaid, line.roles.join(', ')])),
       [],
       ['Review detail', 'Staff', 'Date', 'Rating', 'Customer', 'Service', 'Comment'],
-      ...staffRows.flatMap(member => member.reviews.items.map(review => [member.name, new Date(review.createdAt).toISOString(), review.rating, review.customerName, review.serviceName, review.comment])),
+      ...staffRows.flatMap(member => member.reviews.items.map(review => [member.name, formatDateTime(review.createdAt), review.rating, review.customerName, review.serviceName, review.comment])),
       [],
       ['Shift detail', 'Staff', 'Date', 'Check in', 'Check out', 'Minutes'],
-      ...staffRows.flatMap(member => member.attendance.shifts.map(shift => [member.name, shift.date, new Date(shift.checkInAt).toISOString(), shift.checkOutAt ? new Date(shift.checkOutAt).toISOString() : '', shift.minutes])),
+      ...staffRows.flatMap(member => member.attendance.shifts.map(shift => [member.name, shift.date, formatDateTime(shift.checkInAt), shift.checkOutAt ? formatDateTime(shift.checkOutAt) : '', shift.minutes])),
     ];
     downloadCSV(`braidy-staff-performance-${report.period.fromDate}-to-${report.period.toDate}.csv`, rows);
   };
@@ -303,7 +310,7 @@ function StaffPerformance() {
           <Card className="overflow-hidden">
             <div className="flex items-center justify-between border-b border-black/5 px-5 py-4"><div><h3 className="font-semibold">Appointment outcomes</h3><p className="text-xs text-[#6E6E73]">Client bookings assigned to {selected.name}</p></div><CalendarDays size={17} className="text-[#17679a]" aria-hidden="true" /></div>
             <div className="max-h-80 overflow-auto">
-              {selectedWork?.items.length ? <table className="w-full min-w-[620px] text-left text-sm"><thead className="sticky top-0 bg-white text-xs text-[#6E6E73]"><tr><th className="px-5 py-3 font-medium">Date</th><th className="px-5 py-3 font-medium">Time</th><th className="px-5 py-3 font-medium">Client</th><th className="px-5 py-3 font-medium">Service</th><th className="px-5 py-3 font-medium">Outcome</th></tr></thead><tbody>{selectedWork.items.map(item => <tr key={item.id} className="border-t border-black/5"><td className="px-5 py-3">{formatDate(item.date, { day: 'numeric', month: 'short' })}</td><td className="px-5 py-3">{item.time || '—'}</td><td className="px-5 py-3">{item.customerName}</td><td className="px-5 py-3">{item.serviceName}</td><td className="px-5 py-3"><Badge tone={toneForStatus(item.status)}>{item.status}</Badge></td></tr>)}</tbody></table> : <p className="p-5 text-sm text-[#6E6E73]">No appointment records for this period.</p>}
+              {selectedWork?.items.length ? <table className="w-full min-w-[700px] text-left text-sm"><thead className="sticky top-0 bg-white text-xs text-[#6E6E73]"><tr><th className="px-5 py-3 font-medium">Date</th><th className="px-5 py-3 font-medium">Time</th><th className="px-5 py-3 font-medium">Client</th><th className="px-5 py-3 font-medium">Service</th><th className="px-5 py-3 font-medium">Minutes</th><th className="px-5 py-3 font-medium">Outcome</th></tr></thead><tbody>{selectedWork.items.map(item => <tr key={item.id} className="border-t border-black/5"><td className="px-5 py-3">{formatDate(item.date, { day: 'numeric', month: 'short' })}</td><td className="px-5 py-3">{item.time || '—'}</td><td className="px-5 py-3">{item.customerName}</td><td className="px-5 py-3">{item.serviceName}</td><td className="px-5 py-3">{item.durationMin || '—'}</td><td className="px-5 py-3"><Badge tone={toneForStatus(item.status)}>{item.status}</Badge></td></tr>)}</tbody></table> : <p className="p-5 text-sm text-[#6E6E73]">No appointment records for this period.</p>}
             </div>
           </Card>
         </section>}

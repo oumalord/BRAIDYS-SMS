@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { calculateUnpaidStaffEarnings } from '../backend/earnings.ts';
+import { calculateUnpaidStaffEarnings, staffAppointmentMinutes } from '../backend/earnings.ts';
 
 const now = new Date(2026, 8, 26, 12, 0, 0).getTime();
 const startOfSunday = new Date(2026, 8, 20, 0, 0, 0).getTime();
@@ -65,4 +65,10 @@ test('paid transactions reappear in unpaid calculations only after payout lines 
   const cleared = calculateUnpaidStaffEarnings([order], [{ ...activePayout, itemKey: matchingKey, deletedAt: now }], [], startOfSunday, startOfNextSunday);
   assert.equal(active.length, 0);
   assert.equal(cleared.reduce((sum, line) => sum + line.amount, 0), 450);
+});
+
+test('appointment minutes use assigned service durations and legacy primary-staff fallback', () => {
+  assert.equal(staffAppointmentMinutes({ staffId: 'primary', durationMin: 60, items: [{ durationMin: 30 }, { durationMin: 30 }] }, 'primary'), 60);
+  assert.equal(staffAppointmentMinutes({ staffId: 'primary', durationMin: 60, items: [{ staffId: 'primary', durationMin: 35 }, { staffId: 'other', durationMin: 25 }] }, 'primary'), 35);
+  assert.equal(staffAppointmentMinutes({ staffId: 'other', durationMin: 60, items: [{ staffId: 'primary', durationMin: 35 }, { staffId: 'other', durationMin: 25 }] }, 'primary'), 35);
 });

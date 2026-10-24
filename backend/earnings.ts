@@ -19,6 +19,16 @@ export function staffCommission(item: any, staffId: unknown): number {
   return 0;
 }
 
+export function staffAppointmentMinutes(appointment: any, staffId: unknown): number {
+  const items = Array.isArray(appointment?.items) ? appointment.items : [];
+  const assigned = items.filter((item: any) => String(item.staffId || '') === String(staffId || ''));
+  if (assigned.length) return assigned.reduce((sum: number, item: any) => sum + Math.max(0, Number(item.durationMin || 0)), 0);
+  const hasItemAssignments = items.some((item: any) => item.staffId);
+  return !hasItemAssignments && String(appointment?.staffId || '') === String(staffId || '')
+    ? Math.max(0, Number(appointment?.durationMin || 0))
+    : 0;
+}
+
 export interface StaffEarningLine {
   itemKey: string;
   orderId: string;
