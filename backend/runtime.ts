@@ -3,7 +3,7 @@ import { neon } from '@neondatabase/serverless';
 import { randomUUID } from 'node:crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
 
-type RouteHandler = (context: { body: any; query: Record<string, string>; params: Record<string, string> }) => Promise<any>;
+type RouteHandler = (context: { body: any; query: Record<string, string>; params: Record<string, string>; headers: Record<string, string | string[] | undefined>; rawBody?: Buffer }) => Promise<any>;
 
 type StoredRecord = { id: string; collection: string; record: Record<string, any> };
 type RequestContext = { accountId: string; tenantId: string; salonName: string; branchId?: string; role: string; name: string; staffId?: string };

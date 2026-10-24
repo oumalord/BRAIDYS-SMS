@@ -14,7 +14,7 @@ function normalizeRole(role: unknown) {
 
 const app = express();
 const port = Number(process.env.PORT || 8787);
-app.use(express.json({ limit: '1mb' }));
+app.use(express.json({ limit: '1mb', verify: (request: any, _response, buffer) => { request.rawBody = Buffer.from(buffer); } }));
 app.use((request, response, next) => {
   const origin = String(request.headers.origin || '');
   if (/^https?:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin)) response.header('Access-Control-Allow-Origin', origin);
@@ -47,7 +47,7 @@ async function resolveContext(request: any) {
   return { accountId: account.id, tenantId: account.tenantId, salonName: account.salonName, branchId, role, name: account.name, staffId: account.staffId };
 }
 
-const publicRoutes = new Set(['/api/_healthcheck', '/api/public/salons', '/api/public/branches', '/api/auth/login', '/api/auth/signup', '/api/auth/demo', '/api/mpesa/callback', '/api/payroll/timeout', '/api/payroll/result']);
+const publicRoutes = new Set(['/api/_healthcheck', '/api/public/salons', '/api/public/branches', '/api/auth/login', '/api/auth/signup', '/api/auth/demo', '/api/mpesa/callback', '/api/payroll/timeout', '/api/payroll/result', '/api/paystack/webhook']);
 
 for (const [definition, [routeHandler]] of Object.entries(handler.routes)) {
   const [method, path] = definition.split(' ');
@@ -59,7 +59,7 @@ for (const [definition, [routeHandler]] of Object.entries(handler.routes)) {
     try {
       const context = await resolveContext(request);
       if (!publicRoutes.has(request.path) && !context) return response.status(401).json({ error: 'Please log in.' });
-      const result = await withRequestContext(context, () => routeHandler({ body: request.body, query: request.query, params }));
+      const result = await withRequestContext(context, () => routeHandler({ body: request.body, query: request.query, params, headers: request.headers, rawBody: request.rawBody }));
       response.status(result?.status || 200).json(result?.body ?? result);
     } catch (cause) {
       console.error(cause);

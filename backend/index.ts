@@ -1,6 +1,7 @@
-import { router, json, error, db, ai, storage, currentContext } from './runtime.ts';
+import { router, json, error, db, ai, storage, currentContext, withRequestContext } from './runtime.ts';
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import { calculateUnpaidStaffEarnings, serviceCommission, staffAppointmentMinutes, staffCommission } from './earnings.ts';
+import { toPaystackMinorAmount, verifyPaystackSignature } from './paystack.ts';
 
 const DAY = 24 * 3600 * 1000;
 const DEFAULT_STAFF_PIN = '1234';
@@ -1937,7 +1938,7 @@ export const handler = router({
       totals.set(earning.staffId, total);
     }
     return json({
-      items: (items as any[]).filter(member => !member.deletedAt).map(member => ({
+      items: (items as any[]).filter(member => !member.deletedAt && (!currentContext()?.branchId || member.branchId === currentContext()?.branchId)).map(member => ({
         ...member,
         commissionEarnedWeek: totals.get(member.id)?.commission || 0,
         assistantEarnedWeek: totals.get(member.id)?.assistant || 0,
@@ -2006,6 +2007,198 @@ export const handler = router({
   }],
   'POST /api/payroll/result': [async ({ body }) => { await db.add('payroll_callbacks', [{ type: 'result', body, createdAt: Date.now() }]); return json({ ResultCode: 0, ResultDesc: 'Accepted' }); }],
   'POST /api/payroll/timeout': [async ({ body }) => { await db.add('payroll_callbacks', [{ type: 'timeout', body, createdAt: Date.now() }]); return json({ ResultCode: 0, ResultDesc: 'Accepted' }); }],
+
+  'GET /api/payroll/paystack/status': [async () => {
+    const context = currentContext();
+    if (!context || !['owner', 'admin'].includes(context.role)) return error('Only the owner or administrator can configure payroll transfers', 403);
+    const multiplier = Number(process.env.PAYSTACK_TRANSFER_AMOUNT_MULTIPLIER || 100);
+    const validMultiplier = Number.isSafeInteger(multiplier) && multiplier > 0;
+    return json({ configured: Boolean(process.env.PAYSTACK_SECRET_KEY) && validMultiplier, canSend: context.role === 'owner', currency: 'KES', amountMultiplier: validMultiplier ? multiplier : null, webhookPath: '/api/paystack/webhook' });
+  }],
+  'GET /api/payroll/paystack/batches': [async () => {
+    const context = currentContext();
+    if (!context || !['owner', 'admin'].includes(context.role)) return error('Only the owner or administrator can view Paystack payroll history', 403);
+    const [{ items: batches }, { items: payrollItems }] = await Promise.all([db.list('payroll_batches', { limit: 500 }), db.list('payroll_items', { limit: 5000 })]);
+    const visibleBatches = (batches as any[]).filter(batch => batch.provider === 'paystack' && batch.tenantId === context.tenantId && (!context.branchId || batch.branchId === context.branchId));
+    visibleBatches.sort((first, second) => Number(second.createdAt || 0) - Number(first.createdAt || 0));
+    return json({ items: visibleBatches.slice(0, 20).map(batch => ({
+      id: batch.id, status: batch.status, totalKES: batch.totalKES, employeeCount: batch.employeeCount,
+      sentCount: batch.sentCount || 0, failedCount: batch.failedCount || 0, createdAt: batch.createdAt,
+      transfers: (payrollItems as any[]).filter(item => item.provider === 'paystack' && item.batchId === batch.id && item.tenantId === context.tenantId)
+        .map(item => ({ staffId: item.staffId, staffName: item.staffName, amountKES: item.amountKES, status: item.status, reference: item.reference, failureReason: item.failureReason || item.error || item.webhookIssue || '' })),
+    })) });
+  }],
+  'POST /api/payroll/paystack/send': [async ({ body }) => {
+    const context = currentContext();
+    if (!context || context.role !== 'owner') return error('Only the salon owner can send Paystack payroll', 403);
+    if (!process.env.PAYSTACK_SECRET_KEY) return error('Paystack payroll is not configured. Add PAYSTACK_SECRET_KEY to the backend environment.', 503);
+    if (!context.tenantId) return error('A salon-scoped owner account is required to send payroll.', 403);
+    const multiplier = Number(process.env.PAYSTACK_TRANSFER_AMOUNT_MULTIPLIER || 100);
+    if (!Number.isSafeInteger(multiplier) || multiplier <= 0) return error('PAYSTACK_TRANSFER_AMOUNT_MULTIPLIER must be a positive integer.', 503);
+    const requestedIds = Array.isArray(body?.staffIds) ? Array.from(new Set(body.staffIds.map((id: unknown) => String(id || '').trim()).filter(Boolean))) : [];
+    if (!requestedIds.length) return error('Select at least one staff member for payroll.', 400);
+    if (requestedIds.length > 100) return error('Paystack bulk transfers support up to 100 recipients per batch.', 400);
+
+    const [{ items: staffRows }, { items: orders }, { items: payoutItems }, { items: appointments }, { items: previousPayrollItems }] = await Promise.all([
+      db.list('staff', { limit: 2000 }), db.list('orders', { limit: 5000 }), db.list('payout_items', { limit: 10000 }),
+      db.list('appointments', { limit: 5000 }), db.list('payroll_items', { limit: 5000 }),
+    ]);
+    const members = (staffRows as any[]).filter(member => !member.deletedAt && member.employmentStatus !== 'laid-off' && member.tenantId === context.tenantId
+      && (!context.branchId || member.branchId === context.branchId) && requestedIds.includes(String(member.id)));
+    if (members.length !== requestedIds.length) return error('One or more selected staff members are not available in this salon or branch.', 400);
+    const missingRecipient = members.find(member => !/^RCP_[A-Za-z0-9]+$/.test(String(member.paystackRecipientCode || '')));
+    if (missingRecipient) return error(`Add a valid Paystack recipient code for ${missingRecipient.name} in Staff details before sending payroll.`, 400);
+    if (new Set(members.map(member => member.paystackRecipientCode)).size !== members.length) return error('Each staff member must have a unique Paystack recipient code.', 400);
+
+    const staffById = new Map(members.map(member => [String(member.id), member]));
+    const appointmentsById = new Map((appointments as any[]).filter(item => !item.deletedAt).map(item => [String(item.id), item]));
+    const branchOrders = (orders as any[]).filter(order => {
+      if (order.tenantId !== context.tenantId) return false;
+      if (!context.branchId) return true;
+      const appointment = appointmentsById.get(String(order.appointmentId || ''));
+      const orderBranch = order.branchId || appointment?.branchId;
+      if (orderBranch) return orderBranch === context.branchId;
+      return (Array.isArray(order.items) ? order.items : []).some((item: any) => [item.staffId, item.coStaffId, item.thirdStaffId, item.helperStaffId]
+        .some(id => staffById.get(String(id || ''))?.branchId === context.branchId));
+    });
+    const branchPayoutItems = (payoutItems as any[]).filter(item => item.tenantId === context.tenantId && (!context.branchId || !item.branchId || item.branchId === context.branchId));
+    const { from, to } = currentSundayThroughYesterdayRange();
+    const earnings = calculateUnpaidStaffEarnings(branchOrders, branchPayoutItems, (appointments as any[]).filter(item => item.tenantId === context.tenantId), from, to)
+      .filter(line => staffById.has(line.staffId) && line.currency === 'KES');
+    const earningsByStaffId = new Map<string, any[]>();
+    for (const earning of earnings) {
+      const lines = earningsByStaffId.get(earning.staffId) || [];
+      lines.push(earning);
+      earningsByStaffId.set(earning.staffId, lines);
+    }
+    const pendingStatuses = new Set(['submitting', 'pending', 'unknown', 'review']);
+    const lockedItemKeys = new Set((previousPayrollItems as any[]).filter(item => item.provider === 'paystack' && pendingStatuses.has(item.status))
+      .flatMap(item => Array.isArray(item.itemKeys) ? item.itemKeys.map(String) : []));
+    const transfers: any[] = [];
+    for (const member of members) {
+      const lines = earningsByStaffId.get(String(member.id)) || [];
+      if (!lines.length) return error(`No unpaid KES earnings are available for ${member.name}. Refresh payroll before sending.`, 409);
+      if (lines.some(line => lockedItemKeys.has(String(line.itemKey)))) return error(`A transfer for ${member.name}'s payroll is already pending. Check transfer status before retrying.`, 409);
+      const amountKES = Math.round(lines.reduce((sum, line) => sum + Number(line.amount || 0), 0));
+      const expectedAmountKES = Number(body?.expectedAmountsKES?.[member.id]);
+      if (!Number.isSafeInteger(expectedAmountKES) || expectedAmountKES !== amountKES) return error(`Unpaid earnings changed for ${member.name}. Refresh payroll and confirm the updated total.`, 409);
+      const amount = toPaystackMinorAmount(amountKES, multiplier);
+      if (!amount) return error(`Could not calculate a valid payment amount for ${member.name}.`, 400);
+      transfers.push({ member, lines, amountKES, amount, reference: `braidy-${randomBytes(18).toString('hex')}` });
+    }
+
+    const now = Date.now();
+    const totalKES = transfers.reduce((sum, transfer) => sum + transfer.amountKES, 0);
+    const [batchId] = await db.add('payroll_batches', [{ tenantId: context.tenantId, branchId: context.branchId || null, provider: 'paystack', status: 'submitting', totalKES, employeeCount: transfers.length, createdAt: now }]);
+    const payrollRecords = transfers.map(transfer => ({
+      tenantId: context.tenantId, branchId: context.branchId || transfer.member.branchId || null, provider: 'paystack', batchId,
+      staffId: transfer.member.id, staffName: transfer.member.name, recipientCode: transfer.member.paystackRecipientCode,
+      amountKES: transfer.amountKES, amount: transfer.amount, currency: 'KES', reference: transfer.reference,
+      itemKeys: transfer.lines.map((line: any) => String(line.itemKey)), earningLines: transfer.lines,
+      status: 'submitting', createdAt: now,
+    }));
+    const itemIds = await db.add('payroll_items', payrollRecords);
+    try {
+      const response = await fetch('https://api.paystack.co/transfer/bulk', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source: 'balance', currency: 'KES', transfers: transfers.map(transfer => ({
+          amount: transfer.amount, recipient: transfer.member.paystackRecipientCode, reference: transfer.reference, reason: `BRAIDY SALON payroll ${batchId}`,
+        })) }),
+      });
+      const resultBody: any = await response.json().catch(() => ({}));
+      if (!response.ok || !resultBody.status) {
+        const message = resultBody.message || `Paystack rejected the batch (${response.status}).`;
+        await db.update('payroll_items', itemIds.map((id: string, index: number) => ({ id, record: { ...payrollRecords[index], id, status: 'failed', error: message } })));
+        await db.update('payroll_batches', [{ id: batchId, record: { id: batchId, tenantId: context.tenantId, provider: 'paystack', status: 'failed', totalKES, employeeCount: transfers.length, failedCount: transfers.length, createdAt: now, error: message } }]);
+        return error(message, 502);
+      }
+      const acceptedRows = Array.isArray(resultBody.data) ? resultBody.data : Array.isArray(resultBody.data?.success) ? resultBody.data.success : [];
+      const failedReferences = new Set((Array.isArray(resultBody.data?.errors) ? resultBody.data.errors : []).map((item: any) => String(item.reference || '')));
+      const [{ items: currentPayrollItems }] = await Promise.all([db.list('payroll_items', { limit: 5000 })]);
+      const currentItemById = new Map((currentPayrollItems as any[]).map(item => [String(item.id), item]));
+      const updatedItems = transfers.map((transfer, index) => {
+        const result = acceptedRows.find((item: any) => String(item.reference || '') === transfer.reference);
+        const currentItem: any = currentItemById.get(String(itemIds[index]));
+        const finalizedByWebhook = ['success', 'failed', 'reversed', 'review'].includes(currentItem?.status);
+        const omittedFromResponse = !result && !failedReferences.has(transfer.reference);
+        const status = finalizedByWebhook ? currentItem.status : failedReferences.has(transfer.reference) ? 'failed' : omittedFromResponse ? 'review' : 'pending';
+        return { id: itemIds[index], record: { ...payrollRecords[index], ...(currentItem || {}), id: itemIds[index], status, webhookIssue: omittedFromResponse ? 'Paystack omitted this reference from the bulk response. Verify it in the Paystack dashboard before retrying.' : currentItem?.webhookIssue, transferCode: result?.transfer_code || currentItem?.transferCode || null, responseStatus: result?.status || currentItem?.responseStatus || null } };
+      });
+      await db.update('payroll_items', updatedItems);
+      const successCount = updatedItems.filter(item => item.record.status === 'success').length;
+      const failedCount = updatedItems.filter(item => ['failed', 'reversed', 'review'].includes(item.record.status)).length;
+      const pendingCount = updatedItems.length - successCount - failedCount;
+      const batchStatus = successCount === updatedItems.length ? 'success' : successCount || failedCount ? 'partial' : 'pending';
+      await db.update('payroll_batches', [{ id: batchId, record: { id: batchId, tenantId: context.tenantId, branchId: context.branchId || null, provider: 'paystack', status: batchStatus, totalKES, employeeCount: transfers.length, sentCount: successCount, pendingCount, failedCount, createdAt: now } }]);
+      await audit('submitted', 'paystack_payroll_batch', { id: batchId, totalKES, employeeCount: transfers.length, pendingCount, failedCount, successCount }, context.name);
+      return json({ id: batchId, totalKES, employeeCount: transfers.length, pendingCount, failedCount, successCount, status: batchStatus, message: 'Transfers are queued. Earnings will be marked paid only after Paystack confirms success.' });
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : 'Paystack transfer status is unknown.';
+      await db.update('payroll_items', itemIds.map((id: string, index: number) => ({ id, record: { ...payrollRecords[index], id, status: 'unknown', error: message } })));
+      await db.update('payroll_batches', [{ id: batchId, record: { id: batchId, tenantId: context.tenantId, provider: 'paystack', status: 'unknown', totalKES, employeeCount: transfers.length, createdAt: now, error: message } }]);
+      return error('Paystack response was interrupted. Check the Paystack dashboard before retrying this batch.', 502);
+    }
+  }],
+  'POST /api/paystack/webhook': [async ({ body, headers, rawBody }) => {
+    const secret = process.env.PAYSTACK_SECRET_KEY || '';
+    const signatureHeader = headers['x-paystack-signature'];
+    const signature = Array.isArray(signatureHeader) ? signatureHeader[0] : signatureHeader;
+    if (!secret) return error('Paystack webhook is not configured.', 503);
+    if (!verifyPaystackSignature(rawBody, signature, secret)) return error('Invalid Paystack webhook signature.', 401);
+    const event = String(body?.event || '');
+    if (!['transfer.success', 'transfer.failed', 'transfer.reversed'].includes(event)) return json({ received: true });
+    const transfer = body?.data || {};
+    const reference = String(transfer.reference || '');
+    if (!reference) return json({ received: true });
+
+    return withRequestContext({ accountId: 'paystack-webhook', tenantId: '', salonName: '', role: 'admin', name: 'Paystack webhook' }, async () => {
+      const [{ items: payrollItems }] = await Promise.all([db.list('payroll_items', { limit: 5000 })]);
+      const item: any = (payrollItems as any[]).find(record => record.provider === 'paystack' && record.reference === reference);
+      if (!item) return json({ received: true });
+      if (event === 'transfer.success') {
+        if (['success', 'reversed'].includes(item.status)) return json({ received: true });
+        const amountMatches = Number(transfer.amount) === Number(item.amount);
+        const currencyMatches = String(transfer.currency || '').toUpperCase() === 'KES';
+        const recipientMatches = !transfer.recipient?.recipient_code || transfer.recipient.recipient_code === item.recipientCode;
+        if (!amountMatches || !currencyMatches || !recipientMatches) {
+          await db.update('payroll_items', [{ id: item.id, record: { ...item, status: 'review', webhookIssue: 'Paystack transfer details did not match the submitted batch.', updatedAt: Date.now() } }]);
+          return json({ received: true });
+        }
+        const [{ items: existingPayouts }] = await Promise.all([db.list('payout_items', { limit: 10000 })]);
+        const activeKeys = new Set((existingPayouts as any[]).filter(record => !record.deletedAt).map(record => String(record.itemKey || '')));
+        const payoutRows = (Array.isArray(item.earningLines) ? item.earningLines : []).filter((line: any) => !activeKeys.has(String(line.itemKey || ''))).map((line: any) => ({
+          id: `paystack-${createHash('sha256').update(`${reference}:${line.itemKey}`).digest('hex')}`,
+          tenantId: item.tenantId, branchId: line.branchId || item.branchId || null, batchId: item.batchId, provider: 'paystack', reference,
+          itemKey: line.itemKey, orderId: line.orderId, staffId: line.staffId, serviceName: line.serviceName,
+          role: line.role, commission: line.amount, currency: line.currency, orderCreatedAt: line.createdAt, createdAt: Date.now(),
+        }));
+        if (payoutRows.length) await db.add('payout_items', payoutRows);
+        await db.update('payroll_items', [{ id: item.id, record: { ...item, status: 'success', transferCode: transfer.transfer_code || item.transferCode, paidAt: Date.now(), payoutItemIds: payoutRows.map(row => row.id) } }]);
+      } else if (event === 'transfer.reversed' && item.status === 'success') {
+        const payoutItemIds = new Set(Array.isArray(item.payoutItemIds) ? item.payoutItemIds : []);
+        const [{ items: existingPayouts }] = await Promise.all([db.list('payout_items', { limit: 10000 })]);
+        const now = Date.now();
+        const reversals = (existingPayouts as any[]).filter(record => payoutItemIds.has(record.id) && !record.deletedAt)
+          .map(record => ({ id: record.id, record: { ...record, deletedAt: now, deletionReason: 'Paystack transfer reversed' } }));
+        if (reversals.length) await db.update('payout_items', reversals);
+        await db.update('payroll_items', [{ id: item.id, record: { ...item, status: 'reversed', reversedAt: now } }]);
+      } else if (event === 'transfer.failed' && !['success', 'reversed'].includes(item.status)) {
+        await db.update('payroll_items', [{ id: item.id, record: { ...item, status: 'failed', failureReason: transfer.reason || transfer.message || 'Paystack transfer failed.', updatedAt: Date.now() } }]);
+      }
+
+      const [{ items: updatedItems }, [batch]] = await Promise.all([
+        db.list('payroll_items', { limit: 5000 }), db.get('payroll_batches', [item.batchId]),
+      ]);
+      const batchItems = (updatedItems as any[]).filter(record => record.provider === 'paystack' && record.batchId === item.batchId);
+      const terminal = batchItems.every(record => ['success', 'failed', 'reversed'].includes(record.status));
+      const hasSuccess = batchItems.some(record => record.status === 'success');
+      const failedCount = batchItems.filter(record => ['failed', 'reversed'].includes(record.status)).length;
+      const batchStatus = batchItems.every(record => record.status === 'success') ? 'success' : terminal ? (hasSuccess ? 'partial' : 'failed') : (hasSuccess || failedCount ? 'partial' : 'pending');
+      if (batch) await db.update('payroll_batches', [{ id: batch.id, record: { ...batch, status: batchStatus, sentCount: batchItems.filter(record => record.status === 'success').length, failedCount, updatedAt: Date.now() } }]);
+      return json({ received: true });
+    });
+  }],
 
   'GET /api/dashboard': [async ({ query }) => {
     const range = query.range || 'today';

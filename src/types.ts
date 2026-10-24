@@ -15,6 +15,7 @@ export interface Staff {
   employmentStatus?: 'active' | 'laid-off';
   branchId?: string;
   branchName?: string;
+  paystackRecipientCode?: string;
   commissionEarnedWeek?: number;
   assistantEarnedWeek?: number;
 }
@@ -250,6 +251,17 @@ export interface PayrollResult {
   sentCount: number;
   failedCount: number;
   status: 'submitted' | 'failed';
+}
+
+export interface PaystackPayrollBatch {
+  id: string;
+  status: string;
+  totalKES: number;
+  employeeCount: number;
+  sentCount: number;
+  failedCount: number;
+  createdAt: number;
+  transfers: { staffId: string; staffName: string; amountKES: number; status: string; reference: string; failureReason: string }[];
 }
 
 export type Role = 'owner' | 'manager' | 'receptionist' | 'barber' | 'customer' | 'admin';
