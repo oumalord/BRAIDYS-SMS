@@ -784,8 +784,10 @@ export const handler = router({
   'POST /api/services': [async ({ body }) => {
     const b: any = body;
     if (!b.name || !b.price) return error('Name and price are required', 400);
+    if (b.imageUrl) requireOwner();
+    if (b.imageUrl && (typeof b.imageUrl !== 'string' || b.imageUrl.length > 800000 || !/^data:image\/(jpeg|png|webp);base64,/.test(b.imageUrl))) return error('Service image must be a supported image smaller than 800 KB.', 400);
     const staffCount = serviceStaffCount(b.staffCount);
-    const [id] = await db.add('services', [{ name: b.name, category: b.category || 'General', price: b.price, currency: b.currency === 'USD' ? 'USD' : 'KES', durationMin: b.durationMin || 30, description: b.description || '', staffCount, commissionPct: commissionPct(b.commissionPct, staffCount) }]);
+    const [id] = await db.add('services', [{ name: b.name, category: b.category || 'General', price: b.price, currency: b.currency === 'USD' ? 'USD' : 'KES', durationMin: b.durationMin || 30, description: b.description || '', imageUrl: b.imageUrl || '', staffCount, commissionPct: commissionPct(b.commissionPct, staffCount) }]);
     if (!id) return error('Failed to add service', 500);
     await audit('created', 'service', { id, name: b.name, category: b.category || 'General', price: b.price, currency: b.currency === 'USD' ? 'USD' : 'KES' }, b.actor || 'owner');
     return json({ id });
@@ -797,6 +799,7 @@ export const handler = router({
     const patch: any = body || {};
     if (patch.name !== undefined && !String(patch.name).trim()) return error('Name is required', 400);
     if (patch.price !== undefined && Number(patch.price) <= 0) return error('Price must be greater than zero', 400);
+    if (patch.imageUrl !== undefined && patch.imageUrl !== '' && (typeof patch.imageUrl !== 'string' || patch.imageUrl.length > 800000 || !/^data:image\/(jpeg|png|webp);base64,/.test(patch.imageUrl))) return error('Service image must be a supported image smaller than 800 KB.', 400);
     const updated = {
       ...existing,
       name: patch.name !== undefined ? String(patch.name).trim() : existing.name,
@@ -805,6 +808,7 @@ export const handler = router({
       currency: patch.currency === 'USD' ? 'USD' : patch.currency === 'KES' ? 'KES' : existing.currency,
       durationMin: patch.durationMin !== undefined ? Math.max(5, Number(patch.durationMin) || 30) : existing.durationMin,
       description: patch.description !== undefined ? String(patch.description || '') : existing.description,
+      imageUrl: patch.imageUrl !== undefined ? patch.imageUrl : existing.imageUrl || '',
       staffCount: patch.staffCount !== undefined ? serviceStaffCount(patch.staffCount) : serviceStaffCount(existing.staffCount),
       commissionPct: commissionPct(patch.commissionPct !== undefined ? patch.commissionPct : existing.commissionPct, patch.staffCount !== undefined ? patch.staffCount : existing.staffCount),
     };

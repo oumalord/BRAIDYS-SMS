@@ -33,6 +33,7 @@ export interface ServiceItem {
   name: string;
   category: string;
   price: number;
+  imageUrl?: string;
   currency: Currency;
   durationMin: number;
   description: string;

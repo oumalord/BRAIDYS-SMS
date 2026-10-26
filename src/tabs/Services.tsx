@@ -4,12 +4,39 @@ import { Card, Button, Modal, Field, Input, Select, EmptyState, LoadingState, to
 import { ServicesApi, fmtMoney } from '../lib/api';
 import type { ServiceItem, Currency, Role } from '../types';
 
+const MAX_IMAGE_DATA_URL_LENGTH = 800_000;
+
+async function resizeServiceImage(file: File): Promise<string> {
+  if (!file.type.startsWith('image/')) throw new Error('Choose an image file.');
+  if (file.size > 10 * 1024 * 1024) throw new Error('Image must be smaller than 10 MB.');
+
+  const image = await createImageBitmap(file);
+  try {
+    const scale = Math.min(1, 1200 / Math.max(image.width, image.height));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(image.width * scale));
+    canvas.height = Math.max(1, Math.round(image.height * scale));
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('Could not process this image.');
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+    for (const quality of [0.82, 0.68, 0.54, 0.4]) {
+      const dataUrl = canvas.toDataURL('image/jpeg', quality);
+      if (dataUrl.length <= MAX_IMAGE_DATA_URL_LENGTH) return dataUrl;
+    }
+    throw new Error('Image is too detailed to upload. Choose a smaller image.');
+  } finally {
+    image.close();
+  }
+}
+
 function Services({ role }: { role: Role }) {
   const [services, setServices] = useState<ServiceItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
-  const [form, setForm] = useState({ name: '', category: '', price: 0, currency: 'KES' as Currency, durationMin: 30, description: '', staffCount: 1 as 1 | 2, commissionPct: 50 as 30 | 33.35 | 40 | 50 });
+  const [form, setForm] = useState({ name: '', category: '', price: 0, currency: 'KES' as Currency, durationMin: 30, description: '', imageUrl: '', staffCount: 1 as 1 | 2, commissionPct: 50 as 30 | 33.35 | 40 | 50 });
+  const [processingImage, setProcessingImage] = useState(false);
 
   const load = () => { ServicesApi.list().then(setServices).catch(() => toast('Could not load services.', 'error')).finally(() => setLoading(false)); };
   useEffect(load, []);
@@ -19,7 +46,7 @@ function Services({ role }: { role: Role }) {
     await ServicesApi.create(form);
     toast('Service added to the catalog.', 'success');
     setOpen(false);
-    setForm({ name: '', category: '', price: 0, currency: 'KES', durationMin: 30, description: '', staffCount: 1, commissionPct: 50 });
+    setForm({ name: '', category: '', price: 0, currency: 'KES', durationMin: 30, description: '', imageUrl: '', staffCount: 1, commissionPct: 50 });
     load();
   };
 
@@ -32,6 +59,7 @@ function Services({ role }: { role: Role }) {
       currency: service.currency,
       durationMin: service.durationMin,
       description: service.description || '',
+      imageUrl: service.imageUrl || '',
       staffCount: service.staffCount || 1,
       commissionPct: service.commissionPct || (service.staffCount === 2 ? 33.35 : 50),
     });
@@ -45,7 +73,7 @@ function Services({ role }: { role: Role }) {
     toast('Service updated.', 'success');
     setOpen(false);
     setEditId(null);
-    setForm({ name: '', category: '', price: 0, currency: 'KES', durationMin: 30, description: '', staffCount: 1, commissionPct: 50 });
+    setForm({ name: '', category: '', price: 0, currency: 'KES', durationMin: 30, description: '', imageUrl: '', staffCount: 1, commissionPct: 50 });
     load();
   };
 
@@ -69,6 +97,7 @@ function Services({ role }: { role: Role }) {
               <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
                 {services.filter(s => s.category === cat).map(s => (
                   <Card key={s.id} className={`p-4 ${s.commissionPct === 40 ? 'border-amber-300 bg-amber-50/40' : ''}`}>
+                    {s.imageUrl && <img src={s.imageUrl} alt={`${s.name} service`} className="mb-3 aspect-[4/3] w-full rounded-lg object-cover" />}
                     <div className="flex items-center justify-between gap-2"><p className="font-medium text-sm">{s.name}</p>{s.commissionPct === 40 && <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800">40% commission</span>}</div>
                     <p className="text-xs text-[#6E6E73] mt-1">{fmtMoney(s.price, s.currency)} · {s.durationMin} min · {s.staffCount || 1} staff · {s.commissionPct || (s.staffCount === 2 ? 33.35 : 50)}% commission per staff member</p>
                     {s.description && <p className="text-xs text-[#6E6E73] mt-2">{s.description}</p>}
@@ -86,11 +115,29 @@ function Services({ role }: { role: Role }) {
       {open && (
         <Modal title={editId ? 'Edit Service' : 'Add Service'} onClose={() => { setOpen(false); setEditId(null); }} footer={<>
           <Button variant="secondary" onClick={() => { setOpen(false); setEditId(null); }}>Cancel</Button>
-          <Button onClick={editId ? saveEdit : addService}>{editId ? 'Save Changes' : 'Add Service'}</Button>
+          <Button onClick={editId ? saveEdit : addService} disabled={processingImage}>{editId ? 'Save Changes' : 'Add Service'}</Button>
         </>}>
           <div className="space-y-4">
             <Field label="Service name" htmlFor="sv-name"><Input id="sv-name" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></Field>
             <Field label="Category" htmlFor="sv-cat"><Input id="sv-cat" value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))} placeholder="e.g. Barber, Salon, Spa" /></Field>
+            {canEdit && <Field label="Service image" htmlFor="sv-image" hint="JPG, PNG, or WebP. Images are resized before saving.">
+              <Input id="sv-image" type="file" accept="image/jpeg,image/png,image/webp" disabled={processingImage} onChange={async event => {
+                const file = event.target.files?.[0];
+                event.target.value = '';
+                if (!file) return;
+                setProcessingImage(true);
+                try {
+                  const imageUrl = await resizeServiceImage(file);
+                  setForm(current => ({ ...current, imageUrl }));
+                } catch (cause) {
+                  toast(cause instanceof Error ? cause.message : 'Could not process this image.', 'error');
+                } finally {
+                  setProcessingImage(false);
+                }
+              }} />
+              {processingImage && <span className="text-xs text-[#6E6E73]">Preparing image...</span>}
+              {form.imageUrl && <div className="flex items-start gap-3"><img src={form.imageUrl} alt="Service image preview" className="h-24 w-32 rounded-lg object-cover" /><Button size="sm" variant="secondary" onClick={() => setForm(current => ({ ...current, imageUrl: '' }))}>Remove image</Button></div>}
+            </Field>}
             <div className="grid grid-cols-2 gap-3">
               <Field label="Price" htmlFor="sv-price"><Input id="sv-price" type="number" min={0} value={form.price} onChange={e => setForm(f => ({ ...f, price: Number(e.target.value) }))} /></Field>
               <Field label="Currency" htmlFor="sv-currency">
