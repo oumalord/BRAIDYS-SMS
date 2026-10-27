@@ -2561,6 +2561,53 @@ export const handler = router({
     const staffId = query.staffId;
     return json({ items: staffId ? (items as any[]).filter(r => r.staffId === staffId) : items });
   }],
+  'GET /api/complaints': [async () => {
+    if (!['owner', 'admin', 'manager', 'receptionist', 'barber'].includes(currentContext()?.role || '')) return error('Staff access is required', 403);
+    const { items } = await db.list('complaints', { limit: 2000 });
+    return json({ items: (items as any[]).filter(item => !item.deletedAt).sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0)) });
+  }],
+  'POST /api/complaints': [async ({ body }) => {
+    const context = currentContext();
+    if (!['owner', 'admin', 'manager', 'barber'].includes(context?.role || '')) return error('Only staff can submit a complaint', 403);
+    const targetType = String(body?.targetType || '');
+    const targetName = String(body?.targetName || '').trim();
+    const category = String(body?.category || '').trim();
+    const description = String(body?.description || '').trim();
+    const incidentDate = String(body?.incidentDate || '').trim();
+    if (!['client', 'staff'].includes(targetType) || !targetName || !category || !description) return error('Person, category and complaint details are required', 400);
+    if (targetName.length > 120 || category.length > 80 || description.length > 3000) return error('Complaint details are too long', 400);
+    if (incidentDate && !/^\d{4}-\d{2}-\d{2}$/.test(incidentDate)) return error('Incident date must be a valid date', 400);
+    const createdAt = Date.now();
+    const complaint = {
+      targetType, targetName, category, description, incidentDate,
+      createdBy: context!.name, createdByRole: context!.role, staffId: context!.staffId || null,
+      branchId: context!.branchId || null, status: 'open', responses: [], createdAt, updatedAt: createdAt,
+    };
+    const [id] = await db.add('complaints', [complaint]);
+    if (!id) return error('Could not submit complaint', 500);
+    const item = { ...complaint, id };
+    await audit('created', 'complaint', item);
+    return json({ item }, 201);
+  }],
+  'PUT /api/complaints/:id': [async ({ params, body }) => {
+    const context = currentContext();
+    if (!['owner', 'admin'].includes(context?.role || '')) return error('Only the owner or administrator can respond to complaints', 403);
+    const [complaint] = await db.get('complaints', [params.id]);
+    if (!complaint || complaint.deletedAt) return error('Complaint not found', 404);
+    const allowedStatuses = ['open', 'in_review', 'resolved', 'dismissed'];
+    const status = body?.status === undefined ? complaint.status : String(body.status);
+    const responseText = String(body?.response || '').trim();
+    if (!allowedStatuses.includes(status)) return error('Choose a valid complaint status', 400);
+    if (body?.response !== undefined && (!responseText || responseText.length > 2000)) return error('Response must contain 1 to 2000 characters', 400);
+    const now = Date.now();
+    const responses = responseText
+      ? [...(Array.isArray(complaint.responses) ? complaint.responses : []), { id: `${now}-${Math.random().toString(36).slice(2, 8)}`, authorName: context!.name, authorRole: context!.role, text: responseText, createdAt: now }]
+      : (complaint.responses || []);
+    const updated = { ...complaint, status, responses, updatedAt: now };
+    await db.update('complaints', [{ id: complaint.id, record: updated }]);
+    await audit('updated', 'complaint', updated);
+    return json({ item: updated });
+  }],
   'POST /api/reviews': [async ({ body }) => {
     const b: any = body;
     const rating = Number(b.rating);

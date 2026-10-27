@@ -278,6 +278,33 @@ export interface ChatMessage {
   createdAt: number;
 }
 
+export type ComplaintStatus = 'open' | 'in_review' | 'resolved' | 'dismissed';
+
+export interface ComplaintResponse {
+  id: string;
+  authorName: string;
+  authorRole: string;
+  text: string;
+  createdAt: number;
+}
+
+export interface Complaint {
+  id: string;
+  targetType: 'client' | 'staff';
+  targetName: string;
+  category: string;
+  description: string;
+  incidentDate: string;
+  createdBy: string;
+  createdByRole: string;
+  staffId?: string;
+  branchId?: string | null;
+  status: ComplaintStatus;
+  responses: ComplaintResponse[];
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface DashboardData {
   range: string;
   revenueByCurrency: Record<string, number>;

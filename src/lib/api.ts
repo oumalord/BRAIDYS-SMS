@@ -1,4 +1,4 @@
-import type { Staff, ServiceItem, Customer, Appointment, AttendanceRecord, AttendanceClientAssignment, QueueEntry, Order, Expense, DashboardData, RebookingItem, ChatChannel, ChatMessage, Currency, MembershipPlan, Promotion, Review, AuditLog, Branch, PayoutBatch, WeeklyStaffWorkReport, StaffPerformanceReport, PaystackPayrollBatch } from '../types';
+import type { Staff, ServiceItem, Customer, Appointment, AttendanceRecord, AttendanceClientAssignment, QueueEntry, Order, Expense, DashboardData, RebookingItem, ChatChannel, ChatMessage, Currency, MembershipPlan, Promotion, Review, AuditLog, Branch, PayoutBatch, WeeklyStaffWorkReport, StaffPerformanceReport, PaystackPayrollBatch, Complaint } from '../types';
 
 const api = {
   get: async (path: string) => ({ data: await request(path) }),
@@ -224,6 +224,12 @@ export const ReviewsApi = {
   list: (staffId?: string) => api.get(staffId ? `/api/reviews?staffId=${staffId}` : '/api/reviews').then(r => r.data.items as Review[]),
   create: (r: Partial<Review>) => api.post('/api/reviews', r),
   createPublic: (r: Partial<Review>) => api.post('/api/public/reviews', r),
+};
+
+export const ComplaintsApi = {
+  list: () => api.get('/api/complaints').then(r => r.data.items as Complaint[]),
+  create: (payload: Pick<Complaint, 'targetType' | 'targetName' | 'category' | 'description' | 'incidentDate'>) => api.post('/api/complaints', payload).then(r => r.data.item as Complaint),
+  update: (id: string, patch: { status?: Complaint['status']; response?: string }) => api.put(`/api/complaints/${id}`, patch),
 };
 
 export const MpesaApi = {

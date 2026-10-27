@@ -26,8 +26,9 @@ import PublicReview from './components/PublicReview';
 import Attendance from './tabs/Attendance';
 import StaffPerformance from './tabs/StaffPerformance';
 import InstallAppButton from './components/InstallAppButton';
+import Complaints from './tabs/Complaints';
 
-type TabKey = 'dashboard' | 'appointments' | 'attendance' | 'messages' | 'staff' | 'customers' | 'pos' | 'services' | 'memberships' | 'promotions' | 'reviews' | 'reports' | 'staff-performance' | 'finance' | 'ai' | 'booking' | 'logs' | 'admin';
+type TabKey = 'dashboard' | 'appointments' | 'attendance' | 'messages' | 'staff' | 'customers' | 'pos' | 'services' | 'memberships' | 'promotions' | 'reviews' | 'complaints' | 'reports' | 'staff-performance' | 'finance' | 'ai' | 'booking' | 'logs' | 'admin';
 
 const TABS: { key: TabKey; label: string; icon: any; roles: Role[] }[] = [
   { key: 'dashboard', label: 'Dashboard', icon: Home, roles: ['owner', 'barber', 'receptionist', 'customer', 'admin'] },
@@ -38,6 +39,7 @@ const TABS: { key: TabKey; label: string; icon: any; roles: Role[] }[] = [
   { key: 'memberships', label: 'Memberships', icon: CreditCard, roles: ['owner', 'admin'] },
   { key: 'promotions', label: 'Promotions', icon: Percent, roles: ['owner', 'manager', 'receptionist', 'admin'] },
   { key: 'reviews', label: 'Reviews', icon: MessageSquare, roles: ['owner', 'admin'] },
+  { key: 'complaints', label: 'Complaints', icon: MessageSquare, roles: ['owner', 'admin', 'manager', 'receptionist', 'barber'] },
   { key: 'customers', label: 'Customers', icon: Contact, roles: ['owner', 'manager', 'admin'] },
   { key: 'pos', label: 'Point of Sale', icon: ShoppingCart, roles: ['owner', 'manager', 'receptionist', 'barber', 'admin'] },
   { key: 'finance', label: 'Finance', icon: DollarSign, roles: ['owner', 'admin'] },
@@ -284,6 +286,7 @@ function App() {
                 {tab === 'memberships' && <Memberships />}
                 {tab === 'promotions' && <Promotions role={effectiveRole} />}
                 {tab === 'reviews' && <Reviews />}
+                {tab === 'complaints' && <Complaints role={effectiveRole} />}
                 {tab === 'customers' && <CustomersTab role={effectiveRole} />}
                 {tab === 'pos' && !attendanceLocked && <POS appointment={posAppointment} currentStaffId={account?.staffId} onSaleComplete={() => { setPosAppointment(undefined); toast('Sale completed and recorded.', 'success'); }} />}
                 {tab === 'finance' && <Finance />}
