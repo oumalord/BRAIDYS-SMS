@@ -38,7 +38,7 @@ function canAssignStaff(member: Staff) {
 }
 
 function Appointments({ role }: { role: Role }) {
-  const [date, setDate] = useState(todayStr());
+  const [date, setDate] = useState(() => role === 'barber' ? '' : todayStr());
   const [appts, setAppts] = useState<Appointment[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [staff, setStaff] = useState<Staff[]>([]);
@@ -67,11 +67,11 @@ function Appointments({ role }: { role: Role }) {
 
   useEffect(() => {
     setLoading(true);
-    AppointmentsApi.list(date).then(setAppts).catch(() => toast('Could not load appointments.', 'error')).finally(() => setLoading(false));
+    AppointmentsApi.list(date || undefined).then(setAppts).catch(() => toast('Could not load appointments.', 'error')).finally(() => setLoading(false));
   }, [date]);
 
   const reload = () => {
-    AppointmentsApi.list(date).then(setAppts).catch(() => toast('Could not load appointments.', 'error'));
+    AppointmentsApi.list(date || undefined).then(setAppts).catch(() => toast('Could not load appointments.', 'error'));
     CustomersApi.list().then(setCustomers).catch(() => {});
   };
 
@@ -275,6 +275,7 @@ function Appointments({ role }: { role: Role }) {
 
   const orderByBookingTime = ['owner', 'admin', 'receptionist'].includes(role);
   const sorted = [...appts].sort((a, b) => {
+    if (!date) return `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`);
     const bookingDifference = Number(b.createdAt || 0) - Number(a.createdAt || 0);
     return orderByBookingTime && bookingDifference !== 0 ? bookingDifference : b.time.localeCompare(a.time);
   });
@@ -290,7 +291,7 @@ function Appointments({ role }: { role: Role }) {
   const canManageAppointmentStatus = ['owner', 'admin', 'manager'].includes(role) || (role === 'barber' && Boolean(account?.staffId));
   const returningCustomer = customers.find(customer => normalizePhone(customer.phone) === normalizePhone(form.customerPhone));
   const openNewAppointment = () => {
-    setForm(current => ({ ...current, date, staffId: role === 'barber' ? account?.staffId || '' : current.staffId, cardNumber: role === 'barber' ? '' : current.cardNumber }));
+    setForm(current => ({ ...current, date: date || todayStr(), staffId: role === 'barber' ? account?.staffId || '' : current.staffId, cardNumber: role === 'barber' ? '' : current.cardNumber }));
     setOpen(true);
   };
 
@@ -299,10 +300,11 @@ function Appointments({ role }: { role: Role }) {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Appointments</h1>
-          <p className="text-sm text-[#6E6E73]">Calendar for {date}{orderByBookingTime ? ' · newest bookings first' : ''}</p>
+          <p className="text-sm text-[#6E6E73]">Calendar for {date || 'all dates'}{orderByBookingTime ? ' · newest bookings first' : ''}</p>
         </div>
         <div className="flex items-center gap-2">
           <Field label="Date" htmlFor="date-picker"><Input id="date-picker" type="date" value={date} onChange={e => setDate(e.target.value)} aria-label="Select date" /></Field>
+          {role === 'barber' && date && <Button variant="secondary" size="sm" onClick={() => setDate('')}>All dates</Button>}
           {(role === 'owner' || role === 'admin') && appts.some(appointment => appointment.status === 'cancelled') && <Button variant="danger" onClick={deleteCancelled} disabled={saving}><Trash2 size={16} aria-hidden="true" />Delete canceled</Button>}
           {canBookAppointments && <Button onClick={openNewAppointment}><Plus size={16} aria-hidden="true" />New Appointment</Button>}
         </div>
@@ -346,7 +348,7 @@ function Appointments({ role }: { role: Role }) {
         <div className="space-y-3">
           {sorted.map(a => (
             <Card key={a.id} className="p-4 flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-6">
-              <div className="flex items-center gap-2 text-sm font-medium w-24"><Clock size={14} aria-hidden="true" className="text-[#6E6E73]" />{a.time}</div>
+              <div className="flex w-28 flex-col text-sm font-medium">{!date && <span className="mb-0.5 text-[10px] text-[#6E6E73]">{a.date}</span>}<span className="flex items-center gap-2"><Clock size={14} aria-hidden="true" className="text-[#6E6E73]" />{a.time}</span></div>
               <div className="flex-1">
                 <p className="font-medium">{a.customerName}{a.customerId ? <span className="ml-2 text-xs font-normal text-[#6E6E73]">{customers.find(customer => customer.id === a.customerId)?.visits ?? 0} visits</span> : null}</p>
                 <p className="text-sm text-[#6E6E73]">{a.customerPhone ? `${a.customerPhone} · ` : ''}{a.serviceName} · {a.staffName || 'Awaiting employee assignment'} · {fmtKES(a.price)}{a.cardNumber ? ` · Card ${a.cardNumber}` : ''}</p>

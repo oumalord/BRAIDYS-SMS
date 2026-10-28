@@ -29,7 +29,7 @@ function EmployeeDashboard({ account, onAddService }: { account: { name?: string
     setEarningsError('');
     AppointmentsApi.list().then(items => {
       if (!active) return;
-      const staffAppointments = items.filter(item => item.staffId === account.staffId);
+      const staffAppointments = items.filter(item => item.staffId === account.staffId || item.items?.some(service => service.staffId === account.staffId));
       setAppointments(staffAppointments);
       const waiting = staffAppointments.filter(item => item.date === todayStr() && ['checked-in', 'pending'].includes(item.status));
       setWaitingClients(waiting);

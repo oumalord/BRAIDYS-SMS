@@ -981,13 +981,16 @@ export const handler = router({
 
   'GET /api/appointments': [async ({ query }) => {
     const [{ items }, { items: orders }] = await Promise.all([
-      db.list('appointments', { limit: 1000 }),
+      db.list('appointments', { limit: 5000 }),
       db.list('orders', { limit: 5000 }),
     ]);
     const date = query.date;
     const context = currentContext();
     const activeItems = items.filter((appointment: any) => !appointment.deletedAt);
-    const visible = context?.role === 'barber' ? activeItems.filter((a: any) => a.staffId === context.staffId) : activeItems;
+    const staffId = String(context?.staffId || '');
+    const visible = context?.role !== 'barber' ? activeItems : staffId ? activeItems.filter((appointment: any) =>
+      String(appointment.staffId || '') === staffId || (Array.isArray(appointment.items) && appointment.items.some((service: any) => String(service.staffId || '') === staffId))
+    ) : [];
     const paidAppointmentIds = new Set((orders as any[])
       .filter(order => !order.deletedAt && order.appointmentId && (order.paymentMethod !== 'M-Pesa' || !(Number(order.totalByCurrency?.KES || 0) > 0) || order.mpesaReceiptNumber))
       .map(order => String(order.appointmentId)));
