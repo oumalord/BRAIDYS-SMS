@@ -166,7 +166,9 @@ function Finance() {
     ? `${new Date(payrollPeriod.from).toLocaleDateString()} – ${new Date(payrollPeriod.to).toLocaleDateString()}`
     : 'Sunday through yesterday';
   const selectedEarningsLabel = earningsDate ? new Date(`${earningsDate}T12:00:00`).toLocaleDateString() : 'Sunday through today';
-  const payrollStaff = staff.filter(member => member.employmentStatus !== 'laid-off');
+  const totalUnpaidEarnings = (member: Staff) => Number(member.commissionEarnedWeek || 0) + Number(member.assistantEarnedWeek || 0);
+  const payrollStaff = staff.filter(member => member.employmentStatus !== 'laid-off')
+    .sort((first, second) => totalUnpaidEarnings(second) - totalUnpaidEarnings(first) || first.name.localeCompare(second.name));
   const weeklyStaffEarnings = payrollStaff.map(member => {
     const report = weeklyReports[member.id];
     const lines = report?.services.flatMap(service => service.distribution.filter(line => line.staffId === member.id).map(line => ({ service, line }))) || [];
@@ -177,7 +179,8 @@ function Finance() {
     const revenue = lines.reduce((sum, item) => sum + item.service.serviceRevenue, 0);
     const helperDeductions = lines.reduce((sum, item) => sum + item.service.assistantFee, 0);
     return { member, count: lines.length, revenue, helperDeductions, commission, assistantEarnings };
-  });
+  }).sort((first, second) => second.commission + second.assistantEarnings - first.commission - first.assistantEarnings
+    || first.member.name.localeCompare(second.member.name));
   const openBreakdown = async (member: Staff) => {
     setBreakdownStaff(member);
     setBreakdown(null);
