@@ -9,7 +9,7 @@ function StaffTab({ role = 'owner' }: { role?: Role }) {
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Staff | null>(null);
-  const [editForm, setEditForm] = useState({ name: '', phone: '', chair: '', pin: '', paystackRecipientCode: '' });
+  const [editForm, setEditForm] = useState({ name: '', phone: '', chair: '', pin: '' });
   const [savingEdit, setSavingEdit] = useState(false);
 
   const load = () => { StaffApi.list().then(setStaff).catch(() => toast('Could not load staff.', 'error')).finally(() => setLoading(false)); };
@@ -61,7 +61,7 @@ function StaffTab({ role = 'owner' }: { role?: Role }) {
 
   const editStaff = (member: Staff) => {
     setEditing(member);
-    setEditForm({ name: member.name, phone: member.phone, chair: member.chair, pin: '', paystackRecipientCode: member.paystackRecipientCode || '' });
+    setEditForm({ name: member.name, phone: member.phone, chair: member.chair, pin: '' });
   };
 
   const saveStaff = async () => {
@@ -165,7 +165,6 @@ function StaffTab({ role = 'owner' }: { role?: Role }) {
           <Field label="Full name" htmlFor="edit-s-name"><Input id="edit-s-name" name="staff-display-name" autoComplete="off" value={editForm.name} onChange={e => setEditForm(current => ({ ...current, name: e.target.value }))} /></Field>
           <Field label="Phone" htmlFor="edit-s-phone"><Input id="edit-s-phone" name="staff-phone-number" autoComplete="off" value={editForm.phone} onChange={e => setEditForm(current => ({ ...current, phone: e.target.value }))} /></Field>
           <Field label="Chair / Station" htmlFor="edit-s-chair"><Input id="edit-s-chair" name="staff-chair" autoComplete="off" value={editForm.chair} onChange={e => setEditForm(current => ({ ...current, chair: e.target.value }))} /></Field>
-          <Field label="Paystack recipient code" htmlFor="edit-s-paystack-recipient" hint="Create the recipient in Paystack, then enter its RCP_ code here."><Input id="edit-s-paystack-recipient" name="paystack-recipient-code" autoComplete="off" value={editForm.paystackRecipientCode} onChange={e => setEditForm(current => ({ ...current, paystackRecipientCode: e.target.value.trim() }))} placeholder="RCP_…" /></Field>
           <Field label="New login PIN (optional)" htmlFor="edit-s-pin"><Input id="edit-s-pin" name="staff-new-pin" autoComplete="new-password" type="password" inputMode="numeric" maxLength={4} minLength={4} value={editForm.pin} onChange={e => setEditForm(current => ({ ...current, pin: e.target.value.replace(/\D/g, '').slice(0, 4) }))} placeholder="Leave blank to keep current PIN" /></Field>
         </form>
       </Modal>}

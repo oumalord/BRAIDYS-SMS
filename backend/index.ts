@@ -159,6 +159,24 @@ function normalizeCustomerPhone(value: unknown) {
   return digits.startsWith('0') ? `254${digits.slice(1)}` : digits;
 }
 
+async function createPaystackStaffRecipient(staffMember: any): Promise<string> {
+  const secretKey = String(process.env.PAYSTACK_SECRET_KEY || '');
+  if (!secretKey.startsWith('sk_live_')) throw new Error('Live Paystack credentials are required to create staff recipients.');
+  const phone = normalizeCustomerPhone(staffMember.phone);
+  if (!/^254[17]\d{8}$/.test(phone)) throw new Error(`Enter a valid Kenyan mobile number for ${staffMember.name}.`);
+  const response = await fetch('https://api.paystack.co/transferrecipient', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${secretKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ type: 'mobile_money', name: staffMember.name, account_number: phone, bank_code: 'MPESA', currency: 'KES', description: `BRAIDY SALON staff ${staffMember.id}`, metadata: { staffId: staffMember.id } }),
+  });
+  const result: any = await response.json().catch(() => ({}));
+  const recipient = result?.data;
+  if (!response.ok || !result.status || !/^RCP_[A-Za-z0-9]+$/.test(String(recipient?.recipient_code || '')) || recipient.currency !== 'KES' || recipient.type !== 'mobile_money') {
+    throw new Error(result.message || `Paystack could not register ${staffMember.name} as an M-PESA recipient.`);
+  }
+  return recipient.recipient_code;
+}
+
 async function notifyCustomer(email: string | undefined, subject: string, message: string, referenceId: string) {
   if (!email) return;
   await db.add('notifications', [{ email, subject, message, referenceId, status: 'queued', createdAt: Date.now() }]);
@@ -723,6 +741,17 @@ export const handler = router({
     if (!/^\d{4}$/.test(pin)) return error('Staff PIN must be exactly 4 digits', 400);
     const [id] = await db.add('staff', [{ tenantId: branch.salonId, salonName: branch.salonName || context?.salonName || '', name: b.name, role: b.role || 'Staff', specialties: b.specialties || [], branch: branch.name, branchId: branch.id, branchName: branch.name, chair: b.chair || '', phone: b.phone || '', accountEmail: b.accountEmail || '', accountStatus: b.accountStatus || 'pending', employmentStatus: 'active', commissionPct: 50, status: b.status || 'available' }]);
     if (!id) return error('Failed to add staff', 500);
+    if (String(process.env.PAYSTACK_SECRET_KEY || '').startsWith('sk_live_')) {
+      const [createdStaff] = await db.get('staff', [id]);
+      if (createdStaff) {
+        try {
+          const paystackRecipientCode = await createPaystackStaffRecipient(createdStaff);
+          await db.update('staff', [{ id, record: { ...createdStaff, paystackRecipientCode, paystackRecipientMode: 'live' } }]);
+        } catch (cause) {
+          console.error('Paystack recipient setup failed for new staff:', cause instanceof Error ? cause.message : 'Unknown error');
+        }
+      }
+    }
     await audit('created', 'staff', { id, name: b.name, responsibility: b.role || 'Staff', accountEmail: b.accountEmail || '', commissionPct: 50 }, b.actor || 'owner');
     if (currentContext()) {
       const context = currentContext()!;
@@ -737,6 +766,11 @@ export const handler = router({
     const patch: any = body;
     if (patch.pin && !/^\d{4}$/.test(String(patch.pin))) return error('Staff PIN must be exactly 4 digits', 400);
     const updated = { ...existing, ...patch };
+    const phoneChanged = normalizeCustomerPhone(updated.phone) !== normalizeCustomerPhone(existing.phone);
+    if (phoneChanged) {
+      delete updated.paystackRecipientCode;
+      delete updated.paystackRecipientMode;
+    }
     delete updated.password;
     delete updated.pin;
     updated.commissionPct = 50;
@@ -754,6 +788,14 @@ export const handler = router({
         delete accountPatch.passwordHash;
       }
       await db.update('accounts', [{ id: account.id, record: accountPatch }]);
+    }
+    if (String(process.env.PAYSTACK_SECRET_KEY || '').startsWith('sk_live_') && (phoneChanged || updated.paystackRecipientMode !== 'live' || !updated.paystackRecipientCode)) {
+      try {
+        const paystackRecipientCode = await createPaystackStaffRecipient(updated);
+        await db.update('staff', [{ id: params.id, record: { ...updated, paystackRecipientCode, paystackRecipientMode: 'live' } }]);
+      } catch (cause) {
+        console.error('Paystack recipient setup failed for updated staff:', cause instanceof Error ? cause.message : 'Unknown error');
+      }
     }
     return json({ ok: true });
   }],
@@ -1266,9 +1308,7 @@ export const handler = router({
     const requestedCategories = Array.isArray(b.serviceCategories) ? b.serviceCategories.slice(0, 2).filter(Boolean) : [];
     const requestedItems = Array.isArray(b.items) && b.items.length ? b.items : b.serviceId ? [{ serviceId: b.serviceId, serviceName: b.serviceName, price: b.price || 0, currency: b.currency || 'KES', durationMin: b.durationMin || 30, staffId: b.staffId, staffName: b.staffName }] : requestedCategories.length ? [{ serviceId: null, serviceName: `Requested: ${requestedCategories.join(' + ')}`, price: 0, currency: 'KES', durationMin: 30, staffId: b.staffId, staffName: b.staffName }] : [];
     if (context?.role === 'barber' && !context.staffId) return error('Your login is not linked to a staff profile', 403);
-    const items = context?.role === 'barber'
-      ? requestedItems.map((item: any) => ({ ...item, staffId: context.staffId, staffName: context.name }))
-      : requestedItems;
+    const items = requestedItems;
     const appointmentDate = b.date || new Date().toISOString().slice(0, 10);
     const appointmentTime = b.time || '00:00';
     if (b.cardNumber && !['owner', 'admin', 'manager', 'receptionist', 'barber'].includes(context?.role || '')) return error('Only salon staff can add a card number', 403);
@@ -2020,7 +2060,8 @@ export const handler = router({
     if (!context || !['owner', 'admin'].includes(context.role)) return error('Only the owner or administrator can configure payroll transfers', 403);
     const multiplier = Number(process.env.PAYSTACK_TRANSFER_AMOUNT_MULTIPLIER || 100);
     const validMultiplier = Number.isSafeInteger(multiplier) && multiplier > 0;
-    return json({ configured: Boolean(process.env.PAYSTACK_SECRET_KEY) && validMultiplier, canSend: context.role === 'owner', currency: 'KES', amountMultiplier: validMultiplier ? multiplier : null, webhookPath: '/api/paystack/webhook' });
+    const secretKey = String(process.env.PAYSTACK_SECRET_KEY || '');
+    return json({ configured: secretKey.startsWith('sk_live_') && validMultiplier, canSend: context.role === 'owner', currency: 'KES', amountMultiplier: validMultiplier ? multiplier : null, webhookPath: '/api/paystack/webhook' });
   }],
   'GET /api/payroll/paystack/batches': [async () => {
     const context = currentContext();
@@ -2038,7 +2079,7 @@ export const handler = router({
   'POST /api/payroll/paystack/send': [async ({ body }) => {
     const context = currentContext();
     if (!context || context.role !== 'owner') return error('Only the salon owner can send Paystack payroll', 403);
-    if (!process.env.PAYSTACK_SECRET_KEY) return error('Paystack payroll is not configured. Add PAYSTACK_SECRET_KEY to the backend environment.', 503);
+    if (!String(process.env.PAYSTACK_SECRET_KEY || '').startsWith('sk_live_')) return error('Paystack payroll requires a live PAYSTACK_SECRET_KEY in the backend environment.', 503);
     if (!context.tenantId) return error('A salon-scoped owner account is required to send payroll.', 403);
     const multiplier = Number(process.env.PAYSTACK_TRANSFER_AMOUNT_MULTIPLIER || 100);
     if (!Number.isSafeInteger(multiplier) || multiplier <= 0) return error('PAYSTACK_TRANSFER_AMOUNT_MULTIPLIER must be a positive integer.', 503);
@@ -2052,12 +2093,24 @@ export const handler = router({
     ]);
     const members = (staffRows as any[]).filter(member => !member.deletedAt && member.employmentStatus !== 'laid-off' && member.tenantId === context.tenantId
       && (!context.branchId || member.branchId === context.branchId) && requestedIds.includes(String(member.id)));
+    if (!members.length) return error('No active staff records are available for this payroll batch.', 400);
     if (members.length !== requestedIds.length) return error('One or more selected staff members are not available in this salon or branch.', 400);
-    const missingRecipient = members.find(member => !/^RCP_[A-Za-z0-9]+$/.test(String(member.paystackRecipientCode || '')));
-    if (missingRecipient) return error(`Add a valid Paystack recipient code for ${missingRecipient.name} in Staff details before sending payroll.`, 400);
+    for (const member of members) {
+      if (member.paystackRecipientMode === 'live' && /^RCP_[A-Za-z0-9]+$/.test(String(member.paystackRecipientCode || ''))) continue;
+      try {
+        const paystackRecipientCode = await createPaystackStaffRecipient(member);
+        member.paystackRecipientCode = paystackRecipientCode;
+        member.paystackRecipientMode = 'live';
+        await db.update('staff', [{ id: member.id, record: member }]);
+      } catch (cause) {
+        return error(cause instanceof Error ? cause.message : `Could not create a Paystack recipient for ${member.name}.`, 502);
+      }
+    }
     if (new Set(members.map(member => member.paystackRecipientCode)).size !== members.length) return error('Each staff member must have a unique Paystack recipient code.', 400);
 
     const staffById = new Map(members.map(member => [String(member.id), member]));
+    const earningsByStaffId = new Map<string, any[]>();
+    const lockedItemKeys = new Set<string>();
     const appointmentsById = new Map((appointments as any[]).filter(item => !item.deletedAt).map(item => [String(item.id), item]));
     const branchOrders = (orders as any[]).filter(order => {
       if (order.tenantId !== context.tenantId) return false;
@@ -2072,15 +2125,16 @@ export const handler = router({
     const { from, to } = currentSundayThroughYesterdayRange();
     const earnings = calculateUnpaidStaffEarnings(branchOrders, branchPayoutItems, (appointments as any[]).filter(item => item.tenantId === context.tenantId), from, to)
       .filter(line => staffById.has(line.staffId) && line.currency === 'KES');
-    const earningsByStaffId = new Map<string, any[]>();
     for (const earning of earnings) {
       const lines = earningsByStaffId.get(earning.staffId) || [];
       lines.push(earning);
       earningsByStaffId.set(earning.staffId, lines);
     }
     const pendingStatuses = new Set(['submitting', 'pending', 'unknown', 'review']);
-    const lockedItemKeys = new Set((previousPayrollItems as any[]).filter(item => item.provider === 'paystack' && pendingStatuses.has(item.status))
-      .flatMap(item => Array.isArray(item.itemKeys) ? item.itemKeys.map(String) : []));
+    for (const item of previousPayrollItems as any[]) {
+      if (item.provider !== 'paystack' || !pendingStatuses.has(item.status)) continue;
+      for (const itemKey of Array.isArray(item.itemKeys) ? item.itemKeys : []) lockedItemKeys.add(String(itemKey));
+    }
     const transfers: any[] = [];
     for (const member of members) {
       const lines = earningsByStaffId.get(String(member.id)) || [];
@@ -2181,11 +2235,12 @@ export const handler = router({
           role: line.role, commission: line.amount, currency: line.currency, orderCreatedAt: line.createdAt, createdAt: Date.now(),
         }));
         if (payoutRows.length) await db.add('payout_items', payoutRows);
-        await db.update('payroll_items', [{ id: item.id, record: { ...item, status: 'success', transferCode: transfer.transfer_code || item.transferCode, paidAt: Date.now(), payoutItemIds: payoutRows.map(row => row.id) } }]);
+        const payoutItemIds = payoutRows.map(row => row.id);
+        await db.update('payroll_items', [{ id: item.id, record: { ...item, status: 'success', transferCode: transfer.transfer_code || item.transferCode, paidAt: Date.now(), payoutItemIds } }]);
       } else if (event === 'transfer.reversed' && item.status === 'success') {
+        const now = Date.now();
         const payoutItemIds = new Set(Array.isArray(item.payoutItemIds) ? item.payoutItemIds : []);
         const [{ items: existingPayouts }] = await Promise.all([db.list('payout_items', { limit: 10000 })]);
-        const now = Date.now();
         const reversals = (existingPayouts as any[]).filter(record => payoutItemIds.has(record.id) && !record.deletedAt)
           .map(record => ({ id: record.id, record: { ...record, deletedAt: now, deletionReason: 'Paystack transfer reversed' } }));
         if (reversals.length) await db.update('payout_items', reversals);
@@ -2197,7 +2252,7 @@ export const handler = router({
       const [{ items: updatedItems }, [batch]] = await Promise.all([
         db.list('payroll_items', { limit: 5000 }), db.get('payroll_batches', [item.batchId]),
       ]);
-      const batchItems = (updatedItems as any[]).filter(record => record.provider === 'paystack' && record.batchId === item.batchId);
+      const batchItems = (updatedItems as any[]).filter(record => record.provider === item.provider && record.batchId === item.batchId);
       const terminal = batchItems.every(record => ['success', 'failed', 'reversed'].includes(record.status));
       const hasSuccess = batchItems.some(record => record.status === 'success');
       const failedCount = batchItems.filter(record => ['failed', 'reversed'].includes(record.status)).length;

@@ -34,7 +34,7 @@ interface CompletionLine {
 }
 
 function canAssignStaff(member: Staff) {
-  return member.employmentStatus !== 'laid-off' && member.status !== 'off';
+  return member.employmentStatus !== 'laid-off';
 }
 
 function Appointments({ role }: { role: Role }) {
@@ -395,7 +395,7 @@ function Appointments({ role }: { role: Role }) {
               </Select>
             </Field>
             <Field label={role === 'barber' ? 'Your staff profile' : 'Staff'} htmlFor="appt-staff">
-              <Select id="appt-staff" value={form.staffId} disabled={role === 'barber'} onChange={e => setForm(f => ({ ...f, staffId: e.target.value }))}>
+              <Select id="appt-staff" value={form.staffId} onChange={e => setForm(f => ({ ...f, staffId: e.target.value }))}>
                 <option value="">Select staff</option>
                 {assignableStaff.map(s => <option key={s.id} value={s.id}>{s.name} — {s.role}</option>)}
               </Select>
