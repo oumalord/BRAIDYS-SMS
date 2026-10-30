@@ -159,6 +159,29 @@ function normalizeCustomerPhone(value: unknown) {
   return digits.startsWith('0') ? `254${digits.slice(1)}` : digits;
 }
 
+function findOrderForAppointment(orders: any[], appointment: any) {
+  const activeOrders = orders.filter(order => !order.deletedAt);
+  const linkedOrder = activeOrders.find(order => String(order.appointmentId || '') === String(appointment.id));
+  if (linkedOrder) return linkedOrder;
+
+  const dateRange = nairobiDayRange(String(appointment.date || ''));
+  if (!dateRange) return null;
+  const serviceIds = new Set([appointment.serviceId, ...(Array.isArray(appointment.items) ? appointment.items.map((item: any) => item.serviceId) : [])].filter(Boolean).map(String));
+  const serviceNames = new Set([appointment.serviceName, ...(Array.isArray(appointment.items) ? appointment.items.map((item: any) => item.serviceName) : [])]
+    .filter(Boolean).map((name: unknown) => String(name).trim().toLowerCase()));
+  const customerName = String(appointment.customerName || '').trim().toLowerCase();
+  const candidates = activeOrders.filter(order => {
+    const sameCustomer = appointment.customerId
+      ? String(order.customerId || '') === String(appointment.customerId)
+      : String(order.customerName || '').trim().toLowerCase() === customerName;
+    const createdAt = Number(order.createdAt || 0);
+    const matchingService = Array.isArray(order.items) && order.items.some((item: any) => item.type === 'service'
+      && (serviceIds.has(String(item.refId || '')) || serviceNames.has(String(item.name || '').trim().toLowerCase())));
+    return sameCustomer && createdAt >= dateRange.from && createdAt < dateRange.to && matchingService;
+  });
+  return candidates.length === 1 ? candidates[0] : null;
+}
+
 function isPaystackRecipientEligible(staffMember: any, accountRole = '') {
   if (staffMember.deletedAt || ['laid-off', 'permanently-deleted'].includes(String(staffMember.employmentStatus || ''))) return false;
   const roles = [staffMember.role, accountRole].map(role => String(role || '').trim().toLowerCase());
@@ -1449,10 +1472,10 @@ export const handler = router({
   }],
   'GET /api/appointments/:id/completion': [async ({ params }) => {
     const context = currentContext();
-    const { items } = await db.list('orders', { limit: 1000 });
-    const order = (items as any[]).find(item => String(item.appointmentId || '') === params.id);
+    const { items } = await db.list('orders', { limit: 5000 });
+    const [appointment] = await db.get('appointments', [params.id]);
+    const order = appointment ? findOrderForAppointment(items as any[], appointment) : null;
     if (context?.role === 'barber') {
-      const [appointment] = await db.get('appointments', [params.id]);
       const identity = { staffId: context.staffId, name: context.name };
       const ownAppointment = Boolean(appointment && sameStaffIdentity(appointment.staffId, appointment.staffName, identity));
       const ownOrderItem = Boolean(order && Array.isArray(order.items) && order.items.some((item: any) => sameStaffIdentity(item.staffId, item.staffName, identity) || sameStaffIdentity(item.coStaffId, item.coStaffName, identity)));
@@ -1465,10 +1488,9 @@ export const handler = router({
     requireOwner();
     const [appointment] = await db.get('appointments', [params.id]);
     if (!appointment || appointment.deletedAt) return error('Appointment not found', 404);
-    if (appointment.status !== 'completed') return error('Only completed appointments can be reopened', 409);
-
     const { items: orders } = await db.list('orders', { limit: 5000 });
-    const order = (orders as any[]).find(item => String(item.appointmentId || '') === appointment.id && !item.deletedAt);
+    const order = findOrderForAppointment(orders as any[], appointment);
+    if (appointment.status !== 'completed' && !order) return error('Only completed appointments can be reopened', 409);
     if (order) {
       const { items: payoutItems } = await db.list('payout_items', { limit: 10000 });
       if ((payoutItems as any[]).some(item => !item.deletedAt && item.orderId === order.id)) return error('This deal is already included in a recorded payout and cannot be undone', 409);

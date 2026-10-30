@@ -37,6 +37,10 @@ function canAssignStaff(member: Staff) {
   return member.employmentStatus !== 'laid-off';
 }
 
+function hasCompletedDeal(appointment: Appointment) {
+  return appointment.status === 'completed' || appointment.paymentCompleted === true;
+}
+
 function Appointments({ role }: { role: Role }) {
   const [date, setDate] = useState(() => role === 'barber' ? '' : todayStr());
   const [appts, setAppts] = useState<Appointment[]>([]);
@@ -356,9 +360,9 @@ function Appointments({ role }: { role: Role }) {
               <Badge tone={STATUS_TONE[a.status]}>{role === 'receptionist' ? a.status === 'completed' && a.paymentCompleted ? 'Completed' : 'Pending' : a.status.replace('-', ' ')}</Badge>
               {(canEditAppointments || canDeleteAppointments || canViewCompletionSummary || (role === 'barber' && a.staffId === account?.staffId)) && <div className="flex flex-wrap gap-2">
                 {canEditAppointments && (canEditClosedAppointments || !['completed', 'cancelled', 'no-show'].includes(a.status)) && <Button size="sm" variant="secondary" onClick={() => beginEdit(a)}><Pencil size={14} aria-hidden="true" />Edit</Button>}
-                {(canViewCompletionSummary || (role === 'barber' && a.staffId === account?.staffId)) && a.status === 'completed' && <Button size="sm" variant="secondary" onClick={() => showCompletionSummary(a)}>Deal summary</Button>}
-                {(role === 'owner' || role === 'admin') && a.status === 'completed' && <Button size="sm" variant="secondary" onClick={() => beginCompletionEdit(a)}><Pencil size={14} aria-hidden="true" />Adjust completion</Button>}
-                {(role === 'owner' || role === 'admin') && a.status === 'completed' && <Button size="sm" variant="danger" onClick={() => reopenCompletedDeal(a)} disabled={saving}>Undo completed deal</Button>}
+                {(canViewCompletionSummary || (role === 'barber' && a.staffId === account?.staffId)) && hasCompletedDeal(a) && <Button size="sm" variant="secondary" onClick={() => showCompletionSummary(a)}>Deal summary</Button>}
+                {(role === 'owner' || role === 'admin') && hasCompletedDeal(a) && <Button size="sm" variant="secondary" onClick={() => beginCompletionEdit(a)}><Pencil size={14} aria-hidden="true" />Adjust completion</Button>}
+                {(role === 'owner' || role === 'admin') && hasCompletedDeal(a) && <Button size="sm" variant="danger" onClick={() => reopenCompletedDeal(a)} disabled={saving}>Undo completed deal</Button>}
                 {(role === 'owner' || role === 'admin') && !['completed', 'cancelled', 'no-show'].includes(a.status) && (
                     <Select aria-label={`Assign employee for ${a.customerName}`} value={a.staffId || ''} onChange={e => {
                       const selected = staff.find(s => s.id === e.target.value);
