@@ -173,6 +173,7 @@ export const PayrollApi = {
   send: (recipients: { staffId: string; amountKES: number; phone: string }[]) => api.post('/api/payroll/send', { recipients }),
   paystackStatus: () => api.get('/api/payroll/paystack/status').then(r => r.data as { configured: boolean; canSend: boolean; currency: 'KES'; amountMultiplier: number | null; webhookPath: string }),
   paystackBatches: () => api.get('/api/payroll/paystack/batches').then(r => r.data.items as PaystackPayrollBatch[]),
+  syncPaystackRecipients: () => api.post('/api/payroll/paystack/recipients/sync'),
   sendPaystack: (staffIds: string[], expectedAmountsKES: Record<string, number>) => api.post('/api/payroll/paystack/send', { staffIds, expectedAmountsKES }),
 };
 

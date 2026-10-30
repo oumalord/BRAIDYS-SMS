@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Download, Plus, Receipt, Search } from 'lucide-react';
+import { Download, Plus, Receipt, Search, Users } from 'lucide-react';
 import { Card, Button, Badge, Modal, Field, Input, Select, EmptyState, LoadingState, StatCard, toast } from '../components/ui';
 import { AppointmentsApi, DashboardApi, downloadCSV, ExpensesApi, PayrollApi, PayoutsApi, fmtMoney } from '../lib/api';
 import type { DashboardData, Expense, PayoutBatch, PaystackPayrollBatch, Staff, WeeklyStaffWorkReport } from '../types';
@@ -21,6 +21,7 @@ function Finance() {
   const [canSendPaystack, setCanSendPaystack] = useState(false);
   const [financeDataError, setFinanceDataError] = useState('');
   const [payrollSending, setPayrollSending] = useState(false);
+  const [recipientsSyncing, setRecipientsSyncing] = useState(false);
   const [deletingEarnings, setDeletingEarnings] = useState(false);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
@@ -120,6 +121,22 @@ function Finance() {
       toast(cause?.message || 'Paystack payroll transfer failed.', 'error');
     } finally {
       setPayrollSending(false);
+    }
+  };
+
+  const syncPaystackRecipients = async () => {
+    if (!window.confirm('Create Paystack M-PESA recipients for eligible staff, excluding receptionists and administrators? This will not send payments.')) return;
+    setRecipientsSyncing(true);
+    try {
+      const { data } = await PayrollApi.syncPaystackRecipients();
+      const firstFailure = data.failures?.[0];
+      const summary = `${data.createdCount} created, ${data.existingCount} already ready, ${data.failedCount} failed.`;
+      toast(firstFailure ? `${summary} ${firstFailure.name}: ${firstFailure.error}` : `${summary} No payments were sent.`, firstFailure ? 'error' : 'success');
+      loadPayroll();
+    } catch (cause: any) {
+      toast(cause?.message || 'Could not sync Paystack recipients.', 'error');
+    } finally {
+      setRecipientsSyncing(false);
     }
   };
 
@@ -271,7 +288,7 @@ function Finance() {
       )}
 
       <Card className="p-6">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4"><div><h2 className="font-semibold">Unpaid payroll</h2><p className="text-xs text-[#6E6E73]">Sunday through yesterday: {payrollDateRange}. Today’s sales are excluded.</p></div><div className="flex flex-wrap gap-2"><Button variant="secondary" onClick={downloadPayroll} disabled={payrollLoading || !payrollStaff.length}><Download size={16} aria-hidden="true" />Download payroll CSV</Button><Button variant="secondary" onClick={() => { loadPayroll(); loadDailyReports(); }} disabled={payrollLoading || dailyReportsLoading}>{payrollLoading || dailyReportsLoading ? 'Refreshing…' : 'Refresh payroll'}</Button><Button variant="secondary" onClick={sendPayroll} disabled={payrollSending || payrollLoading}>{payrollSending ? 'Sending…' : 'Send M-Pesa batch'}</Button>{paystackConfigured && canSendPaystack && <Button onClick={sendPaystackPayroll} disabled={payrollSending || payrollLoading}>{payrollSending ? 'Submitting…' : 'Send with Paystack'}</Button>}</div></div>
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4"><div><h2 className="font-semibold">Unpaid payroll</h2><p className="text-xs text-[#6E6E73]">Sunday through yesterday: {payrollDateRange}. Today’s sales are excluded.</p></div><div className="flex flex-wrap gap-2"><Button variant="secondary" onClick={downloadPayroll} disabled={payrollLoading || !payrollStaff.length}><Download size={16} aria-hidden="true" />Download payroll CSV</Button><Button variant="secondary" onClick={() => { loadPayroll(); loadDailyReports(); }} disabled={payrollLoading || dailyReportsLoading}>{payrollLoading || dailyReportsLoading ? 'Refreshing…' : 'Refresh payroll'}</Button><Button variant="secondary" onClick={sendPayroll} disabled={payrollSending || payrollLoading}>{payrollSending ? 'Sending…' : 'Send M-Pesa batch'}</Button>{paystackConfigured && canSendPaystack && <><Button variant="secondary" onClick={syncPaystackRecipients} disabled={recipientsSyncing || payrollSending || payrollLoading}><Users size={16} aria-hidden="true" />{recipientsSyncing ? 'Syncing…' : 'Sync recipients'}</Button><Button onClick={sendPaystackPayroll} disabled={payrollSending || payrollLoading || recipientsSyncing}>{payrollSending ? 'Submitting…' : 'Send with Paystack'}</Button></>}</div></div>
         {paystackConfigured ? <p className="mb-3 text-xs text-[#6E6E73]">Live Paystack KES transfers are configured. Payments go to each staff member’s registered phone shown below; missing Paystack recipients are created automatically.</p> : <p className="mb-3 text-xs text-[#6E6E73]">Paystack payroll requires a live secret key in the backend environment.</p>}
         {payrollLoading ? <p className="text-sm text-[#6E6E73]">Loading staff payroll…</p> : payrollError ? <p role="alert" className="text-sm text-amber-700">{payrollError} Use “Refresh payroll” to try again.</p> : payrollStaff.length === 0 ? <p className="text-sm text-[#6E6E73]">No active staff records were returned for payroll.</p> : <div className="space-y-2">{payrollStaff.map(member => { const commission = member.commissionEarnedWeek || 0; const assistant = member.assistantEarnedWeek || 0; const calculated = Math.round(commission + assistant); return <div key={member.id} className="flex items-center justify-between gap-3 border-b border-black/5 pb-2"><div><p className="text-sm font-medium">{member.name}</p><p className="text-xs text-[#6E6E73]">{member.phone || 'No phone number'} · {member.branchName || member.branch}</p><p className="text-xs text-[#6E6E73]">Commission {fmtMoney(commission, 'KES')} + assistant compensation {fmtMoney(assistant, 'KES')}</p></div><p className="font-semibold text-sm">{fmtMoney(calculated, 'KES')}</p></div>; })}</div>}
       </Card>

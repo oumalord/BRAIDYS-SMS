@@ -10,6 +10,8 @@ Set `PAYSTACK_TRANSFER_AMOUNT_MULTIPLIER=100` for KES subunits.
 
 With a live key configured, staff onboarding and phone-number updates automatically create or refresh a KES M-PESA transfer recipient and save its code to the staff profile. The staff profile phone is also the phone used to register the employee account, and profile edits keep the account phone synchronized. Existing staff missing a live recipient code are provisioned automatically before their first payout. The backend validates Kenyan mobile numbers and verifies Paystack's returned recipient type and currency; recipient account details remain in Paystack.
 
+An owner can use **Finance → Unpaid payroll → Sync recipients** to provision missing recipients for all eligible staff in the salon, including receptionists. Administrator roles are excluded. This action only registers recipients; it does not send payments. Review any reported phone or Paystack errors before sending payroll.
+
 ## Paystack Dashboard
 
 Bulk transfer requires the transfer OTP requirement to be disabled for the Paystack integration. Configure the webhook URL as `https://YOUR_DOMAIN/api/paystack/webhook` and subscribe to `transfer.success`, `transfer.failed`, and `transfer.reversed`.

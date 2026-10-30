@@ -159,6 +159,12 @@ function normalizeCustomerPhone(value: unknown) {
   return digits.startsWith('0') ? `254${digits.slice(1)}` : digits;
 }
 
+function isPaystackRecipientEligible(staffMember: any, accountRole = '') {
+  if (staffMember.deletedAt || ['laid-off', 'permanently-deleted'].includes(String(staffMember.employmentStatus || ''))) return false;
+  const roles = [staffMember.role, accountRole].map(role => String(role || '').trim().toLowerCase());
+  return !roles.some(role => role.includes('admin'));
+}
+
 async function createPaystackStaffRecipient(staffMember: any): Promise<string> {
   const secretKey = String(process.env.PAYSTACK_SECRET_KEY || '');
   if (!secretKey.startsWith('sk_live_')) throw new Error('Live Paystack credentials are required to create staff recipients.');
@@ -741,23 +747,24 @@ export const handler = router({
     if (!/^\d{4}$/.test(pin)) return error('Staff PIN must be exactly 4 digits', 400);
     const [id] = await db.add('staff', [{ tenantId: branch.salonId, salonName: branch.salonName || context?.salonName || '', name: b.name, role: b.role || 'Staff', specialties: b.specialties || [], branch: branch.name, branchId: branch.id, branchName: branch.name, chair: b.chair || '', phone: b.phone || '', accountEmail: b.accountEmail || '', accountStatus: b.accountStatus || 'pending', employmentStatus: 'active', commissionPct: 50, status: b.status || 'available' }]);
     if (!id) return error('Failed to add staff', 500);
-    if (String(process.env.PAYSTACK_SECRET_KEY || '').startsWith('sk_live_')) {
-      const [createdStaff] = await db.get('staff', [id]);
-      if (createdStaff) {
-        try {
-          const paystackRecipientCode = await createPaystackStaffRecipient(createdStaff);
-          await db.update('staff', [{ id, record: { ...createdStaff, paystackRecipientCode, paystackRecipientMode: 'live' } }]);
-        } catch (cause) {
-          console.error('Paystack recipient setup failed for new staff:', cause instanceof Error ? cause.message : 'Unknown error');
-        }
+    await audit('created', 'staff', { id, name: b.name, responsibility: b.role || 'Staff', accountEmail: b.accountEmail || '', commissionPct: 50 }, b.actor || 'owner');
+    let accountId: string | undefined;
+    if (currentContext()) {
+      const ownerContext = currentContext()!;
+      [accountId] = await db.add('accounts', [{ id: `account-${randomBytes(8).toString('hex')}`, tenantId: branch.salonId, salonName: branch.salonName || ownerContext.salonName, branchId: branch.id, name: b.name, email: String(b.accountEmail || '').trim().toLowerCase(), phone: b.phone, role: isReceptionist ? 'receptionist' : 'barber', status: 'active', pinHash: passwordHash(pin), staffId: id, createdAt: Date.now() }]);
+    }
+    const [createdStaff] = await db.get('staff', [id]);
+    let paystackRecipientError = '';
+    if (accountId && createdStaff && isPaystackRecipientEligible(createdStaff) && String(process.env.PAYSTACK_SECRET_KEY || '').startsWith('sk_live_')) {
+      try {
+        const paystackRecipientCode = await createPaystackStaffRecipient(createdStaff);
+        await db.update('staff', [{ id, record: { ...createdStaff, paystackRecipientCode, paystackRecipientMode: 'live' } }]);
+      } catch (cause) {
+        paystackRecipientError = cause instanceof Error ? cause.message : 'Unknown error';
+        console.error('Paystack recipient setup failed for new staff:', paystackRecipientError);
       }
     }
-    await audit('created', 'staff', { id, name: b.name, responsibility: b.role || 'Staff', accountEmail: b.accountEmail || '', commissionPct: 50 }, b.actor || 'owner');
-    if (currentContext()) {
-      const context = currentContext()!;
-      await db.add('accounts', [{ id: `account-${randomBytes(8).toString('hex')}`, tenantId: branch.salonId, salonName: branch.salonName || context.salonName, branchId: branch.id, name: b.name, email: String(b.accountEmail || '').trim().toLowerCase(), phone: b.phone, role: isReceptionist ? 'receptionist' : 'barber', status: 'active', pinHash: passwordHash(pin), staffId: id, createdAt: Date.now() }]);
-    }
-    return json({ id });
+    return json({ id, paystackRecipientError });
   }],
   'PUT /api/staff/:id': [async ({ params, body }) => {
     requireOwner();
@@ -789,7 +796,7 @@ export const handler = router({
       }
       await db.update('accounts', [{ id: account.id, record: accountPatch }]);
     }
-    if (String(process.env.PAYSTACK_SECRET_KEY || '').startsWith('sk_live_') && (phoneChanged || updated.paystackRecipientMode !== 'live' || !updated.paystackRecipientCode)) {
+    if (isPaystackRecipientEligible(updated, account?.role) && String(process.env.PAYSTACK_SECRET_KEY || '').startsWith('sk_live_') && (phoneChanged || updated.paystackRecipientMode !== 'live' || !updated.paystackRecipientCode)) {
       try {
         const paystackRecipientCode = await createPaystackStaffRecipient(updated);
         await db.update('staff', [{ id: params.id, record: { ...updated, paystackRecipientCode, paystackRecipientMode: 'live' } }]);
@@ -2075,6 +2082,34 @@ export const handler = router({
       transfers: (payrollItems as any[]).filter(item => item.provider === 'paystack' && item.batchId === batch.id && item.tenantId === context.tenantId)
         .map(item => ({ staffId: item.staffId, staffName: item.staffName, amountKES: item.amountKES, status: item.status, reference: item.reference, failureReason: item.failureReason || item.error || item.webhookIssue || '' })),
     })) });
+  }],
+  'POST /api/payroll/paystack/recipients/sync': [async () => {
+    const context = currentContext();
+    if (!context || context.role !== 'owner') return error('Only the salon owner can sync Paystack recipients', 403);
+    if (!String(process.env.PAYSTACK_SECRET_KEY || '').startsWith('sk_live_')) return error('Recipient setup requires a live PAYSTACK_SECRET_KEY in the backend environment.', 503);
+    const [{ items: staffRows }, { items: accounts }] = await Promise.all([
+      db.list('staff', { limit: 5000 }), db.list('accounts', { limit: 5000 }),
+    ]);
+    const accountByStaffId = new Map((accounts as any[]).filter(account => account.staffId).map(account => [String(account.staffId), account]));
+    const members = (staffRows as any[]).filter(member => member.tenantId === context.tenantId
+      && isPaystackRecipientEligible(member, accountByStaffId.get(String(member.id))?.role));
+    let createdCount = 0;
+    let existingCount = 0;
+    const failures: { name: string; error: string }[] = [];
+    for (const member of members) {
+      if (member.paystackRecipientMode === 'live' && /^RCP_[A-Za-z0-9]+$/.test(String(member.paystackRecipientCode || ''))) {
+        existingCount += 1;
+        continue;
+      }
+      try {
+        const paystackRecipientCode = await createPaystackStaffRecipient(member);
+        await db.update('staff', [{ id: member.id, record: { ...member, paystackRecipientCode, paystackRecipientMode: 'live' } }]);
+        createdCount += 1;
+      } catch (cause) {
+        failures.push({ name: String(member.name || 'Unknown staff member'), error: cause instanceof Error ? cause.message : 'Recipient setup failed.' });
+      }
+    }
+    return json({ eligibleCount: members.length, createdCount, existingCount, failedCount: failures.length, failures });
   }],
   'POST /api/payroll/paystack/send': [async ({ body }) => {
     const context = currentContext();

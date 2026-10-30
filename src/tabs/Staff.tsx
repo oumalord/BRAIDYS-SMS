@@ -30,8 +30,8 @@ function StaffTab({ role = 'owner' }: { role?: Role }) {
     if (!/^\d{4}$/.test(form.credential)) { toast('Staff PIN must be exactly 4 digits.', 'error'); return; }
     if (!form.branchId) { toast('Choose a branch for this staff member.', 'error'); return; }
     try {
-      await StaffApi.create({ ...form, pin: form.credential, accountStatus: 'active', specialties: [], status: 'available' });
-      toast('Staff member and worker account created.', 'success');
+      const { data } = await StaffApi.create({ ...form, pin: form.credential, accountStatus: 'active', specialties: [], status: 'available' });
+      toast(data.paystackRecipientError ? `Staff account created, but Paystack recipient setup failed: ${data.paystackRecipientError}` : 'Staff member and worker account created.', data.paystackRecipientError ? 'error' : 'success');
       setOpen(false);
       setForm({ name: '', role: 'Barber', chair: '', phone: '', credential: '1234', branchId: branches[0]?.id || '' });
       load();
