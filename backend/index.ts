@@ -159,6 +159,18 @@ function normalizeCustomerPhone(value: unknown) {
   return digits.startsWith('0') ? `254${digits.slice(1)}` : digits;
 }
 
+function normalizeCustomerName(value: unknown) {
+  return String(value || '').trim().replace(/\s+/g, ' ').toLocaleLowerCase();
+}
+
+function hasSameDayCustomerDetails(appointment: any, date: string, name: unknown, phone: unknown, cardNumber: string) {
+  return !appointment.deletedAt
+    && appointment.date === date
+    && normalizeCustomerName(appointment.customerName) === normalizeCustomerName(name)
+    && normalizeCustomerPhone(appointment.customerPhone || appointment.phone) === normalizeCustomerPhone(phone)
+    && String(appointment.cardNumber || '').trim() === cardNumber;
+}
+
 function findOrderForAppointment(orders: any[], appointment: any) {
   const activeOrders = orders.filter(order => !order.deletedAt);
   const linkedOrder = activeOrders.find(order => String(order.appointmentId || '') === String(appointment.id));
@@ -1348,8 +1360,9 @@ export const handler = router({
     if (!b.customerName || normalizeCustomerPhone(b.customerPhone).length < 7 || items.length === 0) return error('Customer name, valid phone number, and appointment details are required', 400);
     for (const it of items) { if (!it.serviceId && !requestedCategories.length) return error('Each service needs a service selected', 400); }
 
-    const { items: existing } = await db.list('appointments', { limit: 1000 });
-    if (cardNumber && (existing as any[]).some(appointment => !appointment.deletedAt && appointment.date === appointmentDate && String(appointment.cardNumber || '') === cardNumber)) return error('This card number is already assigned on the selected date', 409);
+    const { items: existing } = await db.list('appointments', { limit: 5000 });
+    if ((existing as any[]).some(appointment => hasSameDayCustomerDetails(appointment, appointmentDate, b.customerName, b.customerPhone, cardNumber))) return error('This customer already has an appointment with the same details on the selected date', 409);
+    if (cardNumber && (existing as any[]).some(appointment => !appointment.deletedAt && appointment.date === appointmentDate && String(appointment.cardNumber || '').trim() === cardNumber)) return error('This card number is already assigned on the selected date', 409);
     const totalDurationMin = items.reduce((s: number, it: any) => s + (it.durationMin || 30), 0);
     const totalPrice = items.reduce((s: number, it: any) => s + (it.price || 0), 0);
     const currency = items[0]?.currency || 'KES';
@@ -1436,9 +1449,10 @@ export const handler = router({
     const nextStaffId = 'staffId' in patch ? patch.staffId : existing.staffId;
     const nextDuration = Number(patch.durationMin || existing.durationMin || 30);
     const nextCardNumber = String(patch.cardNumber || existing.cardNumber || '');
+    const { items: appointments } = await db.list('appointments', { limit: 5000 });
+    if (appointments.some(appointment => appointment.id !== existing.id && hasSameDayCustomerDetails(appointment, nextDate, existing.customerName, existing.customerPhone || existing.phone, nextCardNumber))) return error('This customer already has an appointment with the same details on the selected date', 409);
     if (nextCardNumber) {
-      const { items: appointments } = await db.list('appointments', { limit: 2000 });
-      if ((appointments as any[]).some(appointment => appointment.id !== existing.id && !appointment.deletedAt && appointment.date === nextDate && String(appointment.cardNumber || '') === nextCardNumber)) return error('This card number is already assigned on the selected date', 409);
+      if ((appointments as any[]).some(appointment => appointment.id !== existing.id && !appointment.deletedAt && appointment.date === nextDate && String(appointment.cardNumber || '').trim() === nextCardNumber)) return error('This card number is already assigned on the selected date', 409);
     }
     if (nextStaffId && nextStaffId !== existing.staffId) {
       const [assignedStaff] = await db.get('staff', [patch.staffId]);
