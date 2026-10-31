@@ -1360,7 +1360,7 @@ export const handler = router({
     if (!b.customerName || normalizeCustomerPhone(b.customerPhone).length < 7 || items.length === 0) return error('Customer name, valid phone number, and appointment details are required', 400);
     for (const it of items) { if (!it.serviceId && !requestedCategories.length) return error('Each service needs a service selected', 400); }
 
-    const { items: existing } = await db.list('appointments', { limit: 5000 });
+    const { items: existing } = await db.listAllTenant('appointments', context?.tenantId || '', { limit: 5000, branchScope: false });
     if ((existing as any[]).some(appointment => hasSameDayCustomerDetails(appointment, appointmentDate, b.customerName, b.customerPhone, cardNumber))) return error('This customer already has an appointment with the same details on the selected date', 409);
     if (cardNumber && (existing as any[]).some(appointment => !appointment.deletedAt && appointment.date === appointmentDate && String(appointment.cardNumber || '').trim() === cardNumber)) return error('This card number is already assigned on the selected date', 409);
     const totalDurationMin = items.reduce((s: number, it: any) => s + (it.durationMin || 30), 0);
@@ -1449,7 +1449,7 @@ export const handler = router({
     const nextStaffId = 'staffId' in patch ? patch.staffId : existing.staffId;
     const nextDuration = Number(patch.durationMin || existing.durationMin || 30);
     const nextCardNumber = String(patch.cardNumber || existing.cardNumber || '');
-    const { items: appointments } = await db.list('appointments', { limit: 5000 });
+    const { items: appointments } = await db.listAllTenant('appointments', context.tenantId, { limit: 5000, branchScope: false });
     if (appointments.some(appointment => appointment.id !== existing.id && hasSameDayCustomerDetails(appointment, nextDate, existing.customerName, existing.customerPhone || existing.phone, nextCardNumber))) return error('This customer already has an appointment with the same details on the selected date', 409);
     if (nextCardNumber) {
       if ((appointments as any[]).some(appointment => appointment.id !== existing.id && !appointment.deletedAt && appointment.date === nextDate && String(appointment.cardNumber || '').trim() === nextCardNumber)) return error('This card number is already assigned on the selected date', 409);

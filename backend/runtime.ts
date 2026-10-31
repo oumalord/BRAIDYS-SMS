@@ -60,17 +60,25 @@ export const db = {
     const limit = Math.min(Math.max(Number(options?.limit || 100), 1), 5000);
     const context = currentContext();
     const tenantId = context?.tenantId || null;
+    const branchId = context?.branchId;
     const rows = globalCollections.has(collection)
       ? await sql`SELECT id, record FROM app_records WHERE collection = ${collection} ORDER BY created_at ASC LIMIT ${limit}` as StoredRecord[]
       : context?.role === 'admin'
-        ? await sql`SELECT id, record FROM app_records WHERE collection = ${collection} ORDER BY created_at ASC LIMIT ${limit}` as StoredRecord[]
-        : await sql`SELECT id, record FROM app_records WHERE collection = ${collection} AND (tenant_id = ${tenantId} OR record->>'tenantId' = ${tenantId}) ORDER BY created_at ASC LIMIT ${limit}` as StoredRecord[];
+        ? branchId
+          ? await sql`SELECT id, record FROM app_records WHERE collection = ${collection} AND record->>'branchId' = ${branchId} ORDER BY created_at ASC LIMIT ${limit}` as StoredRecord[]
+          : await sql`SELECT id, record FROM app_records WHERE collection = ${collection} ORDER BY created_at ASC LIMIT ${limit}` as StoredRecord[]
+        : branchId
+          ? await sql`SELECT id, record FROM app_records WHERE collection = ${collection} AND (tenant_id = ${tenantId} OR record->>'tenantId' = ${tenantId}) AND (record->>'branchId' = ${branchId} OR record->>'branchId' IS NULL OR record->>'branchId' = '') ORDER BY created_at ASC LIMIT ${limit}` as StoredRecord[]
+          : await sql`SELECT id, record FROM app_records WHERE collection = ${collection} AND (tenant_id = ${tenantId} OR record->>'tenantId' = ${tenantId}) ORDER BY created_at ASC LIMIT ${limit}` as StoredRecord[];
     return { items: rows.map(row => ({ ...(row.record || {}), id: row.id })) };
   },
-  async listAllTenant(collection: string, tenantId: string, options?: { limit?: number }): Promise<{ items: any[] }> {
+  async listAllTenant(collection: string, tenantId: string, options?: { limit?: number; branchScope?: boolean }): Promise<{ items: any[] }> {
     await init();
     const limit = Math.min(Math.max(Number(options?.limit || 100), 1), 5000);
-    const rows = await sql`SELECT id, record FROM app_records WHERE collection = ${collection} AND tenant_id = ${tenantId} ORDER BY created_at ASC LIMIT ${limit}` as StoredRecord[];
+    const branchId = options?.branchScope === false ? undefined : currentContext()?.branchId;
+    const rows = branchId
+      ? await sql`SELECT id, record FROM app_records WHERE collection = ${collection} AND tenant_id = ${tenantId} AND (record->>'branchId' = ${branchId} OR record->>'branchId' IS NULL OR record->>'branchId' = '') ORDER BY created_at ASC LIMIT ${limit}` as StoredRecord[]
+      : await sql`SELECT id, record FROM app_records WHERE collection = ${collection} AND tenant_id = ${tenantId} ORDER BY created_at ASC LIMIT ${limit}` as StoredRecord[];
     return { items: rows.map(row => ({ ...(row.record || {}), id: row.id })) };
   },
   async get(collection: string, ids: string[]): Promise<any[]> {
@@ -78,9 +86,16 @@ export const db = {
     if (!ids.length) return [];
     const context = currentContext();
     const tenantId = context?.tenantId || null;
-    const rows = globalCollections.has(collection) || context?.role === 'admin'
+    const branchId = context?.branchId;
+    const rows = globalCollections.has(collection)
       ? await sql`SELECT id, record FROM app_records WHERE collection = ${collection} AND id = ANY(${ids})` as StoredRecord[]
-      : await sql`SELECT id, record FROM app_records WHERE collection = ${collection} AND (tenant_id = ${tenantId} OR record->>'tenantId' = ${tenantId}) AND id = ANY(${ids})` as StoredRecord[];
+      : context?.role === 'admin'
+        ? branchId
+          ? await sql`SELECT id, record FROM app_records WHERE collection = ${collection} AND record->>'branchId' = ${branchId} AND id = ANY(${ids})` as StoredRecord[]
+          : await sql`SELECT id, record FROM app_records WHERE collection = ${collection} AND id = ANY(${ids})` as StoredRecord[]
+        : branchId
+          ? await sql`SELECT id, record FROM app_records WHERE collection = ${collection} AND (tenant_id = ${tenantId} OR record->>'tenantId' = ${tenantId}) AND (record->>'branchId' = ${branchId} OR record->>'branchId' IS NULL OR record->>'branchId' = '') AND id = ANY(${ids})` as StoredRecord[]
+          : await sql`SELECT id, record FROM app_records WHERE collection = ${collection} AND (tenant_id = ${tenantId} OR record->>'tenantId' = ${tenantId}) AND id = ANY(${ids})` as StoredRecord[];
     const byId = new Map(rows.map(row => [row.id, { ...(row.record || {}), id: row.id }]));
     return ids.map(id => byId.get(id) || null);
   },
@@ -88,9 +103,13 @@ export const db = {
     await init();
     const context = currentContext();
     const tenantId = context?.tenantId || null;
+    const branchId = context?.branchId;
     for (const update of updates) {
       if (globalCollections.has(collection)) await sql`UPDATE app_records SET record = ${JSON.stringify({ ...update.record, id: update.id })}::jsonb WHERE collection = ${collection} AND id = ${update.id}`;
-      else if (context?.role === 'admin') await sql`UPDATE app_records SET record = ${JSON.stringify({ ...update.record, id: update.id, tenantId: update.record.tenantId || tenantId })}::jsonb WHERE collection = ${collection} AND id = ${update.id}`;
+      else if (context?.role === 'admin') {
+        if (branchId) await sql`UPDATE app_records SET record = ${JSON.stringify({ ...update.record, id: update.id, tenantId: update.record.tenantId || tenantId })}::jsonb WHERE collection = ${collection} AND record->>'branchId' = ${branchId} AND id = ${update.id}`;
+        else await sql`UPDATE app_records SET record = ${JSON.stringify({ ...update.record, id: update.id, tenantId: update.record.tenantId || tenantId })}::jsonb WHERE collection = ${collection} AND id = ${update.id}`;
+      } else if (branchId) await sql`UPDATE app_records SET record = ${JSON.stringify({ ...update.record, id: update.id, tenantId })}::jsonb WHERE collection = ${collection} AND (tenant_id = ${tenantId} OR record->>'tenantId' = ${tenantId}) AND (record->>'branchId' = ${branchId} OR record->>'branchId' IS NULL OR record->>'branchId' = '') AND id = ${update.id}`;
       else await sql`UPDATE app_records SET record = ${JSON.stringify({ ...update.record, id: update.id, tenantId })}::jsonb WHERE collection = ${collection} AND (tenant_id = ${tenantId} OR record->>'tenantId' = ${tenantId}) AND id = ${update.id}`;
     }
     return updates.map(() => true);
