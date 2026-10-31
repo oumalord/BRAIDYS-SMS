@@ -45,6 +45,32 @@ export interface StaffEarningLine {
   branchId: string | null;
 }
 
+export function currentSundayThroughNowRange(date = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Africa/Nairobi', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(date);
+  const part = (type: string) => Number(parts.find(value => value.type === type)?.value);
+  const today = new Date(Date.UTC(part('year'), part('month') - 1, part('day')));
+  const currentSunday = new Date(today);
+  currentSunday.setUTCDate(today.getUTCDate() - today.getUTCDay());
+  const from = Date.UTC(currentSunday.getUTCFullYear(), currentSunday.getUTCMonth(), currentSunday.getUTCDate()) - 3 * 60 * 60 * 1000;
+  return { from, to: date.getTime() + 1 };
+}
+
+export function previousSaturdayThroughYesterdayRange(date = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Africa/Nairobi', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(date);
+  const part = (type: string) => Number(parts.find(value => value.type === type)?.value);
+  const today = new Date(Date.UTC(part('year'), part('month') - 1, part('day')));
+  const currentSunday = new Date(today);
+  currentSunday.setUTCDate(today.getUTCDate() - today.getUTCDay());
+  const previousSaturday = new Date(currentSunday);
+  previousSaturday.setUTCDate(currentSunday.getUTCDate() - 1);
+  const nairobiMidnight = (day: Date) => Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate()) - 3 * 60 * 60 * 1000;
+  return { from: nairobiMidnight(previousSaturday), to: nairobiMidnight(today) };
+}
+
 export function calculateUnpaidStaffEarnings(
   orders: any[],
   payoutItems: any[],

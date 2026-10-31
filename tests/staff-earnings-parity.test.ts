@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { calculateUnpaidStaffEarnings, staffAppointmentMinutes } from '../backend/earnings.ts';
+import { calculateUnpaidStaffEarnings, currentSundayThroughNowRange, previousSaturdayThroughYesterdayRange, staffAppointmentMinutes } from '../backend/earnings.ts';
 
 const now = new Date(2026, 8, 26, 12, 0, 0).getTime();
 const startOfSunday = new Date(2026, 8, 20, 0, 0, 0).getTime();
@@ -10,6 +10,26 @@ const orderAt = (createdAt: number, item: Record<string, unknown>, extras: Recor
   createdAt,
   items: [{ type: 'service', price: 1000, qty: 1, currency: 'KES', ...item }],
   ...extras,
+});
+
+test('payroll date range is the previous Saturday through yesterday in Nairobi', () => {
+  const range = previousSaturdayThroughYesterdayRange(new Date('2026-10-31T12:00:00+03:00'));
+  assert.equal(new Date(range.from).toISOString(), '2026-10-23T21:00:00.000Z');
+  assert.equal(new Date(range.to).toISOString(), '2026-10-30T21:00:00.000Z');
+  const orders = [
+    orderAt(range.from, { staffId: 'stylist', commission: 100 }),
+    orderAt(range.to - 1, { staffId: 'stylist', commission: 200 }),
+    orderAt(range.to, { staffId: 'stylist', commission: 300 }),
+  ];
+  const lines = calculateUnpaidStaffEarnings(orders, [], [], range.from, range.to);
+  assert.deepEqual(lines.map(line => line.amount), [100, 200]);
+});
+
+test('current earnings range is Sunday through the current instant in Nairobi', () => {
+  const now = new Date('2026-10-31T18:13:00+03:00');
+  const range = currentSundayThroughNowRange(now);
+  assert.equal(new Date(range.from).toISOString(), '2026-10-24T21:00:00.000Z');
+  assert.equal(new Date(range.to).toISOString(), '2026-10-31T15:13:00.001Z');
 });
 
 test('weekly earnings count Sunday through Saturday and exclude Sunday after today', () => {

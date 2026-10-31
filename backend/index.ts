@@ -1,6 +1,6 @@
 import { router, json, error, db, ai, storage, currentContext, withRequestContext } from './runtime.ts';
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
-import { calculateUnpaidStaffEarnings, serviceCommission, staffAppointmentMinutes, staffCommission } from './earnings.ts';
+import { calculateUnpaidStaffEarnings, currentSundayThroughNowRange, staffAppointmentMinutes, staffCommission } from './earnings.ts';
 import { toPaystackMinorAmount, verifyPaystackSignature } from './paystack.ts';
 
 const DAY = 24 * 3600 * 1000;
@@ -32,16 +32,25 @@ function currentSundayThroughYesterdayRange(date = new Date()) {
   return { from: nairobiMidnight(currentSunday), to: nairobiMidnight(today) };
 }
 
-function currentSundayThroughNowRange(date = new Date()) {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Africa/Nairobi', year: 'numeric', month: '2-digit', day: '2-digit',
-  }).formatToParts(date);
-  const part = (type: string) => Number(parts.find(value => value.type === type)?.value);
-  const today = new Date(Date.UTC(part('year'), part('month') - 1, part('day')));
-  const currentSunday = new Date(today);
-  currentSunday.setUTCDate(today.getUTCDate() - today.getUTCDay());
-  const from = Date.UTC(currentSunday.getUTCFullYear(), currentSunday.getUTCMonth(), currentSunday.getUTCDate()) - 3 * 60 * 60 * 1000;
-  return { from, to: date.getTime() + 1 };
+function contextIncludesPayrollRecord(record: any, context: { tenantId: string; role?: string }) {
+  return context.role !== 'admin' || record.tenantId === context.tenantId;
+}
+
+function branchScopedPayrollOrders(orders: any[], appointments: any[], staffById: Map<string, any>, context: { tenantId: string; branchId?: string | null; role?: string }) {
+  const appointmentsById = new Map(appointments.filter(appointment => !appointment.deletedAt && contextIncludesPayrollRecord(appointment, context)).map(appointment => [String(appointment.id), appointment]));
+  return orders.filter(order => {
+    if (!contextIncludesPayrollRecord(order, context)) return false;
+    if (!context.branchId) return true;
+    const appointment = appointmentsById.get(String(order.appointmentId || ''));
+    const orderBranch = order.branchId || appointment?.branchId;
+    if (orderBranch) return orderBranch === context.branchId;
+    return (Array.isArray(order.items) ? order.items : []).some((item: any) => [item.staffId, item.coStaffId, item.thirdStaffId, item.helperStaffId]
+      .some(staffId => staffById.get(String(staffId || ''))?.branchId === context.branchId));
+  });
+}
+
+function branchScopedPayrollPayoutItems(payoutItems: any[], context: { tenantId: string; branchId?: string | null; role?: string }) {
+  return payoutItems.filter(item => contextIncludesPayrollRecord(item, context) && (!context.branchId || !item.branchId || item.branchId === context.branchId));
 }
 
 function nairobiDayRange(date: string) {
@@ -698,7 +707,8 @@ export const handler = router({
       db.list('payout_items', { limit: 10000 }),
       db.list('appointments', { limit: 5000 }),
     ]);
-    const currentPeriodEarnings = calculateUnpaidStaffEarnings(orders as any[], payoutItems as any[], appointments as any[], weekFrom, now + 1);
+    const currentPeriodEarnings = calculateUnpaidStaffEarnings(orders as any[], payoutItems as any[], appointments as any[], weekFrom, now + 1)
+      .filter(line => line.currency === 'KES');
     const ownCurrentPeriodEarnings = currentPeriodEarnings.filter(line => line.staffId === String(context.staffId));
     const orderCreatedAtById = new Map((orders as any[]).map(order => [String(order.id), Number(order.createdAt || 0)]));
     const ordersById = new Map((orders as any[]).map(order => [String(order.id), order]));
@@ -734,7 +744,7 @@ export const handler = router({
       }
     }
 
-    const weekly = { commission: weekCommission, assistant: weekAssistant, total: weekCommission + weekAssistant };
+    const weekly = { commission: weekCommission, assistant: weekAssistant, total: Math.round(weekCommission + weekAssistant) };
     return json({
       today: { commission: todayCommission, assistant: todayAssistant, total: todayCommission + todayAssistant },
       week: weekly,
@@ -1289,7 +1299,8 @@ export const handler = router({
       db.list('appointments', { limit: 5000 }),
       db.list('payout_items', { limit: 10000 }),
     ]);
-    let matchedStaff = (staffRows as any[]).filter(member => !member.deletedAt && (!context.branchId || member.branchId === context.branchId)
+    const tenantStaff = (staffRows as any[]).filter(member => !member.deletedAt && contextIncludesPayrollRecord(member, context));
+    let matchedStaff = tenantStaff.filter(member => (!context.branchId || member.branchId === context.branchId)
       && (requestedStaffId ? String(member.id) === requestedStaffId : String(member.name || '').trim().toLowerCase().includes(search)));
     if (search) {
       const exactMatches = matchedStaff.filter(member => String(member.name || '').trim().toLowerCase() === search);
@@ -1297,19 +1308,21 @@ export const handler = router({
     }
     if (!matchedStaff.length) return json({ period: { from: period.from, to: period.to - 1 }, staff: [], services: [] });
 
-    const staffById = new Map((staffRows as any[]).map(member => [String(member.id), member]));
-    const appointmentsById = new Map((appointmentRows as any[]).filter((appointment: any) => !appointment.deletedAt).map((appointment: any) => [String(appointment.id), appointment]));
-    const activePaidKeys = new Set((payoutItems as any[]).filter(item => !item.deletedAt).map(item => String(item.itemKey || '')));
-    const earningLines = calculateUnpaidStaffEarnings(orders as any[], [], appointmentRows as any[], period.from, period.to);
+    const staffById = new Map(tenantStaff.map(member => [String(member.id), member]));
+    const tenantAppointments = (appointmentRows as any[]).filter(appointment => contextIncludesPayrollRecord(appointment, context));
+    const appointmentsById = new Map(tenantAppointments.filter((appointment: any) => !appointment.deletedAt).map((appointment: any) => [String(appointment.id), appointment]));
+    const branchOrders = branchScopedPayrollOrders(orders as any[], tenantAppointments, staffById, context);
+    const branchPayoutItems = branchScopedPayrollPayoutItems(payoutItems as any[], context);
+    const activePaidKeys = new Set(branchPayoutItems.filter(item => !item.deletedAt).map(item => String(item.itemKey || '')));
+    const earningLines = calculateUnpaidStaffEarnings(branchOrders, branchPayoutItems, tenantAppointments, period.from, period.to)
+      .filter(line => line.currency === 'KES');
     const selectedStaffIds = new Set(matchedStaff.map(member => String(member.id)));
     const staffLineKey = (orderId: string, itemIndex: number) => `${orderId}:${itemIndex}`;
     const services: any[] = [];
-    for (const order of orders as any[]) {
+    for (const order of branchOrders) {
       const createdAt = Number(order.createdAt || 0);
       if (order.deletedAt || createdAt < period.from || createdAt >= period.to) continue;
       const appointment: any = appointmentsById.get(String(order.appointmentId || ''));
-      const recordBranchId = order.branchId || appointment?.branchId || null;
-      if (context.branchId && recordBranchId && recordBranchId !== context.branchId) continue;
       for (const [itemIndex, item] of (Array.isArray(order.items) ? order.items : []).entries()) {
         if (item.type !== 'service') continue;
         const baseKey = staffLineKey(String(order.id), itemIndex);
@@ -2005,35 +2018,47 @@ export const handler = router({
   'GET /api/payouts': [async () => {
     if (!['owner', 'admin'].includes(currentContext()?.role || '')) return error('Only the owner or administrator can view payouts', 403);
     const { items } = await db.list('payout_batches', { limit: 100 });
-    return json({ items: (items as any[]).sort((a, b) => b.createdAt - a.createdAt) });
+    return json({ items: (items as any[]).filter(batch => !batch.deletedAt).sort((a, b) => b.createdAt - a.createdAt) });
   }],
   'GET /api/payroll/staff': [async () => {
     const context = currentContext();
     if (!context || !['owner', 'admin'].includes(context.role)) return error('Only the owner or administrator can view payroll staff', 403);
-    const now = Date.now();
     const { items } = await db.list('staff', { limit: 2000 });
-    const period = currentSundayThroughYesterdayRange();
-    const { from } = period;
-    const [{ items: orders }, { items: deletedPayoutItems }, { items: appointments }] = await Promise.all([
+    const period = currentSundayThroughNowRange();
+    const [{ items: orders }, { items: payoutItems }, { items: appointments }] = await Promise.all([
       db.list('orders', { limit: 5000 }),
       db.list('payout_items', { limit: 10000 }),
       db.list('appointments', { limit: 5000 }),
     ]);
-    const unpaidEarnings = calculateUnpaidStaffEarnings(orders as any[], deletedPayoutItems as any[], appointments as any[], from, period.to);
-    const totals = new Map<string, { commission: number; assistant: number }>();
+    const tenantStaff = (items as any[]).filter(member => !member.deletedAt && contextIncludesPayrollRecord(member, context));
+    const payrollStaff = tenantStaff.filter(member => !context.branchId || member.branchId === context.branchId);
+    const activePayrollStaff = payrollStaff.filter(member => member.employmentStatus !== 'laid-off');
+    const staffById = new Map(activePayrollStaff.map(member => [String(member.id), member]));
+    const tenantAppointments = (appointments as any[]).filter(appointment => contextIncludesPayrollRecord(appointment, context));
+    const branchOrders = branchScopedPayrollOrders(orders as any[], tenantAppointments, staffById, context);
+    const branchPayoutItems = branchScopedPayrollPayoutItems(payoutItems as any[], context);
+    const unpaidEarnings = calculateUnpaidStaffEarnings(branchOrders, branchPayoutItems, tenantAppointments, period.from, period.to)
+      .filter(earning => earning.currency === 'KES' && staffById.has(earning.staffId));
+    const totals = new Map<string, { commission: number; assistant: number; count: number; revenue: number; helperDeductions: number }>();
     for (const earning of unpaidEarnings) {
-      const total = totals.get(earning.staffId) || { commission: 0, assistant: 0 };
+      const total = totals.get(earning.staffId) || { commission: 0, assistant: 0, count: 0, revenue: 0, helperDeductions: 0 };
+      total.count += 1;
+      total.revenue += earning.revenue;
+      total.helperDeductions += earning.helperDeduction;
       if (earning.role === 'assistant') total.assistant += earning.amount;
       else total.commission += earning.amount;
       totals.set(earning.staffId, total);
     }
     return json({
-      items: (items as any[]).filter(member => !member.deletedAt && (!currentContext()?.branchId || member.branchId === currentContext()?.branchId)).map(member => ({
+      items: payrollStaff.map(member => ({
         ...member,
         commissionEarnedWeek: totals.get(member.id)?.commission || 0,
         assistantEarnedWeek: totals.get(member.id)?.assistant || 0,
+        unpaidEarningCount: totals.get(member.id)?.count || 0,
+        unpaidServiceRevenueKES: totals.get(member.id)?.revenue || 0,
+        unpaidAssistantFeesKES: totals.get(member.id)?.helperDeductions || 0,
       })),
-      period: { from, to: period.to - 1 },
+      period: { from: period.from, to: period.to - 1 },
     });
   }],
   'POST /api/earnings/delete': [async ({ body }) => {
@@ -2162,7 +2187,7 @@ export const handler = router({
       db.list('staff', { limit: 2000 }), db.list('orders', { limit: 5000 }), db.list('payout_items', { limit: 10000 }),
       db.list('appointments', { limit: 5000 }), db.list('payroll_items', { limit: 5000 }),
     ]);
-    const members = (staffRows as any[]).filter(member => !member.deletedAt && member.employmentStatus !== 'laid-off' && member.tenantId === context.tenantId
+    const members = (staffRows as any[]).filter(member => !member.deletedAt && member.employmentStatus !== 'laid-off' && contextIncludesPayrollRecord(member, context)
       && (!context.branchId || member.branchId === context.branchId) && requestedIds.includes(String(member.id)));
     if (!members.length) return error('No active staff records are available for this payroll batch.', 400);
     if (members.length !== requestedIds.length) return error('One or more selected staff members are not available in this salon or branch.', 400);
@@ -2182,19 +2207,11 @@ export const handler = router({
     const staffById = new Map(members.map(member => [String(member.id), member]));
     const earningsByStaffId = new Map<string, any[]>();
     const lockedItemKeys = new Set<string>();
-    const appointmentsById = new Map((appointments as any[]).filter(item => !item.deletedAt).map(item => [String(item.id), item]));
-    const branchOrders = (orders as any[]).filter(order => {
-      if (order.tenantId !== context.tenantId) return false;
-      if (!context.branchId) return true;
-      const appointment = appointmentsById.get(String(order.appointmentId || ''));
-      const orderBranch = order.branchId || appointment?.branchId;
-      if (orderBranch) return orderBranch === context.branchId;
-      return (Array.isArray(order.items) ? order.items : []).some((item: any) => [item.staffId, item.coStaffId, item.thirdStaffId, item.helperStaffId]
-        .some(id => staffById.get(String(id || ''))?.branchId === context.branchId));
-    });
-    const branchPayoutItems = (payoutItems as any[]).filter(item => item.tenantId === context.tenantId && (!context.branchId || !item.branchId || item.branchId === context.branchId));
-    const { from, to } = currentSundayThroughYesterdayRange();
-    const earnings = calculateUnpaidStaffEarnings(branchOrders, branchPayoutItems, (appointments as any[]).filter(item => item.tenantId === context.tenantId), from, to)
+    const tenantAppointments = (appointments as any[]).filter(item => contextIncludesPayrollRecord(item, context));
+    const scopedBranchOrders = branchScopedPayrollOrders(orders as any[], tenantAppointments, staffById, context);
+    const branchPayoutItems = branchScopedPayrollPayoutItems(payoutItems as any[], context);
+    const { from, to } = currentSundayThroughNowRange();
+    const earnings = calculateUnpaidStaffEarnings(scopedBranchOrders, branchPayoutItems, tenantAppointments, from, to)
       .filter(line => staffById.has(line.staffId) && line.currency === 'KES');
     for (const earning of earnings) {
       const lines = earningsByStaffId.get(earning.staffId) || [];

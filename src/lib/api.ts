@@ -7,6 +7,8 @@ const api = {
   delete: async (path: string) => ({ data: await request(path, 'DELETE') }),
 };
 
+const REQUEST_TIMEOUT_MS = 60_000;
+
 async function request(path: string, method = 'GET', body?: unknown): Promise<any> {
   const token = window.localStorage.getItem('safigroom_session');
   const branchId = window.localStorage.getItem('safigroom_selected_branch');
@@ -14,7 +16,7 @@ async function request(path: string, method = 'GET', body?: unknown): Promise<an
   try { account = JSON.parse(window.localStorage.getItem('safigroom_account') || 'null'); } catch { account = null; }
   const canSelectBranch = account?.role === 'owner' || account?.role === 'manager' || account?.role === 'admin';
   const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), 15000);
+  const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
     const response = await fetch(path, {
       method,
@@ -25,6 +27,11 @@ async function request(path: string, method = 'GET', body?: unknown): Promise<an
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
     return data;
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error('Request timed out after 60 seconds. Check your connection and try again.');
+    }
+    throw error;
   } finally {
     window.clearTimeout(timeout);
   }

@@ -8,7 +8,6 @@ type Range = 'today' | 'week' | 'month' | 'all';
 
 function Finance() {
   const [range, setRange] = useState<Range>('week');
-  const [earningsDate, setEarningsDate] = useState('');
   const [data, setData] = useState<DashboardData | null>(null);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [payouts, setPayouts] = useState<PayoutBatch[]>([]);
@@ -32,10 +31,6 @@ function Finance() {
   const [breakdown, setBreakdown] = useState<WeeklyStaffWorkReport | null>(null);
   const [breakdownLoading, setBreakdownLoading] = useState(false);
   const [breakdownError, setBreakdownError] = useState('');
-  const [weeklyReports, setWeeklyReports] = useState<Record<string, WeeklyStaffWorkReport>>({});
-  const [dailyReportsError, setDailyReportsError] = useState('');
-  const [dailyReportsLoading, setDailyReportsLoading] = useState(false);
-  const staffIdsKey = staff.filter(member => member.employmentStatus !== 'laid-off').map(member => member.id).join('|');
 
   const loadPayroll = () => {
     setPayrollLoading(true);
@@ -46,19 +41,7 @@ function Finance() {
       .finally(() => setPayrollLoading(false));
     PayrollApi.paystackStatus().then(status => { setPaystackConfigured(status.configured); setCanSendPaystack(status.canSend); }).catch(() => { setPaystackConfigured(false); setCanSendPaystack(false); });
   };
-  const loadDailyReports = (members = staff) => {
-    setDailyReportsLoading(true);
-    setDailyReportsError('');
-    Promise.allSettled(members.filter(member => member.employmentStatus !== 'laid-off').map(async member => [member.id, await AppointmentsApi.staffWeeklyWork(member.id, earningsDate || undefined)] as const))
-      .then(reports => {
-        const successfulReports = reports.flatMap(report => report.status === 'fulfilled' ? [report.value] : []);
-        setWeeklyReports(Object.fromEntries(successfulReports));
-        const failedCount = reports.filter(report => report.status === 'rejected').length;
-        setDailyReportsError(failedCount ? `Could not load daily appointment earnings for ${failedCount} staff member${failedCount === 1 ? '' : 's'}. Refresh to retry.` : '');
-      })
-      .finally(() => setDailyReportsLoading(false));
-  };
-  const load = () => {
+  const load = (refreshPayroll = true) => {
     setLoading(true);
     setFinanceDataError('');
     DashboardApi.get(range)
@@ -68,17 +51,13 @@ function Finance() {
     ExpensesApi.list().then(setExpenses).catch(() => undefined);
     PayoutsApi.list().then(setPayouts).catch(() => undefined);
     PayrollApi.paystackBatches().then(setPaystackBatches).catch(() => undefined);
-    loadPayroll();
+    if (refreshPayroll) loadPayroll();
   };
   useEffect(() => {
     load();
-    const refresh = window.setInterval(load, 15000);
+    const refresh = window.setInterval(() => load(false), 15000);
     return () => window.clearInterval(refresh);
   }, [range]);
-
-  useEffect(() => {
-    if (staffIdsKey) loadDailyReports(staff);
-  }, [staffIdsKey, earningsDate]);
 
   const addExpense = async () => {
     if (!form.category.trim() || form.amount <= 0) { toast('Enter a category and amount greater than zero.', 'error'); return; }
@@ -162,25 +141,27 @@ function Finance() {
   const revenueKES = data?.revenueByCurrency.KES || 0;
   const staffEarningsKES = data?.commissionsByCurrency.KES || 0;
   const profitKES = data?.estimatedProfitByCurrency.KES || 0;
+  const payrollDateFormatter = new Intl.DateTimeFormat(undefined, { timeZone: 'Africa/Nairobi' });
   const payrollDateRange = payrollPeriod
-    ? `${new Date(payrollPeriod.from).toLocaleDateString()} – ${new Date(payrollPeriod.to).toLocaleDateString()}`
-    : 'Sunday through yesterday';
-  const selectedEarningsLabel = earningsDate ? new Date(`${earningsDate}T12:00:00`).toLocaleDateString() : 'Sunday through today';
+    ? `${payrollDateFormatter.format(new Date(payrollPeriod.from))} – ${payrollDateFormatter.format(new Date(payrollPeriod.to))}`
+    : 'Sunday through today';
+  const selectedEarningsLabel = payrollDateRange;
   const totalUnpaidEarnings = (member: Staff) => Number(member.commissionEarnedWeek || 0) + Number(member.assistantEarnedWeek || 0);
   const payrollStaff = staff.filter(member => member.employmentStatus !== 'laid-off')
     .sort((first, second) => totalUnpaidEarnings(second) - totalUnpaidEarnings(first) || first.name.localeCompare(second.name));
   const paystackRecipients = payrollStaff.map(member => ({ member, amountKES: Math.round(totalUnpaidEarnings(member)) })).filter(item => item.amountKES > 0);
   const paystackDepositTotalKES = paystackRecipients.reduce((sum, recipient) => sum + recipient.amountKES, 0);
   const weeklyStaffEarnings = payrollStaff.map(member => {
-    const report = weeklyReports[member.id];
-    const lines = report?.services.flatMap(service => service.distribution.filter(line => line.staffId === member.id).map(line => ({ service, line }))) || [];
-    const reportCommission = lines.filter(({ line }) => line.role !== 'assistant').reduce((sum, item) => sum + item.line.amount, 0);
-    const reportAssistant = lines.filter(({ line }) => line.role === 'assistant').reduce((sum, item) => sum + item.line.amount, 0);
-    const commission = reportCommission;
-    const assistantEarnings = reportAssistant;
-    const revenue = lines.reduce((sum, item) => sum + item.service.serviceRevenue, 0);
-    const helperDeductions = lines.reduce((sum, item) => sum + item.service.assistantFee, 0);
-    return { member, count: lines.length, revenue, helperDeductions, commission, assistantEarnings };
+    const commission = Number(member.commissionEarnedWeek || 0);
+    const assistantEarnings = Number(member.assistantEarnedWeek || 0);
+    return {
+      member,
+      count: member.unpaidEarningCount || 0,
+      revenue: member.unpaidServiceRevenueKES || 0,
+      helperDeductions: member.unpaidAssistantFeesKES || 0,
+      commission,
+      assistantEarnings,
+    };
   }).sort((first, second) => second.commission + second.assistantEarnings - first.commission - first.assistantEarnings
     || first.member.name.localeCompare(second.member.name));
   const openBreakdown = async (member: Staff) => {
@@ -188,7 +169,7 @@ function Finance() {
     setBreakdown(null);
     setBreakdownError('');
     setBreakdownLoading(true);
-    try { setBreakdown(await AppointmentsApi.staffWeeklyWork(member.id, earningsDate || undefined)); }
+    try { setBreakdown(await AppointmentsApi.staffWeeklyWork(member.id)); }
     catch (cause: any) { setBreakdownError(cause?.message || 'Could not load this staff member’s appointment earnings.'); }
     finally { setBreakdownLoading(false); }
   };
@@ -204,13 +185,15 @@ function Finance() {
     helperDeductions: totals.helperDeductions + row.helperDeductions,
     commission: totals.commission + row.commission,
     assistantEarnings: totals.assistantEarnings + row.assistantEarnings,
-  }), { count: 0, revenue: 0, helperDeductions: 0, commission: 0, assistantEarnings: 0 });
+    totalEarnings: totals.totalEarnings + Math.round(row.commission + row.assistantEarnings),
+  }), { count: 0, revenue: 0, helperDeductions: 0, commission: 0, assistantEarnings: 0, totalEarnings: 0 });
   const downloadPayroll = () => {
     const startDate = payrollPeriod ? new Date(payrollPeriod.from) : new Date();
     const endDate = payrollPeriod ? new Date(payrollPeriod.to) : new Date();
-    const dateKey = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    const dateKey = (date: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Nairobi', year: 'numeric', month: '2-digit', day: '2-digit' }).format(date);
     const totalCommission = payrollStaff.reduce((sum, member) => sum + (member.commissionEarnedWeek || 0), 0);
     const totalAssistant = payrollStaff.reduce((sum, member) => sum + (member.assistantEarnedWeek || 0), 0);
+    const totalPayable = payrollStaff.reduce((sum, member) => sum + Math.round((member.commissionEarnedWeek || 0) + (member.assistantEarnedWeek || 0)), 0);
     const rows: (string | number)[][] = [
       ['BRAIDY SALON weekly payroll'],
       ['Earnings period', payrollDateRange],
@@ -220,10 +203,10 @@ function Finance() {
       ...payrollStaff.map(member => {
         const commission = member.commissionEarnedWeek || 0;
         const assistant = member.assistantEarnedWeek || 0;
-        return [member.id, member.name, member.role, member.phone || '', member.branchName || member.branch || '', commission, assistant, commission + assistant];
+        return [member.id, member.name, member.role, member.phone || '', member.branchName || member.branch || '', commission, assistant, Math.round(commission + assistant)];
       }),
       [],
-      ['TOTAL', '', '', '', '', totalCommission, totalAssistant, totalCommission + totalAssistant],
+      ['TOTAL', '', '', '', '', totalCommission, totalAssistant, totalPayable],
     ];
     downloadCSV(`braidy-salon-payroll-${dateKey(startDate)}-to-${dateKey(endDate)}.csv`, rows);
   };
@@ -270,9 +253,8 @@ function Finance() {
             </div>
           </Card>
           <Card className="p-6">
-            <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="font-semibold mb-1">Staff Earnings</h2><p className="text-xs text-[#6E6E73]">Completed appointment commissions and assistant earnings for {selectedEarningsLabel}.</p></div><Field label="Earnings date (optional)" htmlFor="staff-earnings-date"><Input id="staff-earnings-date" type="date" value={earningsDate} onChange={event => setEarningsDate(event.target.value)} /></Field></div>
-            {dailyReportsError && <p role="alert" className="mb-3 text-sm text-amber-700">{dailyReportsError}</p>}
-            {payrollLoading || dailyReportsLoading ? <p className="text-sm text-[#6E6E73]">Loading appointment-linked earnings…</p> : weeklyStaffEarnings.length === 0 ? <p className="text-sm text-[#6E6E73]">No staff records are available.</p> : (
+            <div className="mb-3"><h2 className="font-semibold mb-1">Unpaid Staff Earnings</h2><p className="text-xs text-[#6E6E73]">Unpaid KES commissions and assistant compensation for {selectedEarningsLabel}. Already-paid earnings are excluded.</p></div>
+            {payrollLoading ? <p className="text-sm text-[#6E6E73]">Loading unpaid earnings…</p> : weeklyStaffEarnings.length === 0 ? <p className="text-sm text-[#6E6E73]">No staff records are available.</p> : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <caption className="sr-only">Commission and assistant earnings by staff for {selectedEarningsLabel}</caption>
@@ -284,7 +266,7 @@ function Finance() {
                       </tr>
                     ))}
                   </tbody>
-                  <tfoot><tr className="border-t-2 border-black/10 font-semibold"><td className="py-3 pr-3">TOTAL</td><td className="py-3 pr-3">{dailyTotals.count}</td><td className="py-3 pr-3">{fmtMoney(dailyTotals.revenue, 'KES')}</td><td className="py-3 pr-3">{fmtMoney(dailyTotals.helperDeductions, 'KES')}</td><td className="py-3 pr-3">{fmtMoney(dailyTotals.commission, 'KES')}</td><td className="py-3 pr-3">{fmtMoney(dailyTotals.assistantEarnings, 'KES')}</td><td className="py-3 pr-3">{fmtMoney(dailyTotals.commission + dailyTotals.assistantEarnings, 'KES')}</td><td /></tr></tfoot>
+                  <tfoot><tr className="border-t-2 border-black/10 font-semibold"><td className="py-3 pr-3">TOTAL</td><td className="py-3 pr-3">{dailyTotals.count}</td><td className="py-3 pr-3">{fmtMoney(dailyTotals.revenue, 'KES')}</td><td className="py-3 pr-3">{fmtMoney(dailyTotals.helperDeductions, 'KES')}</td><td className="py-3 pr-3">{fmtMoney(dailyTotals.commission, 'KES')}</td><td className="py-3 pr-3">{fmtMoney(dailyTotals.assistantEarnings, 'KES')}</td><td className="py-3 pr-3">{fmtMoney(dailyTotals.totalEarnings, 'KES')}</td><td /></tr></tfoot>
                 </table>
               </div>
             )}
@@ -293,16 +275,16 @@ function Finance() {
       )}
 
       <Card className="p-6">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4"><div><h2 className="font-semibold">Unpaid payroll</h2><p className="text-xs text-[#6E6E73]">Sunday through yesterday: {payrollDateRange}. Today’s sales are excluded.</p></div><div className="flex flex-wrap gap-2"><Button variant="secondary" onClick={downloadPayroll} disabled={payrollLoading || !payrollStaff.length}><Download size={16} aria-hidden="true" />Download payroll CSV</Button><Button variant="secondary" onClick={() => { loadPayroll(); loadDailyReports(); }} disabled={payrollLoading || dailyReportsLoading}>{payrollLoading || dailyReportsLoading ? 'Refreshing…' : 'Refresh payroll'}</Button><Button variant="secondary" onClick={sendPayroll} disabled={payrollSending || payrollLoading}>{payrollSending ? 'Sending…' : 'Send M-Pesa batch'}</Button>{paystackConfigured && canSendPaystack && <><Button variant="secondary" onClick={syncPaystackRecipients} disabled={recipientsSyncing || payrollSending || payrollLoading}><Users size={16} aria-hidden="true" />{recipientsSyncing ? 'Syncing…' : 'Sync recipients'}</Button><Button onClick={sendPaystackPayroll} disabled={payrollSending || payrollLoading || recipientsSyncing}>{payrollSending ? 'Submitting…' : 'Send with Paystack'}</Button></>}</div></div>
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4"><div><h2 className="font-semibold">Unpaid payroll</h2><p className="text-xs text-[#6E6E73]">Sunday through today: {payrollDateRange}. Today’s completed sales are included.</p></div><div className="flex flex-wrap gap-2"><Button variant="secondary" onClick={downloadPayroll} disabled={payrollLoading || !payrollStaff.length}><Download size={16} aria-hidden="true" />Download payroll CSV</Button><Button variant="secondary" onClick={loadPayroll} disabled={payrollLoading}>{payrollLoading ? 'Refreshing…' : 'Refresh payroll'}</Button><Button variant="secondary" onClick={sendPayroll} disabled={payrollSending || payrollLoading}>{payrollSending ? 'Sending…' : 'Send M-Pesa batch'}</Button>{paystackConfigured && canSendPaystack && <><Button variant="secondary" onClick={syncPaystackRecipients} disabled={recipientsSyncing || payrollSending || payrollLoading}><Users size={16} aria-hidden="true" />{recipientsSyncing ? 'Syncing…' : 'Sync recipients'}</Button><Button onClick={sendPaystackPayroll} disabled={payrollSending || payrollLoading || recipientsSyncing}>{payrollSending ? 'Submitting…' : 'Send with Paystack'}</Button></>}</div></div>
         {paystackConfigured ? <p className="mb-3 text-xs text-[#6E6E73]">Live Paystack KES transfers are configured. Payments go to each staff member’s registered phone shown below; missing Paystack recipients are created automatically.</p> : <p className="mb-3 text-xs text-[#6E6E73]">Paystack payroll requires a live secret key in the backend environment.</p>}
         {!payrollLoading && !payrollError && <div className="my-4 flex flex-col gap-1 border-y border-black/10 py-3 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-sm font-semibold">Paystack deposit needed</p><p className="text-xs text-[#6E6E73]">Unpaid KES payroll for {paystackRecipients.length} staff member{paystackRecipients.length === 1 ? '' : 's'}, rounded per person.</p></div><p className="text-lg font-semibold">{fmtMoney(paystackDepositTotalKES, 'KES')}</p></div>}
         {payrollLoading ? <p className="text-sm text-[#6E6E73]">Loading staff payroll…</p> : payrollError ? <p role="alert" className="text-sm text-amber-700">{payrollError} Use “Refresh payroll” to try again.</p> : payrollStaff.length === 0 ? <p className="text-sm text-[#6E6E73]">No active staff records were returned for payroll.</p> : <div className="space-y-2">{payrollStaff.map(member => { const commission = member.commissionEarnedWeek || 0; const assistant = member.assistantEarnedWeek || 0; const calculated = Math.round(commission + assistant); return <div key={member.id} className="flex items-center justify-between gap-3 border-b border-black/5 pb-2"><div><p className="text-sm font-medium">{member.name}</p><p className="text-xs text-[#6E6E73]">{member.phone || 'No phone number'} · {member.branchName || member.branch}</p><p className="text-xs text-[#6E6E73]">Commission {fmtMoney(commission, 'KES')} + assistant compensation {fmtMoney(assistant, 'KES')}</p></div><p className="font-semibold text-sm">{fmtMoney(calculated, 'KES')}</p></div>; })}</div>}
       </Card>
 
-      {breakdownStaff && <Modal title={`${breakdownStaff.name} appointment earnings`} onClose={closeBreakdown} footer={<Button variant="secondary" onClick={closeBreakdown}>Close</Button>}>
+      {breakdownStaff && <Modal title={`${breakdownStaff.name} unpaid earnings`} onClose={closeBreakdown} footer={<Button variant="secondary" onClick={closeBreakdown}>Close</Button>}>
         <div className="space-y-4">
-          <p className="text-sm text-[#6E6E73]">Completed appointments linked to this staff member for {selectedEarningsLabel}. Amounts come from recorded service commissions and assistant compensation.</p>
-          {breakdownLoading ? <LoadingState label="Loading appointment earnings…" /> : breakdownError ? <p role="alert" className="text-sm text-amber-700">{breakdownError}</p> : !breakdownLines.length ? <p className="text-sm text-[#6E6E73]">No completed appointment earnings were found.</p> : <>
+          <p className="text-sm text-[#6E6E73]">Unpaid KES earnings from completed appointments for {selectedEarningsLabel}. Already-paid earnings are excluded.</p>
+          {breakdownLoading ? <LoadingState label="Loading unpaid earnings…" /> : breakdownError ? <p role="alert" className="text-sm text-amber-700">{breakdownError}</p> : !breakdownLines.length ? <p className="text-sm text-[#6E6E73]">No unpaid earnings were found in this period.</p> : <>
             <div className="grid grid-cols-3 gap-3"><div className="rounded-xl bg-black/[0.03] p-3"><p className="text-xs text-[#6E6E73]">Appointments</p><p className="text-lg font-semibold">{breakdownLines.length}</p></div><div className="rounded-xl bg-black/[0.03] p-3"><p className="text-xs text-[#6E6E73]">Commission</p><p className="text-lg font-semibold">{fmtMoney(breakdownCommission, 'KES')}</p></div><div className="rounded-xl bg-black/[0.03] p-3"><p className="text-xs text-[#6E6E73]">Assistant</p><p className="text-lg font-semibold">{fmtMoney(breakdownAssistant, 'KES')}</p></div></div>
             <div className="max-h-[55vh] overflow-y-auto divide-y divide-black/5">{breakdownLines.map(({ service, line }, index) => <div key={`${service.orderId}-${line.itemKey}-${index}`} className="py-3"><div className="flex items-start justify-between gap-3"><div><p className="text-sm font-medium">{service.serviceName} · {service.customerName}</p><p className="text-xs text-[#6E6E73]">{service.appointmentDate || 'No appointment date'}{service.appointmentTime ? ` at ${service.appointmentTime}` : ''} · {line.role.replace('-', ' ')} · {service.appointmentStatus || 'completed'}</p></div><p className="shrink-0 text-sm font-semibold">{fmtMoney(line.amount, 'KES')}</p></div><p className="mt-1 text-xs text-[#6E6E73]">Revenue {fmtMoney(service.serviceRevenue, 'KES')} · commission base {fmtMoney(service.commissionBase, 'KES')} · order {service.orderId.slice(0, 8)}</p></div>)}</div>
           </>}

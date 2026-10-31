@@ -18,6 +18,9 @@ export interface Staff {
   paystackRecipientCode?: string;
   commissionEarnedWeek?: number;
   assistantEarnedWeek?: number;
+  unpaidEarningCount?: number;
+  unpaidServiceRevenueKES?: number;
+  unpaidAssistantFeesKES?: number;
 }
 
 export interface Branch {

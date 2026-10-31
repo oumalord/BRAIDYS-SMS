@@ -71,7 +71,8 @@ for (const [definition, [routeHandler]] of Object.entries(handler.routes)) {
 export { app };
 
 if (process.env.VERCEL !== '1') {
-  ensurePlatformAdmin().then(() => {
+  const initialization = process.env.SKIP_PLATFORM_ADMIN_INIT === '1' ? Promise.resolve() : ensurePlatformAdmin();
+  initialization.then(() => {
     app.listen(port, () => console.log(`BRAIDY SALON API listening on http://localhost:${port}`));
   }).catch(cause => {
     console.error('Could not initialize platform admin account', cause);
