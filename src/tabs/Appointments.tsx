@@ -239,7 +239,8 @@ function Appointments({ role }: { role: Role }) {
     if (completionLines.some(line => !line.staffId || (line.helperStaffId && line.assistantPayment <= 0) || line.primaryCommission < 0 || line.coStaffCommission < 0 || line.primaryCommission + line.coStaffCommission > line.commissionBase)) { toast('Assign staff, enter each assistant fee, and keep combined commissions within the service balance.', 'error'); return; }
     setSaving(true);
     try {
-      await OrdersApi.updateCompletion(completionEdit.orderId, { items: completionLines });
+      const { data } = await OrdersApi.updateCompletion(completionEdit.orderId, { items: completionLines });
+      setCompletionSummary({ appointment: completionEdit.appointment, order: data.item });
       toast('Completed work and commission totals updated.', 'success');
       setCompletionEdit(null);
       reload();
