@@ -82,6 +82,7 @@ function App() {
   const [branches, setBranches] = useState<Branch[]>([]);
   const [selectedBranchId, setSelectedBranchId] = useState(() => window.localStorage.getItem('safigroom_selected_branch') || '');
   const effectiveRole = normalizeRole(account?.role);
+  const canChooseBranch = ['owner', 'manager', 'admin'].includes(effectiveRole);
   const requiresDailyCheckIn = ['barber', 'receptionist'].includes(effectiveRole) && !['owner', 'admin'].includes(effectiveRole);
   const attendanceLocked = requiresDailyCheckIn && (attendanceVerifiedAccountId !== account?.id || checkedInToday !== true);
   const mustChangePin = Boolean(account?.requiresPinChange && ['barber', 'receptionist'].includes(effectiveRole));
@@ -132,7 +133,7 @@ function App() {
   };
 
   useEffect(() => {
-    if (!['owner', 'admin'].includes(effectiveRole)) return;
+    if (!canChooseBranch) return;
     let alive = true;
     BranchesApi.list().then(loaded => {
       if (!alive) return;
@@ -143,7 +144,7 @@ function App() {
       if (next) window.localStorage.setItem('safigroom_selected_branch', next);
     }).catch(() => {});
     return () => { alive = false; };
-  }, [account, effectiveRole]);
+  }, [account, canChooseBranch]);
 
   const selectBranch = (branchId: string) => {
     setSelectedBranchId(branchId);
@@ -219,7 +220,7 @@ function App() {
             <div className={`hidden items-center gap-3 sm:flex ${isOwner ? 'md:hidden' : ''}`}>
               <span className="truncate text-[10px] text-gray-300 sm:text-xs">{account?.salonName || 'All Salons'} · {account?.name}</span><button className="text-[10px] text-gray-300 underline sm:text-xs" onClick={() => { AuthApi.logout(); setAccount(null); }}>Log out</button>
             </div>
-            {isOwner && branches.length > 0 && <div className="shrink-0"><SelectBranch branches={branches} value={selectedBranchId} onChange={selectBranch} /></div>}
+            {canChooseBranch && branches.length > 0 && <div className="shrink-0"><SelectBranch branches={branches} value={selectedBranchId} onChange={selectBranch} /></div>}
             <div className="shrink-0"><InstallAppButton compact /></div>
             <button className="rounded-lg p-2 text-white hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-[#4C82FF] sm:hidden" aria-label={menuOpen ? 'Close menu' : 'Open menu'} onClick={() => setMenuOpen(m => !m)}>
               {menuOpen ? <X size={20} /> : <Menu size={20} />}
