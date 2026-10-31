@@ -15,6 +15,7 @@ const sql = neon(connectionString);
 let initialized: Promise<void> | undefined;
 const requestContext = new AsyncLocalStorage<RequestContext | null>();
 const globalCollections = new Set(['salons', 'branches', 'accounts', 'sessions']);
+const salonWideCollections = new Set(['services']);
 
 export function withRequestContext<T>(context: RequestContext | null, callback: () => Promise<T>) {
   return requestContext.run(context, callback);
@@ -49,7 +50,8 @@ export const db = {
       const id = String(record.id || randomUUID());
       const context = currentContext();
       const tenantId = record.tenantId || (globalCollections.has(collection) ? null : context?.tenantId || null);
-      const stampedRecord = globalCollections.has(collection) ? { ...record, id } : { ...record, id, tenantId, salonName: record.salonName || context?.salonName || '', branchId: record.branchId || context?.branchId || null };
+      const branchId = salonWideCollections.has(collection) ? null : record.branchId || context?.branchId || null;
+      const stampedRecord = globalCollections.has(collection) ? { ...record, id } : { ...record, id, tenantId, salonName: record.salonName || context?.salonName || '', branchId };
       ids.push(id);
       await sql`INSERT INTO app_records (id, collection, tenant_id, record) VALUES (${id}, ${collection}, ${tenantId}, ${JSON.stringify(stampedRecord)}::jsonb)`;
     }
@@ -60,7 +62,7 @@ export const db = {
     const limit = Math.min(Math.max(Number(options?.limit || 100), 1), 5000);
     const context = currentContext();
     const tenantId = context?.tenantId || null;
-    const branchId = context?.branchId;
+    const branchId = salonWideCollections.has(collection) ? undefined : context?.branchId;
     const rows = globalCollections.has(collection)
       ? await sql`SELECT id, record FROM app_records WHERE collection = ${collection} ORDER BY created_at ASC LIMIT ${limit}` as StoredRecord[]
       : context?.role === 'admin'
@@ -75,7 +77,7 @@ export const db = {
   async listAllTenant(collection: string, tenantId: string, options?: { limit?: number; branchScope?: boolean }): Promise<{ items: any[] }> {
     await init();
     const limit = Math.min(Math.max(Number(options?.limit || 100), 1), 5000);
-    const branchId = options?.branchScope === false ? undefined : currentContext()?.branchId;
+    const branchId = options?.branchScope === false || salonWideCollections.has(collection) ? undefined : currentContext()?.branchId;
     const rows = branchId
       ? await sql`SELECT id, record FROM app_records WHERE collection = ${collection} AND tenant_id = ${tenantId} AND (record->>'branchId' = ${branchId} OR record->>'branchId' IS NULL OR record->>'branchId' = '') ORDER BY created_at ASC LIMIT ${limit}` as StoredRecord[]
       : await sql`SELECT id, record FROM app_records WHERE collection = ${collection} AND tenant_id = ${tenantId} ORDER BY created_at ASC LIMIT ${limit}` as StoredRecord[];
@@ -86,7 +88,7 @@ export const db = {
     if (!ids.length) return [];
     const context = currentContext();
     const tenantId = context?.tenantId || null;
-    const branchId = context?.branchId;
+    const branchId = salonWideCollections.has(collection) ? undefined : context?.branchId;
     const rows = globalCollections.has(collection)
       ? await sql`SELECT id, record FROM app_records WHERE collection = ${collection} AND id = ANY(${ids})` as StoredRecord[]
       : context?.role === 'admin'
@@ -103,7 +105,7 @@ export const db = {
     await init();
     const context = currentContext();
     const tenantId = context?.tenantId || null;
-    const branchId = context?.branchId;
+    const branchId = salonWideCollections.has(collection) ? undefined : context?.branchId;
     for (const update of updates) {
       if (globalCollections.has(collection)) await sql`UPDATE app_records SET record = ${JSON.stringify({ ...update.record, id: update.id })}::jsonb WHERE collection = ${collection} AND id = ${update.id}`;
       else if (context?.role === 'admin') {
