@@ -2697,7 +2697,7 @@ export const handler = router({
   }],
   'POST /api/complaints': [async ({ body }) => {
     const context = currentContext();
-    if (!['owner', 'admin', 'manager', 'barber'].includes(context?.role || '')) return error('Only staff can submit a complaint', 403);
+    if (!['owner', 'admin', 'manager', 'receptionist', 'barber'].includes(context?.role || '')) return error('Only staff can submit a complaint', 403);
     const targetType = String(body?.targetType || '');
     const targetName = String(body?.targetName || '').trim();
     const category = String(body?.category || '').trim();

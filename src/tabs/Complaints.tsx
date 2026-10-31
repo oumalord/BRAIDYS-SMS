@@ -23,7 +23,7 @@ function Complaints({ role }: { role: Role }) {
   const [search, setSearch] = useState('');
   const [responses, setResponses] = useState<Record<string, string>>({});
   const [statuses, setStatuses] = useState<Record<string, ComplaintStatus>>({});
-  const canSubmit = ['owner', 'admin', 'manager', 'barber'].includes(role);
+  const canSubmit = ['owner', 'admin', 'manager', 'receptionist', 'barber'].includes(role);
   const canRespond = role === 'owner' || role === 'admin';
 
   const load = () => ComplaintsApi.list()
