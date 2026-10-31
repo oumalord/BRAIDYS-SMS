@@ -106,7 +106,7 @@ function Finance() {
   };
 
   const sendPaystackPayroll = async () => {
-    const recipients = payrollStaff.map(member => ({ member, amountKES: Math.round((member.commissionEarnedWeek || 0) + (member.assistantEarnedWeek || 0)) })).filter(item => item.amountKES > 0);
+    const recipients = paystackRecipients;
     if (!recipients.length) { toast('No unpaid KES earnings are available to transfer.', 'error'); return; }
     const totalKES = recipients.reduce((sum, item) => sum + item.amountKES, 0);
     if (!window.confirm(`Submit ${fmtMoney(totalKES, 'KES')} for ${recipients.length} staff member${recipients.length === 1 ? '' : 's'} to Paystack? Earnings will be marked paid only after Paystack confirms each transfer.`)) return;
@@ -169,6 +169,8 @@ function Finance() {
   const totalUnpaidEarnings = (member: Staff) => Number(member.commissionEarnedWeek || 0) + Number(member.assistantEarnedWeek || 0);
   const payrollStaff = staff.filter(member => member.employmentStatus !== 'laid-off')
     .sort((first, second) => totalUnpaidEarnings(second) - totalUnpaidEarnings(first) || first.name.localeCompare(second.name));
+  const paystackRecipients = payrollStaff.map(member => ({ member, amountKES: Math.round(totalUnpaidEarnings(member)) })).filter(item => item.amountKES > 0);
+  const paystackDepositTotalKES = paystackRecipients.reduce((sum, recipient) => sum + recipient.amountKES, 0);
   const weeklyStaffEarnings = payrollStaff.map(member => {
     const report = weeklyReports[member.id];
     const lines = report?.services.flatMap(service => service.distribution.filter(line => line.staffId === member.id).map(line => ({ service, line }))) || [];
@@ -293,6 +295,7 @@ function Finance() {
       <Card className="p-6">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4"><div><h2 className="font-semibold">Unpaid payroll</h2><p className="text-xs text-[#6E6E73]">Sunday through yesterday: {payrollDateRange}. Today’s sales are excluded.</p></div><div className="flex flex-wrap gap-2"><Button variant="secondary" onClick={downloadPayroll} disabled={payrollLoading || !payrollStaff.length}><Download size={16} aria-hidden="true" />Download payroll CSV</Button><Button variant="secondary" onClick={() => { loadPayroll(); loadDailyReports(); }} disabled={payrollLoading || dailyReportsLoading}>{payrollLoading || dailyReportsLoading ? 'Refreshing…' : 'Refresh payroll'}</Button><Button variant="secondary" onClick={sendPayroll} disabled={payrollSending || payrollLoading}>{payrollSending ? 'Sending…' : 'Send M-Pesa batch'}</Button>{paystackConfigured && canSendPaystack && <><Button variant="secondary" onClick={syncPaystackRecipients} disabled={recipientsSyncing || payrollSending || payrollLoading}><Users size={16} aria-hidden="true" />{recipientsSyncing ? 'Syncing…' : 'Sync recipients'}</Button><Button onClick={sendPaystackPayroll} disabled={payrollSending || payrollLoading || recipientsSyncing}>{payrollSending ? 'Submitting…' : 'Send with Paystack'}</Button></>}</div></div>
         {paystackConfigured ? <p className="mb-3 text-xs text-[#6E6E73]">Live Paystack KES transfers are configured. Payments go to each staff member’s registered phone shown below; missing Paystack recipients are created automatically.</p> : <p className="mb-3 text-xs text-[#6E6E73]">Paystack payroll requires a live secret key in the backend environment.</p>}
+        {!payrollLoading && !payrollError && <div className="my-4 flex flex-col gap-1 border-y border-black/10 py-3 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-sm font-semibold">Paystack deposit needed</p><p className="text-xs text-[#6E6E73]">Unpaid KES payroll for {paystackRecipients.length} staff member{paystackRecipients.length === 1 ? '' : 's'}, rounded per person.</p></div><p className="text-lg font-semibold">{fmtMoney(paystackDepositTotalKES, 'KES')}</p></div>}
         {payrollLoading ? <p className="text-sm text-[#6E6E73]">Loading staff payroll…</p> : payrollError ? <p role="alert" className="text-sm text-amber-700">{payrollError} Use “Refresh payroll” to try again.</p> : payrollStaff.length === 0 ? <p className="text-sm text-[#6E6E73]">No active staff records were returned for payroll.</p> : <div className="space-y-2">{payrollStaff.map(member => { const commission = member.commissionEarnedWeek || 0; const assistant = member.assistantEarnedWeek || 0; const calculated = Math.round(commission + assistant); return <div key={member.id} className="flex items-center justify-between gap-3 border-b border-black/5 pb-2"><div><p className="text-sm font-medium">{member.name}</p><p className="text-xs text-[#6E6E73]">{member.phone || 'No phone number'} · {member.branchName || member.branch}</p><p className="text-xs text-[#6E6E73]">Commission {fmtMoney(commission, 'KES')} + assistant compensation {fmtMoney(assistant, 'KES')}</p></div><p className="font-semibold text-sm">{fmtMoney(calculated, 'KES')}</p></div>; })}</div>}
       </Card>
 
