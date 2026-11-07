@@ -279,8 +279,26 @@ function Appointments({ role }: { role: Role }) {
   };
 
   const orderByBookingTime = ['owner', 'admin', 'receptionist'].includes(role);
+  const compareCardNumber = (first: Appointment, second: Appointment) => {
+    const firstCardValue = String(first.cardNumber ?? '').trim();
+    const secondCardValue = String(second.cardNumber ?? '').trim();
+    const firstCard = Number(firstCardValue);
+    const secondCard = Number(secondCardValue);
+    const firstHasCard = /^\d+$/.test(firstCardValue) && Number.isFinite(firstCard);
+    const secondHasCard = /^\d+$/.test(secondCardValue) && Number.isFinite(secondCard);
+    if (firstHasCard !== secondHasCard) return firstHasCard ? -1 : 1;
+    if (firstHasCard && secondHasCard && firstCard !== secondCard) return firstCard - secondCard;
+    return first.time.localeCompare(second.time) || Number(first.createdAt || 0) - Number(second.createdAt || 0);
+  };
   const sorted = [...appts].sort((a, b) => {
-    if (!date) return `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`);
+    if (!date) {
+      const dateDifference = b.date.localeCompare(a.date);
+      if (dateDifference) return dateDifference;
+    }
+    const completedDifference = Number(b.status === 'completed') - Number(a.status === 'completed');
+    if (completedDifference) return completedDifference;
+    if (a.status === 'completed' && b.status === 'completed') return compareCardNumber(a, b);
+    if (!date) return b.time.localeCompare(a.time);
     const bookingDifference = Number(b.createdAt || 0) - Number(a.createdAt || 0);
     return orderByBookingTime && bookingDifference !== 0 ? bookingDifference : b.time.localeCompare(a.time);
   });
