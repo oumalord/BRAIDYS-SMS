@@ -215,6 +215,44 @@ async function createPaystackStaffRecipient(staffMember: any): Promise<string> {
   return recipient.recipient_code;
 }
 
+async function createPaystackStaffRecipients(staffMembers: any[]) {
+  const recipientCodesByPhone = new Map<string, string>();
+  const failures: { member: any; error: string }[] = [];
+  const validMembers = staffMembers.flatMap(member => {
+    const phone = normalizeCustomerPhone(member.phone);
+    if (!/^254[17]\d{8}$/.test(phone)) {
+      failures.push({ member, error: `Enter a valid Kenyan mobile number for ${member.name}.` });
+      return [];
+    }
+    return [{ member, phone }];
+  });
+  if (!validMembers.length) return { recipientCodesByPhone, failures };
+
+  const response = await fetch('https://api.paystack.co/transferrecipient/bulk', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ batch: validMembers.map(({ member, phone }) => ({
+      type: 'mobile_money', name: member.name, account_number: phone, bank_code: 'MPESA', currency: 'KES',
+      description: `BRAIDY SALON staff ${member.id}`, metadata: { staffId: member.id },
+    })) }),
+  });
+  const result: any = await response.json().catch(() => ({}));
+  const requestSucceeded = response.ok && Boolean(result?.status);
+  const providerFailures = Array.isArray(result?.data?.errors) ? result.data.errors : [];
+  const successRows = Array.isArray(result?.data?.success) ? result.data.success : [];
+  for (const recipient of requestSucceeded ? successRows : []) {
+    const phone = normalizeCustomerPhone(recipient?.details?.account_number);
+    const code = String(recipient?.recipient_code || '');
+    if (/^254[17]\d{8}$/.test(phone) && /^RCP_[A-Za-z0-9]+$/.test(code)) recipientCodesByPhone.set(phone, code);
+  }
+
+  const providerMessage = String(providerFailures[0]?.message || result?.message || 'Paystack could not register this M-PESA recipient.');
+  for (const { member, phone } of validMembers) {
+    if (!requestSucceeded || !recipientCodesByPhone.has(phone)) failures.push({ member, error: providerMessage });
+  }
+  return { recipientCodesByPhone, failures };
+}
+
 async function notifyCustomer(email: string | undefined, subject: string, message: string, referenceId: string) {
   if (!email) return;
   await db.add('notifications', [{ email, subject, message, referenceId, status: 'queued', createdAt: Date.now() }]);
@@ -2231,20 +2269,23 @@ export const handler = router({
       && isPaystackRecipientEligible(member, accountByStaffId.get(String(member.id))?.role));
     let createdCount = 0;
     let existingCount = 0;
+    let recipientResult: Awaited<ReturnType<typeof createPaystackStaffRecipients>>;
+    try { recipientResult = await createPaystackStaffRecipients(members); }
+    catch (cause) { return error(cause instanceof Error ? cause.message : 'Paystack recipient setup failed.', 502); }
+    const failureByStaffId = new Map<string, string>(recipientResult.failures.map(failure => [String(failure.member.id), failure.error]));
     const failures: { name: string; error: string }[] = [];
+    const updates: any[] = [];
     for (const member of members) {
-      if (member.paystackRecipientMode === 'live' && /^RCP_[A-Za-z0-9]+$/.test(String(member.paystackRecipientCode || ''))) {
-        existingCount += 1;
+      const paystackRecipientCode = recipientResult.recipientCodesByPhone.get(normalizeCustomerPhone(member.phone));
+      if (!paystackRecipientCode) {
+        failures.push({ name: String(member.name || 'Unknown staff member'), error: failureByStaffId.get(String(member.id)) || 'Paystack did not return a valid recipient code.' });
         continue;
       }
-      try {
-        const paystackRecipientCode = await createPaystackStaffRecipient(member);
-        await db.update('staff', [{ id: member.id, record: { ...member, paystackRecipientCode, paystackRecipientMode: 'live' } }]);
-        createdCount += 1;
-      } catch (cause) {
-        failures.push({ name: String(member.name || 'Unknown staff member'), error: cause instanceof Error ? cause.message : 'Recipient setup failed.' });
-      }
+      if (member.paystackRecipientMode === 'live' && member.paystackRecipientCode === paystackRecipientCode) existingCount += 1;
+      else createdCount += 1;
+      updates.push({ id: member.id, record: { ...member, paystackRecipientCode, paystackRecipientMode: 'live' } });
     }
+    if (updates.length) await db.update('staff', updates);
     return json({ eligibleCount: members.length, createdCount, existingCount, failedCount: failures.length, failures });
   }],
   'POST /api/payroll/paystack/send': [async ({ body }) => {
@@ -2266,17 +2307,6 @@ export const handler = router({
       && (!context.branchId || member.branchId === context.branchId) && requestedIds.includes(String(member.id)));
     if (!members.length) return error('No active staff records are available for this payroll batch.', 400);
     if (members.length !== requestedIds.length) return error('One or more selected staff members are not available in this salon or branch.', 400);
-    for (const member of members) {
-      try {
-        const paystackRecipientCode = await createPaystackStaffRecipient(member);
-        member.paystackRecipientCode = paystackRecipientCode;
-        member.paystackRecipientMode = 'live';
-        await db.update('staff', [{ id: member.id, record: member }]);
-      } catch (cause) {
-        return error(cause instanceof Error ? cause.message : `Could not create a Paystack recipient for ${member.name}.`, 502);
-      }
-    }
-    if (new Set(members.map(member => member.paystackRecipientCode)).size !== members.length) return error('Each staff member must have a unique Paystack recipient code.', 400);
 
     const staffById = new Map(members.map(member => [String(member.id), member]));
     const earningsByStaffId = new Map<string, any[]>();
@@ -2309,6 +2339,27 @@ export const handler = router({
       if (!amount) return error(`Could not calculate a valid payment amount for ${member.name}.`, 400);
       transfers.push({ member, lines, amountKES, amount, reference: `braidy-${randomBytes(18).toString('hex')}` });
     }
+    if (!transfers.length) return error('No active staff have non-zero unpaid KES earnings for this payroll period.', 409);
+    let recipientResult: Awaited<ReturnType<typeof createPaystackStaffRecipients>>;
+    try { recipientResult = await createPaystackStaffRecipients(transfers.map(transfer => transfer.member)); }
+    catch (cause) { return error(cause instanceof Error ? cause.message : 'Paystack recipient setup failed.', 502); }
+    const failureByStaffId = new Map<string, string>(recipientResult.failures.map(failure => [String(failure.member.id), failure.error]));
+    const staffUpdates: any[] = [];
+    const recipientFailures: { name: string; error: string }[] = [];
+    for (const transfer of transfers) {
+      const member = transfer.member;
+      const paystackRecipientCode = recipientResult.recipientCodesByPhone.get(normalizeCustomerPhone(member.phone));
+      if (!paystackRecipientCode) {
+        recipientFailures.push({ name: String(member.name || 'Unknown staff member'), error: failureByStaffId.get(String(member.id)) || 'Paystack did not return a valid recipient code.' });
+        continue;
+      }
+      member.paystackRecipientCode = paystackRecipientCode;
+      member.paystackRecipientMode = 'live';
+      staffUpdates.push({ id: member.id, record: member });
+    }
+    if (staffUpdates.length) await db.update('staff', staffUpdates);
+    if (recipientFailures.length) return error(`Could not prepare Paystack recipient for ${recipientFailures[0].name}: ${recipientFailures[0].error}`, 502);
+    if (new Set(transfers.map(transfer => transfer.member.paystackRecipientCode)).size !== transfers.length) return error('Each staff member must have a unique Paystack recipient code.', 400);
 
     const now = Date.now();
     const totalKES = transfers.reduce((sum, transfer) => sum + transfer.amountKES, 0);
