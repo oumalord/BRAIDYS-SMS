@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { calculateUnpaidStaffEarnings, currentSundayThroughNowRange, previousSaturdayThroughYesterdayRange, staffAppointmentMinutes } from '../backend/earnings.ts';
+import { calculateUnpaidStaffEarnings, currentSundayThroughNowRange, mostRecentSaturdayThroughFridayRange, previousSaturdayThroughYesterdayRange, staffAppointmentMinutes } from '../backend/earnings.ts';
 
 const now = new Date(2026, 8, 26, 12, 0, 0).getTime();
 const startOfSunday = new Date(2026, 8, 20, 0, 0, 0).getTime();
@@ -25,6 +25,19 @@ test('payroll date range is the previous Saturday through yesterday in Nairobi',
   assert.deepEqual(lines.map(line => line.amount), [100, 200]);
 });
 
+test('completed earnings period is Saturday through Friday in Nairobi', () => {
+  const range = mostRecentSaturdayThroughFridayRange(new Date('2026-11-07T12:00:00+03:00'));
+  assert.equal(new Date(range.from).toISOString(), '2026-10-30T21:00:00.000Z');
+  assert.equal(new Date(range.to).toISOString(), '2026-11-06T21:00:00.000Z');
+  const orders = [
+    orderAt(range.from, { staffId: 'stylist', commission: 100 }),
+    orderAt(range.to - 1, { staffId: 'stylist', commission: 200 }),
+    orderAt(range.to, { staffId: 'stylist', commission: 300 }),
+  ];
+  const lines = calculateUnpaidStaffEarnings(orders, [], [], range.from, range.to);
+  assert.deepEqual(lines.map(line => line.amount), [100, 200]);
+});
+
 test('current earnings range is Sunday through the current instant in Nairobi', () => {
   const now = new Date('2026-10-31T18:13:00+03:00');
   const range = currentSundayThroughNowRange(now);
@@ -32,7 +45,7 @@ test('current earnings range is Sunday through the current instant in Nairobi', 
   assert.equal(new Date(range.to).toISOString(), '2026-10-31T15:13:00.001Z');
 });
 
-test('weekly earnings count Sunday through Saturday and exclude Sunday after today', () => {
+test('earnings calculation includes the start and excludes the end of its requested range', () => {
   const orders = [
     orderAt(startOfSunday, { staffId: 'stylist', commission: 500 }),
     orderAt(startOfNextSunday - 1, { staffId: 'stylist', commission: 300 }),
@@ -75,6 +88,25 @@ test('shared earnings include every service role, payout exclusions and appointm
   });
   assert.equal(lines.filter(line => line.role === 'assistant')[0].amount, 200);
   assert.equal(lines.reduce((sum, line) => sum + line.amount, 0), 1350);
+});
+
+test('cancelled and deleted appointments exclude all linked order earnings', () => {
+  const orders = [
+    orderAt(now, { staffId: 'cancelled-staff', commission: 300 }, { id: 'cancelled-order', appointmentId: 'cancelled-appointment' }),
+    orderAt(now, { staffId: 'deleted-staff', commission: 400 }, { id: 'deleted-order', appointmentId: 'deleted-appointment' }),
+    orderAt(now, { staffId: 'no-show-staff', commission: 500 }, { id: 'no-show-order', appointmentId: 'no-show-appointment' }),
+    orderAt(now, { staffId: 'active-staff', commission: 600 }, { id: 'active-order', appointmentId: 'active-appointment' }),
+    orderAt(now, { staffId: 'walk-in-staff', commission: 700 }, { id: 'walk-in-order' }),
+  ];
+  const appointments = [
+    { id: 'cancelled-appointment', status: 'cancelled' },
+    { id: 'deleted-appointment', status: 'completed', deletedAt: now },
+    { id: 'no-show-appointment', status: 'no-show' },
+    { id: 'active-appointment', status: 'completed' },
+  ];
+  const lines = calculateUnpaidStaffEarnings(orders, [], appointments, startOfSunday, startOfNextSunday);
+  assert.deepEqual(lines.map(line => line.staffId), ['active-staff', 'walk-in-staff']);
+  assert.deepEqual(lines.map(line => line.amount), [600, 700]);
 });
 
 test('paid transactions reappear in unpaid calculations only after payout lines are soft-deleted', () => {

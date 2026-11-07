@@ -1,6 +1,6 @@
 import { router, json, error, db, ai, storage, currentContext, withRequestContext } from './runtime.ts';
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
-import { calculateUnpaidStaffEarnings, currentSundayThroughNowRange, staffAppointmentMinutes, staffCommission } from './earnings.ts';
+import { calculateUnpaidStaffEarnings, currentSundayThroughNowRange, mostRecentSaturdayThroughFridayRange, staffAppointmentMinutes, staffCommission } from './earnings.ts';
 import { toPaystackMinorAmount, verifyPaystackSignature } from './paystack.ts';
 
 const DAY = 24 * 3600 * 1000;
@@ -18,18 +18,6 @@ function saturdayFridayRange(date = new Date()) {
   const toDate = new Date(fromDate);
   toDate.setDate(fromDate.getDate() + 7);
   return { from: fromDate.getTime(), to: toDate.getTime() };
-}
-
-function currentSundayThroughYesterdayRange(date = new Date()) {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Africa/Nairobi', year: 'numeric', month: '2-digit', day: '2-digit',
-  }).formatToParts(date);
-  const part = (type: string) => Number(parts.find(value => value.type === type)?.value);
-  const today = new Date(Date.UTC(part('year'), part('month') - 1, part('day')));
-  const currentSunday = new Date(today);
-  currentSunday.setUTCDate(today.getUTCDate() - today.getUTCDay());
-  const nairobiMidnight = (day: Date) => Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate()) - 3 * 60 * 60 * 1000;
-  return { from: nairobiMidnight(currentSunday), to: nairobiMidnight(today) };
 }
 
 function contextIncludesPayrollRecord(record: any, context: { tenantId: string; role?: string }) {
@@ -261,6 +249,101 @@ async function audit(action: string, collection: string, record: any, actor = 's
     recordSnapshot: record,
     createdAt: Date.now(),
   }]);
+}
+
+async function voidOrdersForAppointments(appointments: any[], deletedAt: number, deletedBy: string, reason: string) {
+  const context = currentContext();
+  if (!context?.tenantId) throw new Error('Salon context is required to void appointment orders');
+  const appointmentIds = new Set(appointments.map(appointment => String(appointment.id)));
+  const { items: allOrders } = await db.listAllTenant('orders', context.tenantId, { limit: 5000, branchScope: false });
+  const ordersToVoid = (allOrders as any[]).filter(order => !order.deletedAt && appointmentIds.has(String(order.appointmentId || '')));
+  if (!ordersToVoid.length) return { orderIds: [], payoutReversalRequired: false };
+
+  const { items: payoutItems } = await db.list('payout_items', { limit: 10000 });
+  const orderIds = new Set(ordersToVoid.map(order => String(order.id)));
+  const paidOrderIds = new Set((payoutItems as any[])
+    .filter(item => !item.deletedAt && orderIds.has(String(item.orderId || '')))
+    .map(item => String(item.orderId)));
+  const productQuantities = new Map<string, number>();
+  for (const order of ordersToVoid) {
+    for (const item of order.items || []) {
+      if (item.type === 'product' && item.refId) productQuantities.set(String(item.refId), (productQuantities.get(String(item.refId)) || 0) + Number(item.qty || 0));
+      for (const used of item.consumedProducts || []) {
+        if (used.productId) productQuantities.set(String(used.productId), (productQuantities.get(String(used.productId)) || 0) + Number(used.qty || 0));
+      }
+    }
+  }
+  const productIds = Array.from(productQuantities.keys());
+  if (productIds.length) {
+    const products = await db.get('products', productIds);
+    const updates = products.flatMap((product, index) => product ? [{
+      id: productIds[index],
+      record: { ...product, stock: Number(product.stock || 0) + (productQuantities.get(productIds[index]) || 0) },
+    }] : []);
+    if (updates.length) await db.update('products', updates);
+    const movements = updates.map(update => ({
+      productId: update.id,
+      productName: update.record.name,
+      change: productQuantities.get(update.id) || 0,
+      reason,
+      createdAt: deletedAt,
+      actor: deletedBy,
+    })).filter(movement => movement.change !== 0);
+    if (movements.length) await db.add('stock_movements', movements);
+  }
+
+  await db.update('orders', ordersToVoid.map(order => ({
+    id: String(order.id),
+    record: {
+      ...order,
+      deletedAt,
+      deletedBy,
+      voidReason: reason,
+      payoutReversalRequired: paidOrderIds.has(String(order.id)),
+    },
+  })));
+
+  const customerIds = Array.from(new Set(ordersToVoid.map(order => String(order.customerId || '')).filter(Boolean)));
+  if (customerIds.length) {
+    const customers = await db.get('customers', customerIds);
+    const remainingOrders = (allOrders as any[]).filter(order => !order.deletedAt && !orderIds.has(String(order.id)));
+    const customerUpdates = customers.flatMap(customer => {
+      if (!customer) return [];
+      const customerOrders = remainingOrders.filter(order => String(order.customerId || '') === String(customer.id));
+      return [{
+        id: String(customer.id),
+        record: {
+          ...customer,
+          totalSpent: customerOrders.reduce((sum, order) => sum + Number(order.totalByCurrency?.KES || 0), 0),
+          totalSpentUSD: customerOrders.reduce((sum, order) => sum + Number(order.totalByCurrency?.USD || 0), 0),
+          visits: customerOrders.length,
+          loyaltyPoints: Math.max(0, customerOrders.reduce((sum, order) => sum + Math.floor(Number(order.totalByCurrency?.KES || 0) / 100) - Number(order.pointsRedeemed || 0), 0)),
+          lastVisit: customerOrders.reduce((latest, order) => Math.max(latest, Number(order.createdAt || 0)), 0) || null,
+        },
+      }];
+    });
+    if (customerUpdates.length) await db.update('customers', customerUpdates);
+  }
+
+  for (const order of ordersToVoid) {
+    await audit('voided order for inactive appointment', 'order', {
+      id: String(order.id), appointmentId: String(order.appointmentId), reason,
+      payoutReversalRequired: paidOrderIds.has(String(order.id)),
+    }, deletedBy);
+  }
+  return { orderIds: Array.from(orderIds), payoutReversalRequired: paidOrderIds.size > 0 };
+}
+
+async function deleteQueuesForAppointments(appointments: any[], deletedAt: number, deletedBy: string) {
+  const appointmentIds = new Set(appointments.map(appointment => String(appointment.id)));
+  const { items } = await db.list('queue', { limit: 5000 });
+  const queueEntries = (items as any[]).filter(item => !item.deletedAt && appointmentIds.has(String(item.appointmentId || '')));
+  if (queueEntries.length) {
+    await db.update('queue', queueEntries.map(item => ({
+      id: String(item.id), record: { ...item, deletedAt, deletedBy },
+    })));
+  }
+  return queueEntries.map(item => String(item.id));
 }
 
 function buildPriceListServices() {
@@ -699,17 +782,20 @@ export const handler = router({
   'GET /api/staff/me/earnings': [async () => {
     const context = currentContext();
     if (!context?.staffId || !['barber', 'receptionist'].includes(context.role)) return error('Only an employee can view this earnings summary', 403);
-    const { from: weekFrom, to: weekTo } = currentSundayThroughYesterdayRange();
+    const { from: weekFrom, to: weekTo } = mostRecentSaturdayThroughFridayRange();
     const now = Date.now();
+    const todayFrom = new Date(`${nairobiDateString()}T00:00:00+03:00`).getTime();
 
     const [{ items: orders }, { items: payoutItems }, { items: appointments }] = await Promise.all([
       db.list('orders', { limit: 5000 }),
       db.list('payout_items', { limit: 10000 }),
       db.list('appointments', { limit: 5000 }),
     ]);
-    const currentPeriodEarnings = calculateUnpaidStaffEarnings(orders as any[], payoutItems as any[], appointments as any[], weekFrom, now + 1)
-      .filter(line => line.currency === 'KES');
-    const ownCurrentPeriodEarnings = currentPeriodEarnings.filter(line => line.staffId === String(context.staffId));
+    const weekEarnings = calculateUnpaidStaffEarnings(orders as any[], payoutItems as any[], appointments as any[], weekFrom, weekTo)
+      .filter(line => line.currency === 'KES' && line.staffId === String(context.staffId));
+    const todayEarnings = calculateUnpaidStaffEarnings(orders as any[], payoutItems as any[], appointments as any[], todayFrom, now + 1)
+      .filter(line => line.currency === 'KES' && line.staffId === String(context.staffId));
+    const ownCurrentPeriodEarnings = [...weekEarnings, ...todayEarnings];
     const orderCreatedAtById = new Map((orders as any[]).map(order => [String(order.id), Number(order.createdAt || 0)]));
     const ordersById = new Map((orders as any[]).map(order => [String(order.id), order]));
     const appointmentsById = new Map((appointments as any[]).filter(appointment => !appointment.deletedAt).map(appointment => [String(appointment.id), appointment]));
@@ -734,22 +820,23 @@ export const handler = router({
         amount: line.amount,
       };
     });
-    for (const earning of ownCurrentPeriodEarnings) {
+    for (const earning of weekEarnings) {
       const amountField = earning.role === 'assistant' ? 'assistant' : 'commission';
       if (amountField === 'assistant') weekAssistant += earning.amount;
       else weekCommission += earning.amount;
-      if (earning.createdAt >= weekTo) {
-        if (amountField === 'assistant') todayAssistant += earning.amount;
-        else todayCommission += earning.amount;
-      }
+    }
+    for (const earning of todayEarnings) {
+      const amountField = earning.role === 'assistant' ? 'assistant' : 'commission';
+      if (amountField === 'assistant') todayAssistant += earning.amount;
+      else todayCommission += earning.amount;
     }
 
-    const weekly = { commission: weekCommission, assistant: weekAssistant, total: Math.round(weekCommission + weekAssistant) };
+    const weekly = { commission: weekCommission, assistant: weekAssistant, total: Math.round((weekCommission + weekAssistant) * 100) / 100 };
     return json({
       today: { commission: todayCommission, assistant: todayAssistant, total: todayCommission + todayAssistant },
       week: weekly,
       fortnight: weekly,
-      completedWork: completedWork.sort((left, right) => right.createdAt - left.createdAt).slice(0, 30),
+      completedWork: completedWork.sort((left, right) => right.createdAt - left.createdAt),
       paidHistory: paidHistory.sort((left, right) => right.createdAt - left.createdAt).slice(0, 100),
     });
   }],
@@ -1292,7 +1379,7 @@ export const handler = router({
     const selectedDate = String(query.date || '').trim();
     const selectedDay = selectedDate ? nairobiDayRange(selectedDate) : null;
     if (selectedDate && !selectedDay) return error('Choose a valid earnings date', 400);
-    const period = selectedDay || currentSundayThroughNowRange();
+    const period = selectedDay || mostRecentSaturdayThroughFridayRange();
     const [{ items: staffRows }, { items: orders }, { items: appointmentRows }, { items: payoutItems }] = await Promise.all([
       db.list('staff', { limit: 2000 }),
       db.list('orders', { limit: 5000 }),
@@ -1494,7 +1581,20 @@ export const handler = router({
       if (queueEntry) await db.update('queue', [{ id: queueEntry.id, record: { ...queueEntry, staffId: patch.staffId, staffName: patch.staffName } }]);
     }
     if (!ok) return error('Update failed', 500);
-    await audit(patch.staffId ? 'assigned' : `status:${patch.status || 'updated'}`, 'appointment', { ...existing, ...patch }, patch.actor || 'receptionist');
+    const updatedAppointment = { ...existing, ...patch };
+    if (['cancelled', 'no-show'].includes(String(resultingStatus))) {
+      const deletedAt = Date.now();
+      const deletedBy = context.name || patch.actor || 'owner';
+      const reason = resultingStatus === 'cancelled' ? 'Appointment was cancelled' : 'Appointment was marked no-show';
+      const voided = await voidOrdersForAppointments([updatedAppointment], deletedAt, deletedBy, reason);
+      const queueIds = await deleteQueuesForAppointments([updatedAppointment], deletedAt, deletedBy);
+      await audit(`cancelled appointment and voided linked orders`, 'appointment', {
+        id: existing.id, customerName: existing.customerName, status: resultingStatus,
+        orderIds: voided.orderIds, queueIds, payoutReversalRequired: voided.payoutReversalRequired,
+      }, deletedBy);
+    } else {
+      await audit(patch.staffId ? 'assigned' : `status:${patch.status || 'updated'}`, 'appointment', updatedAppointment, patch.actor || 'receptionist');
+    }
     return json({ ok: true });
   }],
   'GET /api/appointments/:id/completion': [async ({ params }) => {
@@ -1565,42 +1665,15 @@ export const handler = router({
     if (!appointment || appointment.deletedAt) return error('Appointment not found', 404);
     const deletedAt = Date.now();
     const deletedBy = currentContext()?.name || 'owner';
-    const { items: orders } = await db.list('orders', { limit: 5000 });
-    const order = (orders as any[]).find(item => String(item.appointmentId || '') === appointment.id && !item.deletedAt);
-    if (order) {
-      const { items: payoutItems } = await db.list('payout_items', { limit: 10000 });
-      const recordedPayout = (payoutItems as any[]).some(item => !item.deletedAt && item.orderId === order.id);
-      const productQuantities = new Map<string, number>();
-      for (const item of order.items || []) {
-        if (item.type === 'product' && item.refId) productQuantities.set(item.refId, (productQuantities.get(item.refId) || 0) + Number(item.qty || 0));
-        for (const used of item.consumedProducts || []) if (used.productId) productQuantities.set(used.productId, (productQuantities.get(used.productId) || 0) + Number(used.qty || 0));
-      }
-      const productIds = [...productQuantities.keys()];
-      if (productIds.length) {
-        const products = await db.get('products', productIds);
-        const productUpdates = products.flatMap((product, index) => product ? [{ id: productIds[index], record: { ...product, stock: Number(product.stock || 0) + (productQuantities.get(productIds[index]) || 0) } }] : []);
-        if (productUpdates.length) await db.update('products', productUpdates);
-        await db.add('stock_movements', productUpdates.map(update => ({ productId: update.id, productName: update.record.name, change: productQuantities.get(update.id) || 0, reason: `Deleted appointment: ${appointment.customerName}`, createdAt: deletedAt, actor: deletedBy })));
-      }
-      await db.update('orders', [{ id: order.id, record: { ...order, deletedAt, deletedBy, voidReason: 'Authorized staff deleted the linked appointment', payoutReversalRequired: recordedPayout } }]);
-      if (order.customerId) {
-        const [customer] = await db.get('customers', [order.customerId]);
-        if (customer) {
-          const remainingOrders = (orders as any[]).filter(item => !item.deletedAt && item.id !== order.id && item.customerId === customer.id);
-          const totalSpent = remainingOrders.reduce((sum, item) => sum + Number(item.totalByCurrency?.KES || 0), 0);
-          const totalSpentUSD = remainingOrders.reduce((sum, item) => sum + Number(item.totalByCurrency?.USD || 0), 0);
-          const loyaltyPoints = Math.max(0, remainingOrders.reduce((sum, item) => sum + Math.floor(Number(item.totalByCurrency?.KES || 0) / 100) - Number(item.pointsRedeemed || 0), 0));
-          const lastVisit = remainingOrders.reduce((latest, item) => Math.max(latest, Number(item.createdAt || 0)), 0) || null;
-          await db.update('customers', [{ id: customer.id, record: { ...customer, totalSpent, totalSpentUSD, visits: remainingOrders.length, loyaltyPoints, lastVisit } }]);
-        }
-      }
-    }
-    await db.update('appointments', [{ id: appointment.id, record: { ...appointment, deletedAt, deletedBy } }]);
-    const { items: queue } = await db.list('queue', { limit: 2000 });
-    const queueEntry = (queue as any[]).find(item => item.appointmentId === appointment.id && !item.deletedAt);
-    if (queueEntry) await db.update('queue', [{ id: queueEntry.id, record: { ...queueEntry, deletedAt, deletedBy } }]);
-    await audit('deleted appointment', 'appointment', { id: appointment.id, customerName: appointment.customerName, status: appointment.status, queueId: queueEntry?.id || null, orderVoided: Boolean(order), payoutReversalRequired: Boolean(order?.payoutReversalRequired) }, deletedBy);
-    return json({ ok: true, orderVoided: Boolean(order) });
+    const [updated] = await db.update('appointments', [{ id: appointment.id, record: { ...appointment, deletedAt, deletedBy } }]);
+    if (!updated) return error('Appointment deletion failed', 500);
+    const voided = await voidOrdersForAppointments([appointment], deletedAt, deletedBy, 'Appointment was deleted');
+    const queueIds = await deleteQueuesForAppointments([appointment], deletedAt, deletedBy);
+    await audit('deleted appointment', 'appointment', {
+      id: appointment.id, customerName: appointment.customerName, status: appointment.status,
+      orderIds: voided.orderIds, queueIds, payoutReversalRequired: voided.payoutReversalRequired,
+    }, deletedBy);
+    return json({ ok: true, voidedOrderCount: voided.orderIds.length });
   }],
   'DELETE /api/appointments/cancelled': [async () => {
     requireOwner();
@@ -1608,15 +1681,17 @@ export const handler = router({
     const cancelledAppointments = (appointments as any[]).filter(item => item.status === 'cancelled' && !item.deletedAt);
     const cancelledIds = cancelledAppointments.map(item => item.id);
     if (!cancelledIds.length) return json({ deleted: 0 });
-    const { items: queue } = await db.list('queue', { limit: 5000 });
-    const queueEntries = (queue as any[]).filter(item => cancelledIds.includes(item.appointmentId) && !item.deletedAt);
     const deletedAt = Date.now();
     const deletedBy = currentContext()?.name || 'owner';
-    await db.update('appointments', cancelledAppointments.map(item => ({ id: item.id, record: { ...item, deletedAt, deletedBy } })));
-    if (queueEntries.length) await db.update('queue', queueEntries.map(item => ({ id: item.id, record: { ...item, deletedAt, deletedBy } })));
-    const queueIds = queueEntries.map(item => item.id);
-    await audit('deleted cancelled appointments', 'appointments', { appointmentIds: cancelledIds, queueIds }, currentContext()?.name || 'owner');
-    return json({ deleted: cancelledIds.length });
+    const [updated] = await db.update('appointments', cancelledAppointments.map(item => ({ id: item.id, record: { ...item, deletedAt, deletedBy } })));
+    if (!updated) return error('Cancelled appointment cleanup failed', 500);
+    const voided = await voidOrdersForAppointments(cancelledAppointments, deletedAt, deletedBy, 'Cancelled appointment was deleted');
+    const queueIds = await deleteQueuesForAppointments(cancelledAppointments, deletedAt, deletedBy);
+    await audit('deleted cancelled appointments', 'appointments', {
+      appointmentIds: cancelledIds, orderIds: voided.orderIds, queueIds,
+      payoutReversalRequired: voided.payoutReversalRequired,
+    }, deletedBy);
+    return json({ deleted: cancelledIds.length, voidedOrderCount: voided.orderIds.length });
   }],
 
   'GET /api/queue': [async () => { const { items } = await db.list('queue', { limit: 200 }); return json({ items: (items as any[]).filter(item => !item.deletedAt) }); }],
@@ -2024,7 +2099,7 @@ export const handler = router({
     const context = currentContext();
     if (!context || !['owner', 'admin'].includes(context.role)) return error('Only the owner or administrator can view payroll staff', 403);
     const { items } = await db.list('staff', { limit: 2000 });
-    const period = currentSundayThroughNowRange();
+    const period = mostRecentSaturdayThroughFridayRange();
     const [{ items: orders }, { items: payoutItems }, { items: appointments }] = await Promise.all([
       db.list('orders', { limit: 5000 }),
       db.list('payout_items', { limit: 10000 }),
@@ -2210,7 +2285,7 @@ export const handler = router({
     const tenantAppointments = (appointments as any[]).filter(item => contextIncludesPayrollRecord(item, context));
     const scopedBranchOrders = branchScopedPayrollOrders(orders as any[], tenantAppointments, staffById, context);
     const branchPayoutItems = branchScopedPayrollPayoutItems(payoutItems as any[], context);
-    const { from, to } = currentSundayThroughNowRange();
+    const { from, to } = mostRecentSaturdayThroughFridayRange();
     const earnings = calculateUnpaidStaffEarnings(scopedBranchOrders, branchPayoutItems, tenantAppointments, from, to)
       .filter(line => staffById.has(line.staffId) && line.currency === 'KES');
     for (const earning of earnings) {
@@ -2257,10 +2332,14 @@ export const handler = router({
       });
       const resultBody: any = await response.json().catch(() => ({}));
       if (!response.ok || !resultBody.status) {
-        const message = resultBody.message || `Paystack rejected the batch (${response.status}).`;
+        const providerMessage = String(resultBody.message || `Paystack rejected the batch (${response.status}).`);
+        const thirdPartyPayoutsDisabled = /cannot initiate third[ -]party payouts/i.test(providerMessage);
+        const message = thirdPartyPayoutsDisabled
+          ? 'Paystack has not enabled third-party payouts for this account. No payroll was sent. Contact Paystack to enable transfers, then retry.'
+          : providerMessage;
         await db.update('payroll_items', itemIds.map((id: string, index: number) => ({ id, record: { ...payrollRecords[index], id, status: 'failed', error: message } })));
         await db.update('payroll_batches', [{ id: batchId, record: { id: batchId, tenantId: context.tenantId, provider: 'paystack', status: 'failed', totalKES, employeeCount: transfers.length, failedCount: transfers.length, createdAt: now, error: message } }]);
-        return error(message, 502);
+        return error(message, thirdPartyPayoutsDisabled ? 503 : 502);
       }
       const acceptedRows = Array.isArray(resultBody.data) ? resultBody.data : Array.isArray(resultBody.data?.success) ? resultBody.data.success : [];
       const failedReferences = new Set((Array.isArray(resultBody.data?.errors) ? resultBody.data.errors : []).map((item: any) => String(item.reference || '')));

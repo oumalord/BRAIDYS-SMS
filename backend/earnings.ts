@@ -71,6 +71,19 @@ export function previousSaturdayThroughYesterdayRange(date = new Date()) {
   return { from: nairobiMidnight(previousSaturday), to: nairobiMidnight(today) };
 }
 
+export function mostRecentSaturdayThroughFridayRange(date = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Africa/Nairobi', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(date);
+  const part = (type: string) => Number(parts.find(value => value.type === type)?.value);
+  const today = new Date(Date.UTC(part('year'), part('month') - 1, part('day')));
+  const latestSaturday = new Date(today);
+  const daysSinceSaturday = (today.getUTCDay() + 1) % 7;
+  latestSaturday.setUTCDate(today.getUTCDate() - daysSinceSaturday);
+  const to = Date.UTC(latestSaturday.getUTCFullYear(), latestSaturday.getUTCMonth(), latestSaturday.getUTCDate()) - 3 * 60 * 60 * 1000;
+  return { from: to - 7 * 24 * 60 * 60 * 1000, to };
+}
+
 export function calculateUnpaidStaffEarnings(
   orders: any[],
   payoutItems: any[],
@@ -79,7 +92,7 @@ export function calculateUnpaidStaffEarnings(
   to: number,
 ): StaffEarningLine[] {
   const paidKeys = new Set(payoutItems.filter(item => !item.deletedAt).map(item => String(item.itemKey || '')));
-  const appointmentsById = new Map(appointments.filter(appointment => !appointment.deletedAt).map(appointment => [String(appointment.id), appointment]));
+  const appointmentsById = new Map(appointments.map(appointment => [String(appointment.id), appointment]));
   const lines: StaffEarningLine[] = [];
   const addLine = (order: any, item: any, itemKey: string, staffId: unknown, role: 'commission' | 'assistant', amount: number, revenue: number, commissionBase: number, helperDeduction: number, productCost: number) => {
     if (!staffId || paidKeys.has(itemKey)) return;
@@ -103,10 +116,11 @@ export function calculateUnpaidStaffEarnings(
   for (const order of orders) {
     const createdAt = Number(order.createdAt || 0);
     if (order.deletedAt || createdAt < from || createdAt >= to) continue;
+    const appointment = appointmentsById.get(String(order.appointmentId || '')) as any;
+    if (appointment && (appointment.deletedAt || ['cancelled', 'no-show'].includes(String(appointment.status || '').toLowerCase()))) continue;
     for (const [index, item] of (Array.isArray(order.items) ? order.items : []).entries()) {
       if (item.type !== 'service') continue;
       const itemKey = `${order.id}:${index}`;
-      const appointment = appointmentsById.get(String(order.appointmentId || '')) as any;
       const primaryStaffId = item.staffId || appointment?.staffId;
       const commissionItem = primaryStaffId === item.staffId
         ? item
