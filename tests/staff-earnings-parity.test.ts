@@ -38,6 +38,21 @@ test('completed earnings period is Saturday through Friday in Nairobi', () => {
   assert.deepEqual(lines.map(line => line.amount), [100, 200]);
 });
 
+test('linked earnings follow appointment date when the order is entered after the payroll cutoff', () => {
+  const range = mostRecentSaturdayThroughFridayRange(new Date('2026-11-07T12:00:00+03:00'));
+  const orderCreatedOnSaturday = orderAt(new Date('2026-11-07T09:24:49+03:00').getTime(), {
+    staffId: 'alice', commission: 900,
+  }, { id: 'alice-order', appointmentId: 'alice-appointment' });
+  const walkInCreatedOnSaturday = orderAt(new Date('2026-11-07T09:25:00+03:00').getTime(), {
+    staffId: 'walk-in', commission: 600,
+  }, { id: 'walk-in-order' });
+  const appointments = [{ id: 'alice-appointment', date: '2026-11-06', status: 'completed', staffId: 'alice' }];
+  const lines = calculateUnpaidStaffEarnings([orderCreatedOnSaturday, walkInCreatedOnSaturday], [], appointments, range.from, range.to);
+
+  assert.deepEqual(lines.map(line => line.staffId), ['alice']);
+  assert.equal(lines[0].amount, 900);
+});
+
 test('current earnings range is Sunday through the current instant in Nairobi', () => {
   const now = new Date('2026-10-31T18:13:00+03:00');
   const range = currentSundayThroughNowRange(now);

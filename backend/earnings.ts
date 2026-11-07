@@ -115,9 +115,14 @@ export function calculateUnpaidStaffEarnings(
 
   for (const order of orders) {
     const createdAt = Number(order.createdAt || 0);
-    if (order.deletedAt || createdAt < from || createdAt >= to) continue;
     const appointment = appointmentsById.get(String(order.appointmentId || '')) as any;
     if (appointment && (appointment.deletedAt || ['cancelled', 'no-show'].includes(String(appointment.status || '').toLowerCase()))) continue;
+    const appointmentDate = String(appointment?.date || '');
+    const appointmentDateStart = /^\d{4}-\d{2}-\d{2}$/.test(appointmentDate)
+      ? Date.parse(`${appointmentDate}T00:00:00+03:00`)
+      : Number.NaN;
+    const earningDate = Number.isFinite(appointmentDateStart) ? appointmentDateStart : createdAt;
+    if (order.deletedAt || earningDate < from || earningDate >= to) continue;
     for (const [index, item] of (Array.isArray(order.items) ? order.items : []).entries()) {
       if (item.type !== 'service') continue;
       const itemKey = `${order.id}:${index}`;
