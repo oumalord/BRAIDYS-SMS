@@ -32272,10 +32272,18 @@ New temporary password: ${newPassword}`, account.id);
     });
   }],
   "GET /api/dashboard": [async ({ query }) => {
-    const range = query.range || "today";
+    const requestedDate = String(query.date || "").trim();
+    const selectedDay = requestedDate ? nairobiDayRange(requestedDate) : null;
+    if (requestedDate && !selectedDay) return error("Choose a valid finance date", 400);
+    if (selectedDay && currentContext()?.role !== "owner") return error("Only the owner can view daily finance summaries", 403);
+    const range = selectedDay ? "day" : query.range || "today";
     const now = Date.now();
     let cutoff = 0;
-    if (range === "today") {
+    let rangeEnd = null;
+    if (selectedDay) {
+      cutoff = selectedDay.from;
+      rangeEnd = selectedDay.to;
+    } else if (range === "today") {
       const d2 = /* @__PURE__ */ new Date();
       d2.setHours(0, 0, 0, 0);
       cutoff = d2.getTime();
@@ -32301,7 +32309,7 @@ New temporary password: ${newPassword}`, account.id);
     const staffById = new Map(staffAll.map((s) => [s.id, s]));
     const productById = new Map(productsAll.map((p2) => [p2.id, p2]));
     const appointmentById = new Map(appts.map((appointment) => [appointment.id, appointment]));
-    const rangeOrders = orders.filter((o) => !o.deletedAt && o.createdAt >= cutoff);
+    const rangeOrders = orders.filter((o) => !o.deletedAt && o.createdAt >= cutoff && (rangeEnd === null || o.createdAt < rangeEnd));
     const paymentMethodTotals = { Cash: 0, Card: 0, "M-Pesa": 0 };
     const revenueByCurrency = {};
     for (const o of rangeOrders) {
@@ -32392,7 +32400,7 @@ New temporary password: ${newPassword}`, account.id);
         }
       }
     }
-    const rangeExpenses = expensesAll.filter((e) => new Date(e.date).getTime() >= cutoff);
+    const rangeExpenses = expensesAll.filter((e) => selectedDay ? String(e.date || "") === requestedDate : new Date(e.date).getTime() >= cutoff);
     const expenseTotal = rangeExpenses.reduce((s, e) => s + e.amount, 0);
     const estimatedProfitByCurrency = {};
     estimatedProfitByCurrency.KES = (revenueByCurrency.KES || 0) - productCost - (commissionsByCurrency.KES || 0) - expenseTotal;
@@ -32416,6 +32424,7 @@ New temporary password: ${newPassword}`, account.id);
     }
     return json({
       range,
+      date: requestedDate || null,
       revenueByCurrency,
       ordersCount: rangeOrders.length,
       paymentMethodTotals,

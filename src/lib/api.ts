@@ -186,6 +186,7 @@ export const PayrollApi = {
 
 export const DashboardApi = {
   get: (range: string) => cached(`dashboard:${range}`, 10000, () => api.get(`/api/dashboard?range=${range}`).then(r => r.data as DashboardData)),
+  getDay: (date: string) => cached(`dashboard:day:${date}`, 10000, () => api.get(`/api/dashboard?date=${encodeURIComponent(date)}`).then(r => r.data as DashboardData)),
 };
 
 export const RebookingApi = {

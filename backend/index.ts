@@ -2430,10 +2430,16 @@ export const handler = router({
   }],
 
   'GET /api/dashboard': [async ({ query }) => {
-    const range = query.range || 'today';
+    const requestedDate = String(query.date || '').trim();
+    const selectedDay = requestedDate ? nairobiDayRange(requestedDate) : null;
+    if (requestedDate && !selectedDay) return error('Choose a valid finance date', 400);
+    if (selectedDay && currentContext()?.role !== 'owner') return error('Only the owner can view daily finance summaries', 403);
+    const range = selectedDay ? 'day' : query.range || 'today';
     const now = Date.now();
     let cutoff = 0;
-    if (range === 'today') { const d = new Date(); d.setHours(0, 0, 0, 0); cutoff = d.getTime(); }
+    let rangeEnd: number | null = null;
+    if (selectedDay) { cutoff = selectedDay.from; rangeEnd = selectedDay.to; }
+    else if (range === 'today') { const d = new Date(); d.setHours(0, 0, 0, 0); cutoff = d.getTime(); }
     else if (range === 'week') cutoff = currentSundayThroughNowRange().from;
     else if (range === 'month') cutoff = now - 30 * DAY;
     else cutoff = 0;
@@ -2459,7 +2465,7 @@ export const handler = router({
     const productById = new Map(productsAll.map((p: any) => [p.id, p]));
     const appointmentById = new Map(appts.map((appointment: any) => [appointment.id, appointment]));
 
-    const rangeOrders = (orders as any[]).filter(o => !o.deletedAt && o.createdAt >= cutoff);
+    const rangeOrders = (orders as any[]).filter(o => !o.deletedAt && o.createdAt >= cutoff && (rangeEnd === null || o.createdAt < rangeEnd));
     const paymentMethodTotals: Record<'Cash' | 'Card' | 'M-Pesa', number> = { Cash: 0, Card: 0, 'M-Pesa': 0 };
     const revenueByCurrency: Record<string, number> = {};
     for (const o of rangeOrders) {
@@ -2544,7 +2550,9 @@ export const handler = router({
       }
     }
 
-    const rangeExpenses = (expensesAll as any[]).filter(e => new Date(e.date).getTime() >= cutoff);
+    const rangeExpenses = (expensesAll as any[]).filter(e => selectedDay
+      ? String(e.date || '') === requestedDate
+      : new Date(e.date).getTime() >= cutoff);
     const expenseTotal = rangeExpenses.reduce((s: number, e: any) => s + e.amount, 0);
     const estimatedProfitByCurrency: Record<string, number> = {};
     estimatedProfitByCurrency.KES = (revenueByCurrency.KES || 0) - productCost - (commissionsByCurrency.KES || 0) - expenseTotal;
@@ -2567,7 +2575,7 @@ export const handler = router({
     }
 
     return json({
-      range, revenueByCurrency, ordersCount: rangeOrders.length, paymentMethodTotals,
+      range, date: requestedDate || null, revenueByCurrency, ordersCount: rangeOrders.length, paymentMethodTotals,
       expenseTotal, productCost, commissionsByCurrency, estimatedProfitByCurrency,
       todaysAppointmentsCount: todaysAppointments.length,
       upcomingAppointments: todaysAppointments.filter((a: any) => ['pending', 'confirmed', 'checked-in'].includes(a.status)).slice(0, 8),

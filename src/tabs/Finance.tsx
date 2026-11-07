@@ -1,13 +1,28 @@
 import { useEffect, useState } from 'react';
-import { Download, Plus, Receipt, Search, Users } from 'lucide-react';
+import { CalendarDays, Download, Plus, Receipt, Search, Users } from 'lucide-react';
 import { Card, Button, Badge, Modal, Field, Input, Select, EmptyState, LoadingState, StatCard, toast } from '../components/ui';
-import { AppointmentsApi, DashboardApi, downloadCSV, ExpensesApi, PayrollApi, PayoutsApi, fmtMoney } from '../lib/api';
+import { AppointmentsApi, AuthApi, DashboardApi, downloadCSV, ExpensesApi, PayrollApi, PayoutsApi, fmtMoney } from '../lib/api';
 import type { DashboardData, Expense, PayoutBatch, PaystackPayrollBatch, Staff, WeeklyStaffWorkReport } from '../types';
 
 type Range = 'today' | 'week' | 'month' | 'all';
+type FinanceView = 'overview' | 'daily';
+
+function todayInNairobi() {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Africa/Nairobi', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(new Date());
+  const part = (type: string) => parts.find(value => value.type === type)?.value || '';
+  return `${part('year')}-${part('month')}-${part('day')}`;
+}
 
 function Finance() {
+  const isOwner = AuthApi.account()?.role === 'owner';
   const [range, setRange] = useState<Range>('week');
+  const [financeView, setFinanceView] = useState<FinanceView>('overview');
+  const [dailyDate, setDailyDate] = useState(todayInNairobi);
+  const [dailyData, setDailyData] = useState<DashboardData | null>(null);
+  const [dailyLoading, setDailyLoading] = useState(false);
+  const [dailyError, setDailyError] = useState('');
   const [data, setData] = useState<DashboardData | null>(null);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [payouts, setPayouts] = useState<PayoutBatch[]>([]);
@@ -58,6 +73,23 @@ function Finance() {
     const refresh = window.setInterval(() => load(false), 15000);
     return () => window.clearInterval(refresh);
   }, [range]);
+
+  useEffect(() => {
+    if (!isOwner || financeView !== 'daily') return;
+    let active = true;
+    const loadSelectedDay = () => {
+      setDailyLoading(true);
+      setDailyError('');
+      DashboardApi.getDay(dailyDate)
+        .then(result => { if (active) setDailyData(result); })
+        .catch((cause: any) => { if (active) setDailyError(cause?.message || 'Could not load this day’s finance summary.'); })
+        .finally(() => { if (active) setDailyLoading(false); });
+    };
+    setDailyData(null);
+    loadSelectedDay();
+    const refresh = window.setInterval(loadSelectedDay, 15000);
+    return () => { active = false; window.clearInterval(refresh); };
+  }, [isOwner, financeView, dailyDate]);
 
   const addExpense = async () => {
     if (!form.category.trim() || form.amount <= 0) { toast('Enter a category and amount greater than zero.', 'error'); return; }
@@ -187,6 +219,14 @@ function Finance() {
     assistantEarnings: totals.assistantEarnings + row.assistantEarnings,
     totalEarnings: totals.totalEarnings + Math.round(row.commission + row.assistantEarnings),
   }), { count: 0, revenue: 0, helperDeductions: 0, commission: 0, assistantEarnings: 0, totalEarnings: 0 });
+  const dailyStaffRows = (dailyData?.staffEarnings || []).filter(row => row.currency === 'KES')
+    .sort((first, second) => first.name.localeCompare(second.name));
+  const dailyCommissionTotal = dailyStaffRows.reduce((sum, row) => sum + row.commission, 0);
+  const dailyAssistantTotal = dailyStaffRows.reduce((sum, row) => sum + row.assistantEarnings, 0);
+  const dailyStaffPaymentTotal = dailyCommissionTotal + dailyAssistantTotal;
+  const dailyDateLabel = new Intl.DateTimeFormat(undefined, {
+    timeZone: 'Africa/Nairobi', day: 'numeric', month: 'long', year: 'numeric',
+  }).format(new Date(`${dailyDate}T12:00:00+03:00`));
   const downloadPayroll = () => {
     const startDate = payrollPeriod ? new Date(payrollPeriod.from) : new Date();
     const endDate = payrollPeriod ? new Date(payrollPeriod.to) : new Date();
@@ -216,18 +256,51 @@ function Finance() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div><h1 className="text-2xl font-semibold tracking-tight">Finance</h1><p className="text-sm text-[#6E6E73]">Revenue, commissions, expenses and profitability, computed from real transactions.</p></div>
         <div className="flex items-center gap-2">
-          <Select aria-label="Date range" value={range} onChange={e => setRange(e.target.value as Range)} className="w-auto" style={{ width: 'auto' }}>
+          {financeView === 'overview' && <Select aria-label="Date range" value={range} onChange={e => setRange(e.target.value as Range)} className="w-auto" style={{ width: 'auto' }}>
             <option value="today">Today</option><option value="week">This Week</option><option value="month">This Month</option><option value="all">All Time</option>
-          </Select>
+          </Select>}
           <Button variant="secondary" onClick={sendPaystackPayroll} disabled={payrollSending || payrollLoading || !paystackConfigured || !canSendPaystack} title={paystackConfigured ? 'Submit all available unpaid staff earnings through Paystack' : 'Configure Paystack to enable payroll transfers'}><Receipt size={16} aria-hidden="true" />Pay all</Button>
           <Button onClick={() => setOpen(true)}><Plus size={16} aria-hidden="true" />Add Expense</Button>
           <Button variant="danger" onClick={() => setEarningsDeleteOpen(true)}>Clear paid earnings</Button>
         </div>
       </div>
 
-      {!data && loading && <LoadingState label="Loading finance metrics…" />}
-      {!data && !loading && financeDataError && <Card className="p-5"><p role="status" className="text-sm text-amber-700">{financeDataError}</p></Card>}
-      {data && (
+      {isOwner && <div role="tablist" aria-label="Finance views" className="flex w-fit rounded-xl border border-black/10 bg-white p-1">
+        <button type="button" role="tab" aria-selected={financeView === 'overview'} onClick={() => setFinanceView('overview')}
+          className={`rounded-lg px-4 py-2 text-sm font-medium ${financeView === 'overview' ? 'bg-[#2F6BFF] text-white' : 'text-[#6E6E73] hover:bg-black/[0.04]'}`}>Overview</button>
+        <button type="button" role="tab" aria-selected={financeView === 'daily'} onClick={() => setFinanceView('daily')}
+          className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium ${financeView === 'daily' ? 'bg-[#2F6BFF] text-white' : 'text-[#6E6E73] hover:bg-black/[0.04]'}`}><CalendarDays size={16} aria-hidden="true" />Single day</button>
+      </div>}
+
+      {isOwner && financeView === 'daily' && <div className="space-y-5">
+        <Card className="flex flex-col gap-4 p-5 sm:flex-row sm:items-end sm:justify-between">
+          <div><h2 className="font-semibold">Daily financial summary</h2><p className="mt-1 text-sm text-[#6E6E73]">Revenue, staff pay, and net profit for {dailyDateLabel}.</p></div>
+          <Field label="Business date" htmlFor="finance-daily-date"><Input id="finance-daily-date" type="date" value={dailyDate} onChange={event => setDailyDate(event.target.value)} /></Field>
+        </Card>
+        {dailyLoading && !dailyData && <LoadingState label="Loading daily finance summary…" />}
+        {dailyError && <Card className="p-5"><p role="alert" className="text-sm text-amber-700">{dailyError}</p></Card>}
+        {dailyData && <>
+          <div className="grid gap-4 sm:grid-cols-3">
+            <StatCard label="Total revenue" value={fmtMoney(dailyData.revenueByCurrency.KES || 0, 'KES')} icon={Receipt} tone="success" />
+            <StatCard label="Staff payment total" value={fmtMoney(dailyStaffPaymentTotal, 'KES')} sub={`${fmtMoney(dailyCommissionTotal, 'KES')} commission · ${fmtMoney(dailyAssistantTotal, 'KES')} assistant`} icon={Users} />
+            <StatCard label="Net profit" value={fmtMoney(dailyData.estimatedProfitByCurrency.KES || 0, 'KES')} icon={Receipt} tone={(dailyData.estimatedProfitByCurrency.KES || 0) >= 0 ? 'success' : 'danger'} />
+          </div>
+          <Card className="p-5">
+            <div className="mb-3"><h2 className="font-semibold">Staff payments</h2><p className="text-xs text-[#6E6E73]">All staff for {dailyDateLabel}, including zero-payment staff.</p></div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead><tr className="border-b border-black/5 text-left text-xs text-[#6E6E73]"><th className="pb-2 pr-3">Staff</th><th className="pb-2 pr-3">Commission</th><th className="pb-2 pr-3">Assistant compensation</th><th className="pb-2">Total payment</th></tr></thead>
+                <tbody>{dailyStaffRows.map(row => <tr key={row.staffId} className="border-b border-black/5 last:border-0"><td className="py-2 pr-3">{row.name}</td><td className="py-2 pr-3">{fmtMoney(row.commission, 'KES')}</td><td className="py-2 pr-3">{fmtMoney(row.assistantEarnings, 'KES')}</td><td className="py-2 font-medium">{fmtMoney(row.commission + row.assistantEarnings, 'KES')}</td></tr>)}</tbody>
+                <tfoot><tr className="border-t-2 border-black/10 font-semibold"><td className="pt-3 pr-3">TOTAL</td><td className="pt-3 pr-3">{fmtMoney(dailyCommissionTotal, 'KES')}</td><td className="pt-3 pr-3">{fmtMoney(dailyAssistantTotal, 'KES')}</td><td className="pt-3">{fmtMoney(dailyStaffPaymentTotal, 'KES')}</td></tr></tfoot>
+              </table>
+            </div>
+          </Card>
+        </>}
+      </div>}
+
+      {financeView === 'overview' && !data && loading && <LoadingState label="Loading finance metrics…" />}
+      {financeView === 'overview' && !data && !loading && financeDataError && <Card className="p-5"><p role="status" className="text-sm text-amber-700">{financeDataError}</p></Card>}
+      {financeView === 'overview' && data && (
         <>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             <StatCard label="Revenue" value={fmtMoney(revenueKES, 'KES')} icon={Receipt} tone="success" />
