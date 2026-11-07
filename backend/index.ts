@@ -2337,7 +2337,7 @@ export const handler = router({
       if (!Number.isSafeInteger(expectedAmountKES) || expectedAmountKES !== amountKES) return error(`Unpaid earnings changed for ${member.name}. Refresh payroll and confirm the updated total.`, 409);
       const amount = toPaystackMinorAmount(amountKES, multiplier);
       if (!amount) return error(`Could not calculate a valid payment amount for ${member.name}.`, 400);
-      transfers.push({ member, lines, amountKES, amount, reference: `braidy-${randomBytes(18).toString('hex')}` });
+      transfers.push({ member, lines, amountKES, amount, reference: `braidy-${randomBytes(16).toString('hex')}` });
     }
     if (!transfers.length) return error('No active staff have non-zero unpaid KES earnings for this payroll period.', 409);
     const missingRecipient = transfers.find(({ member }) => member.paystackRecipientMode !== 'live'
