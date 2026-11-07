@@ -2337,7 +2337,7 @@ export const handler = router({
       if (!Number.isSafeInteger(expectedAmountKES) || expectedAmountKES !== amountKES) return error(`Unpaid earnings changed for ${member.name}. Refresh payroll and confirm the updated total.`, 409);
       const amount = toPaystackMinorAmount(amountKES, multiplier);
       if (!amount) return error(`Could not calculate a valid payment amount for ${member.name}.`, 400);
-      transfers.push({ member, lines, amountKES, amount, reference: `braidy-${randomBytes(16).toString('hex')}` });
+      transfers.push({ member, lines, amountKES, amount, reference: randomBytes(16).toString('hex') });
     }
     if (!transfers.length) return error('No active staff have non-zero unpaid KES earnings for this payroll period.', 409);
     const missingRecipient = transfers.find(({ member }) => member.paystackRecipientMode !== 'live'
@@ -2368,11 +2368,14 @@ export const handler = router({
       if (!response.ok || !resultBody.status) {
         const providerMessage = String(resultBody.message || `Paystack rejected the batch (${response.status}).`);
         const thirdPartyPayoutsDisabled = /cannot initiate third[ -]party payouts/i.test(providerMessage);
+        const providerErrors = Array.isArray(resultBody.data?.errors) ? resultBody.data.errors : [];
+        const providerErrorDetails = providerErrors.map((item: any) => String(item.message || item.error || '')).filter(Boolean);
         const message = thirdPartyPayoutsDisabled
           ? 'Paystack has not enabled third-party payouts for this account. No payroll was sent. Contact Paystack to enable transfers, then retry.'
-          : providerMessage;
-        await db.update('payroll_items', itemIds.map((id: string, index: number) => ({ id, record: { ...payrollRecords[index], id, status: 'failed', error: message } })));
-        await db.update('payroll_batches', [{ id: batchId, record: { id: batchId, tenantId: context.tenantId, provider: 'paystack', status: 'failed', totalKES, employeeCount: transfers.length, failedCount: transfers.length, createdAt: now, error: message } }]);
+          : `Paystack rejected the batch (HTTP ${response.status}): ${providerMessage}${providerErrorDetails.length ? ` ${providerErrorDetails.join('; ')}` : ''}`;
+        const providerFailure = { status: response.status, message: providerMessage, errors: providerErrors };
+        await db.update('payroll_items', itemIds.map((id: string, index: number) => ({ id, record: { ...payrollRecords[index], id, status: 'failed', error: message, providerFailure } })));
+        await db.update('payroll_batches', [{ id: batchId, record: { id: batchId, tenantId: context.tenantId, provider: 'paystack', status: 'failed', totalKES, employeeCount: transfers.length, failedCount: transfers.length, createdAt: now, error: message, providerFailure } }]);
         return error(message, thirdPartyPayoutsDisabled ? 503 : 502);
       }
       const acceptedRows = Array.isArray(resultBody.data) ? resultBody.data : Array.isArray(resultBody.data?.success) ? resultBody.data.success : [];
