@@ -2267,7 +2267,6 @@ export const handler = router({
     if (!members.length) return error('No active staff records are available for this payroll batch.', 400);
     if (members.length !== requestedIds.length) return error('One or more selected staff members are not available in this salon or branch.', 400);
     for (const member of members) {
-      if (member.paystackRecipientMode === 'live' && /^RCP_[A-Za-z0-9]+$/.test(String(member.paystackRecipientCode || ''))) continue;
       try {
         const paystackRecipientCode = await createPaystackStaffRecipient(member);
         member.paystackRecipientCode = paystackRecipientCode;
