@@ -16,6 +16,7 @@ export interface Staff {
   branchId?: string;
   branchName?: string;
   paystackRecipientCode?: string;
+  paystackRecipientMode?: string;
   commissionEarnedWeek?: number;
   assistantEarnedWeek?: number;
   unpaidEarningCount?: number;

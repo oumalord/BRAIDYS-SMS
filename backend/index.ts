@@ -2340,25 +2340,9 @@ export const handler = router({
       transfers.push({ member, lines, amountKES, amount, reference: `braidy-${randomBytes(18).toString('hex')}` });
     }
     if (!transfers.length) return error('No active staff have non-zero unpaid KES earnings for this payroll period.', 409);
-    let recipientResult: Awaited<ReturnType<typeof createPaystackStaffRecipients>>;
-    try { recipientResult = await createPaystackStaffRecipients(transfers.map(transfer => transfer.member)); }
-    catch (cause) { return error(cause instanceof Error ? cause.message : 'Paystack recipient setup failed.', 502); }
-    const failureByStaffId = new Map<string, string>(recipientResult.failures.map(failure => [String(failure.member.id), failure.error]));
-    const staffUpdates: any[] = [];
-    const recipientFailures: { name: string; error: string }[] = [];
-    for (const transfer of transfers) {
-      const member = transfer.member;
-      const paystackRecipientCode = recipientResult.recipientCodesByPhone.get(normalizeCustomerPhone(member.phone));
-      if (!paystackRecipientCode) {
-        recipientFailures.push({ name: String(member.name || 'Unknown staff member'), error: failureByStaffId.get(String(member.id)) || 'Paystack did not return a valid recipient code.' });
-        continue;
-      }
-      member.paystackRecipientCode = paystackRecipientCode;
-      member.paystackRecipientMode = 'live';
-      staffUpdates.push({ id: member.id, record: member });
-    }
-    if (staffUpdates.length) await db.update('staff', staffUpdates);
-    if (recipientFailures.length) return error(`Could not prepare Paystack recipient for ${recipientFailures[0].name}: ${recipientFailures[0].error}`, 502);
+    const missingRecipient = transfers.find(({ member }) => member.paystackRecipientMode !== 'live'
+      || !/^RCP_[A-Za-z0-9]+$/.test(String(member.paystackRecipientCode || '')));
+    if (missingRecipient) return error(`Sync Paystack recipients before sending. ${missingRecipient.member.name} does not have a live recipient code.`, 409);
     if (new Set(transfers.map(transfer => transfer.member.paystackRecipientCode)).size !== transfers.length) return error('Each staff member must have a unique Paystack recipient code.', 400);
 
     const now = Date.now();
