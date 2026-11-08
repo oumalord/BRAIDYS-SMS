@@ -74,6 +74,28 @@ export const db = {
           : await sql`SELECT id, record FROM app_records WHERE collection = ${collection} AND (tenant_id = ${tenantId} OR record->>'tenantId' = ${tenantId}) ORDER BY created_at ASC LIMIT ${limit}` as StoredRecord[];
     return { items: rows.map(row => ({ ...(row.record || {}), id: row.id })) };
   },
+  async count(collection: string): Promise<number> {
+    await init();
+    const context = currentContext();
+    const tenantId = context?.tenantId || null;
+    const branchId = salonWideCollections.has(collection) ? undefined : context?.branchId;
+    const isGlobal = globalCollections.has(collection);
+    const isAdmin = context?.role === 'admin';
+    const rows = await sql`
+      SELECT COUNT(*)::int AS count
+      FROM app_records
+      WHERE collection = ${collection}
+        AND (
+          ${isGlobal}
+          OR (${isAdmin} AND (NOT ${Boolean(branchId)} OR record->>'branchId' = ${branchId || ''}))
+          OR (${!isGlobal && !isAdmin}
+            AND (tenant_id = ${tenantId} OR record->>'tenantId' = ${tenantId})
+            AND (NOT ${Boolean(branchId)} OR record->>'branchId' = ${branchId || ''} OR record->>'branchId' IS NULL OR record->>'branchId' = '')
+          )
+        )
+    ` as { count: number }[];
+    return Number(rows[0]?.count || 0);
+  },
   async listAllTenant(collection: string, tenantId: string, options?: { limit?: number; branchScope?: boolean }): Promise<{ items: any[] }> {
     await init();
     const limit = Math.min(Math.max(Number(options?.limit || 100), 1), 5000);
@@ -128,12 +150,31 @@ export const db = {
     return true;
   },
   async deleteOlderThan(collection: string, timestamp: number) {
+    await init();
     const context = currentContext();
-    const { items } = await this.list(collection, { limit: 5000 });
     const deletedAt = Date.now();
-    const updates = items.filter(record => !record.deletedAt && Number(record.createdAt || 0) < timestamp)
-      .map(record => ({ id: record.id, record: { ...record, deletedAt, deletedBy: context?.name || 'retention policy' } }));
-    if (updates.length) await this.update(collection, updates);
+    const tenantId = context?.tenantId || null;
+    const branchId = salonWideCollections.has(collection) ? undefined : context?.branchId;
+    const isGlobal = globalCollections.has(collection);
+    const isAdmin = context?.role === 'admin';
+    await sql`
+      UPDATE app_records
+      SET record = record || jsonb_build_object('deletedAt', ${deletedAt}, 'deletedBy', ${context?.name || 'retention policy'})
+      WHERE collection = ${collection}
+        AND NOT (record ? 'deletedAt')
+        AND CASE
+          WHEN record->>'createdAt' ~ '^-?[0-9]+([.][0-9]+)?$' THEN (record->>'createdAt')::numeric
+          ELSE 0
+        END < ${timestamp}
+        AND (
+          ${isGlobal}
+          OR (${isAdmin} AND (NOT ${Boolean(branchId)} OR record->>'branchId' = ${branchId || ''}))
+          OR (${!isGlobal && !isAdmin}
+            AND (tenant_id = ${tenantId} OR record->>'tenantId' = ${tenantId})
+            AND (NOT ${Boolean(branchId)} OR record->>'branchId' = ${branchId || ''} OR record->>'branchId' IS NULL OR record->>'branchId' = '')
+          )
+        )
+    `;
     return true;
   },
 };

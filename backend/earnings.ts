@@ -84,6 +84,19 @@ export function mostRecentSaturdayThroughFridayRange(date = new Date()) {
   return { from: to - 7 * 24 * 60 * 60 * 1000, to };
 }
 
+export function currentSaturdayThroughFridayRange(date = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Africa/Nairobi', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(date);
+  const part = (type: string) => Number(parts.find(value => value.type === type)?.value);
+  const today = new Date(Date.UTC(part('year'), part('month') - 1, part('day')));
+  const currentSaturday = new Date(today);
+  const daysSinceSaturday = (today.getUTCDay() + 1) % 7;
+  currentSaturday.setUTCDate(today.getUTCDate() - daysSinceSaturday);
+  const from = Date.UTC(currentSaturday.getUTCFullYear(), currentSaturday.getUTCMonth(), currentSaturday.getUTCDate()) - 3 * 60 * 60 * 1000;
+  return { from, to: from + 7 * 24 * 60 * 60 * 1000 };
+}
+
 export function calculateUnpaidStaffEarnings(
   orders: any[],
   payoutItems: any[],

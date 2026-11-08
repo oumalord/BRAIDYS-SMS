@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { calculateUnpaidStaffEarnings, currentSundayThroughNowRange, mostRecentSaturdayThroughFridayRange, previousSaturdayThroughYesterdayRange, staffAppointmentMinutes } from '../backend/earnings.ts';
+import { calculateUnpaidStaffEarnings, currentSaturdayThroughFridayRange, currentSundayThroughNowRange, mostRecentSaturdayThroughFridayRange, previousSaturdayThroughYesterdayRange, staffAppointmentMinutes } from '../backend/earnings.ts';
 
 const now = new Date(2026, 8, 26, 12, 0, 0).getTime();
 const startOfSunday = new Date(2026, 8, 20, 0, 0, 0).getTime();
@@ -25,10 +25,23 @@ test('payroll date range is the previous Saturday through yesterday in Nairobi',
   assert.deepEqual(lines.map(line => line.amount), [100, 200]);
 });
 
-test('completed earnings period is Saturday through Friday in Nairobi', () => {
+test('previous completed earnings period is Saturday through Friday in Nairobi', () => {
   const range = mostRecentSaturdayThroughFridayRange(new Date('2026-11-07T12:00:00+03:00'));
   assert.equal(new Date(range.from).toISOString(), '2026-10-30T21:00:00.000Z');
   assert.equal(new Date(range.to).toISOString(), '2026-11-06T21:00:00.000Z');
+  const orders = [
+    orderAt(range.from, { staffId: 'stylist', commission: 100 }),
+    orderAt(range.to - 1, { staffId: 'stylist', commission: 200 }),
+    orderAt(range.to, { staffId: 'stylist', commission: 300 }),
+  ];
+  const lines = calculateUnpaidStaffEarnings(orders, [], [], range.from, range.to);
+  assert.deepEqual(lines.map(line => line.amount), [100, 200]);
+});
+
+test('active earnings period rolls from Saturday through the following Friday in Nairobi', () => {
+  const range = currentSaturdayThroughFridayRange(new Date('2026-11-09T12:00:00+03:00'));
+  assert.equal(new Date(range.from).toISOString(), '2026-11-06T21:00:00.000Z');
+  assert.equal(new Date(range.to).toISOString(), '2026-11-13T21:00:00.000Z');
   const orders = [
     orderAt(range.from, { staffId: 'stylist', commission: 100 }),
     orderAt(range.to - 1, { staffId: 'stylist', commission: 200 }),
@@ -58,6 +71,24 @@ test('current earnings range is Sunday through the current instant in Nairobi', 
   const range = currentSundayThroughNowRange(now);
   assert.equal(new Date(range.from).toISOString(), '2026-10-24T21:00:00.000Z');
   assert.equal(new Date(range.to).toISOString(), '2026-10-31T15:13:00.001Z');
+});
+
+test('Sunday completed work appears in current week earnings but not completed-week payroll', () => {
+  const now = new Date('2026-11-09T01:15:00+03:00');
+  const currentPeriod = currentSaturdayThroughFridayRange(now);
+  const completedPeriod = mostRecentSaturdayThroughFridayRange(now);
+  const order = orderAt(new Date('2026-11-08T10:14:34+03:00').getTime(), {
+    staffId: 'ouma', commission: 1000, lineTotalAfterDiscount: 2000,
+  }, { id: 'ouma-sunday-order', appointmentId: 'ouma-sunday-appointment' });
+  const appointments = [{ id: 'ouma-sunday-appointment', date: '2026-11-08', status: 'completed', staffId: 'ouma' }];
+
+  const currentWeek = calculateUnpaidStaffEarnings([order], [], appointments, currentPeriod.from, currentPeriod.to);
+  const completedWeek = calculateUnpaidStaffEarnings([order], [], appointments, completedPeriod.from, completedPeriod.to);
+
+  assert.equal(currentWeek.length, 1);
+  assert.equal(currentWeek[0].staffId, 'ouma');
+  assert.equal(currentWeek[0].amount, 1000);
+  assert.equal(completedWeek.length, 0);
 });
 
 test('earnings calculation includes the start and excludes the end of its requested range', () => {

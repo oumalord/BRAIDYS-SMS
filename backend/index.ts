@@ -1,6 +1,6 @@
 import { router, json, error, db, ai, storage, currentContext, withRequestContext } from './runtime.ts';
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
-import { calculateUnpaidStaffEarnings, currentSundayThroughNowRange, mostRecentSaturdayThroughFridayRange, staffAppointmentMinutes, staffCommission } from './earnings.ts';
+import { calculateUnpaidStaffEarnings, currentSaturdayThroughFridayRange, currentSundayThroughNowRange, staffAppointmentMinutes, staffCommission } from './earnings.ts';
 import { toPaystackMinorAmount, verifyPaystackSignature } from './paystack.ts';
 
 const DAY = 24 * 3600 * 1000;
@@ -280,7 +280,6 @@ async function notifyEmployee(staff: any, employmentStatus: 'active' | 'laid-off
 }
 
 async function audit(action: string, collection: string, record: any, actor = 'system') {
-  await db.deleteOlderThan('audit_logs', Date.now() - 14 * DAY);
   await db.add('audit_logs', [{
     action, collection, actor: currentContext()?.name || actor, recordId: record?.id || null,
     summary: `${action} ${collection}${record?.name ? `: ${record.name}` : record?.customerName ? `: ${record.customerName}` : ''}`,
@@ -820,7 +819,7 @@ export const handler = router({
   'GET /api/staff/me/earnings': [async () => {
     const context = currentContext();
     if (!context?.staffId || !['barber', 'receptionist'].includes(context.role)) return error('Only an employee can view this earnings summary', 403);
-    const { from: weekFrom, to: weekTo } = mostRecentSaturdayThroughFridayRange();
+    const { from: weekFrom, to: weekTo } = currentSaturdayThroughFridayRange();
     const now = Date.now();
     const todayFrom = new Date(`${nairobiDateString()}T00:00:00+03:00`).getTime();
 
@@ -833,7 +832,7 @@ export const handler = router({
       .filter(line => line.currency === 'KES' && line.staffId === String(context.staffId));
     const todayEarnings = calculateUnpaidStaffEarnings(orders as any[], payoutItems as any[], appointments as any[], todayFrom, now + 1)
       .filter(line => line.currency === 'KES' && line.staffId === String(context.staffId));
-    const ownCurrentPeriodEarnings = [...weekEarnings, ...todayEarnings];
+    const ownCurrentPeriodEarnings = weekEarnings;
     const orderCreatedAtById = new Map((orders as any[]).map(order => [String(order.id), Number(order.createdAt || 0)]));
     const ordersById = new Map((orders as any[]).map(order => [String(order.id), order]));
     const appointmentsById = new Map((appointments as any[]).filter(appointment => !appointment.deletedAt).map(appointment => [String(appointment.id), appointment]));
@@ -923,18 +922,7 @@ export const handler = router({
       const ownerContext = currentContext()!;
       [accountId] = await db.add('accounts', [{ id: `account-${randomBytes(8).toString('hex')}`, tenantId: branch.salonId, salonName: branch.salonName || ownerContext.salonName, branchId: branch.id, name: b.name, email: String(b.accountEmail || '').trim().toLowerCase(), phone: b.phone, role: isReceptionist ? 'receptionist' : 'barber', status: 'active', pinHash: passwordHash(pin), staffId: id, createdAt: Date.now() }]);
     }
-    const [createdStaff] = await db.get('staff', [id]);
-    let paystackRecipientError = '';
-    if (accountId && createdStaff && isPaystackRecipientEligible(createdStaff) && String(process.env.PAYSTACK_SECRET_KEY || '').startsWith('sk_live_')) {
-      try {
-        const paystackRecipientCode = await createPaystackStaffRecipient(createdStaff);
-        await db.update('staff', [{ id, record: { ...createdStaff, paystackRecipientCode, paystackRecipientMode: 'live' } }]);
-      } catch (cause) {
-        paystackRecipientError = cause instanceof Error ? cause.message : 'Unknown error';
-        console.error('Paystack recipient setup failed for new staff:', paystackRecipientError);
-      }
-    }
-    return json({ id, paystackRecipientError });
+    return json({ id });
   }],
   'PUT /api/staff/:id': [async ({ params, body }) => {
     requireOwner();
@@ -1417,7 +1405,7 @@ export const handler = router({
     const selectedDate = String(query.date || '').trim();
     const selectedDay = selectedDate ? nairobiDayRange(selectedDate) : null;
     if (selectedDate && !selectedDay) return error('Choose a valid earnings date', 400);
-    const period = selectedDay || mostRecentSaturdayThroughFridayRange();
+    const period = selectedDay || currentSaturdayThroughFridayRange();
     const [{ items: staffRows }, { items: orders }, { items: appointmentRows }, { items: payoutItems }] = await Promise.all([
       db.list('staff', { limit: 2000 }),
       db.list('orders', { limit: 5000 }),
@@ -2137,7 +2125,7 @@ export const handler = router({
     const context = currentContext();
     if (!context || !['owner', 'admin'].includes(context.role)) return error('Only the owner or administrator can view payroll staff', 403);
     const { items } = await db.list('staff', { limit: 2000 });
-    const period = mostRecentSaturdayThroughFridayRange();
+    const period = currentSaturdayThroughFridayRange();
     const [{ items: orders }, { items: payoutItems }, { items: appointments }] = await Promise.all([
       db.list('orders', { limit: 5000 }),
       db.list('payout_items', { limit: 10000 }),
@@ -2314,7 +2302,7 @@ export const handler = router({
     const tenantAppointments = (appointments as any[]).filter(item => contextIncludesPayrollRecord(item, context));
     const scopedBranchOrders = branchScopedPayrollOrders(orders as any[], tenantAppointments, staffById, context);
     const branchPayoutItems = branchScopedPayrollPayoutItems(payoutItems as any[], context);
-    const { from, to } = mostRecentSaturdayThroughFridayRange();
+    const { from, to } = currentSaturdayThroughFridayRange();
     const earnings = calculateUnpaidStaffEarnings(scopedBranchOrders, branchPayoutItems, tenantAppointments, from, to)
       .filter(line => staffById.has(line.staffId) && line.currency === 'KES');
     for (const earning of earnings) {
@@ -2481,14 +2469,15 @@ export const handler = router({
     else if (range === 'month') cutoff = now - 30 * DAY;
     else cutoff = 0;
 
-    const [ordersResult, expensesResult, staffResult, productsResult, appointmentsResult, queueResult, customersResult] = await Promise.all([
+    const [ordersResult, expensesResult, staffResult, productsResult, appointmentsResult, queueResult, customersResult, customersCountResult] = await Promise.all([
       db.list('orders', { limit: 5000 }),
       db.list('expenses', { limit: 500 }),
       db.list('staff', { limit: 2000 }),
       db.list('products', { limit: 500 }),
       db.list('appointments', { limit: 1000 }),
       db.list('queue', { limit: 200 }),
-      db.list('customers', { limit: 5000 }),
+      db.list('customers', { limit: 10 }),
+      db.count('customers'),
     ]);
     const orders = ordersResult.items;
     const expensesAll = expensesResult.items;
@@ -2496,7 +2485,8 @@ export const handler = router({
     const productsAll = productsResult.items;
     const appts = (appointmentsResult.items as any[]).filter(item => !item.deletedAt);
     const queueAll = (queueResult.items as any[]).filter(item => !item.deletedAt);
-    const customersAll = customersResult.items;
+    const customers = customersResult.items;
+    const customersCount = customersCountResult;
 
     const staffById = new Map(staffAll.map((s: any) => [s.id, s]));
     const productById = new Map(productsAll.map((p: any) => [p.id, p]));
@@ -2619,8 +2609,8 @@ export const handler = router({
       lowStockProducts: lowStock,
       activeStaffCount: activeStaff.length, totalStaffCount: staffAll.length,
       waitingQueueCount: waitingQueue.length,
-      customersCount: customersAll.length,
-      customers: customersAll.slice(0, 10),
+      customersCount,
+      customers,
       commissionByClient,
       staffEarnings: Array.from(staffEarnings.values()).sort((a, b) => a.name.localeCompare(b.name) || a.currency.localeCompare(b.currency)),
       topStaff: Array.from(staffRevenue.values()).sort((a, b) => b.revenue - a.revenue).slice(0, 8),
@@ -2630,12 +2620,10 @@ export const handler = router({
   }],
 
   'GET /api/analytics/rebooking': [async () => {
-    const [ordersResult, customersResult] = await Promise.all([
-      db.list('orders', { limit: 1000 }),
-      db.list('customers', { limit: 1000 }),
-    ]);
-    const orders = ordersResult.items;
-    const customers = customersResult.items;
+    const orders = (await db.list('orders', { limit: 1000 })).items;
+    const customerIds = Array.from(new Set((orders as any[]).map(order => String(order.customerId || '')).filter(Boolean)));
+    if (!customerIds.length) return json({ items: [] });
+    const customers = (await db.get('customers', customerIds)).filter(Boolean);
     const byCustomer = new Map<string, number[]>();
     for (const o of orders as any[]) {
       if (!o.customerId) continue;
