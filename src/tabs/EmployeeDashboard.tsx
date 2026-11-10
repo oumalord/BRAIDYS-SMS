@@ -27,17 +27,19 @@ function EmployeeDashboard({ account, onAddService }: { account: { name?: string
     setEarningsLoading(true);
     setAppointmentsError('');
     setEarningsError('');
-    AppointmentsApi.list().then(items => {
+    const loadAppointments = (showError = false) => AppointmentsApi.list().then(items => {
       if (!active) return;
       const staffAppointments = items.filter(item => item.staffId === account.staffId || item.items?.some(service => service.staffId === account.staffId));
       setAppointments(staffAppointments);
+      setAppointmentsError('');
       const waiting = staffAppointments.filter(item => item.date === todayStr() && ['checked-in', 'pending'].includes(item.status));
       setWaitingClients(waiting);
     }).catch((cause: any) => {
-      if (!active) return;
+      if (!active || !showError) return;
       setAppointmentsError(cause?.message || 'Could not load your assigned appointments.');
       toast('Could not load your assigned appointments.', 'error');
-    }).finally(() => {
+    });
+    void loadAppointments(true).finally(() => {
       if (active) setLoading(false);
     });
     const loadEarnings = () => StaffApi.myEarnings().then(earnings => {
@@ -56,7 +58,11 @@ function EmployeeDashboard({ account, onAddService }: { account: { name?: string
       if (active) setEarningsLoading(false);
     });
     loadEarnings();
-    const refreshWhenVisible = () => { if (document.visibilityState === 'visible') loadEarnings(); };
+    const refreshWhenVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      void loadAppointments();
+      loadEarnings();
+    };
     const earningsRefresh = window.setInterval(refreshWhenVisible, 10000);
     window.addEventListener('focus', refreshWhenVisible);
     document.addEventListener('visibilitychange', refreshWhenVisible);
@@ -119,7 +125,7 @@ function EmployeeDashboard({ account, onAddService }: { account: { name?: string
           <section className="space-y-3"><h2 className="font-semibold">My appointments</h2>{sortedAppointments.map(appointment => (
               <Card key={appointment.id} className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-start gap-3"><div className="rounded-xl bg-[#0071e3]/10 p-2 text-[#0071e3]"><Scissors size={18} aria-hidden="true" /></div><div><p className="font-medium">{appointment.customerName}</p><p className="text-sm text-[#6E6E73]">{appointment.serviceName} · {appointment.date} at {appointment.time}</p><p className="text-sm font-medium mt-1">{fmtKES(appointment.price)}</p></div></div>
-                <div className="flex items-center gap-3"><Badge tone={appointment.status === 'in-service' ? 'warning' : 'info'}>{appointment.status.replace('-', ' ')}</Badge><Button size="sm" onClick={() => onAddService(appointment)}>Add service</Button></div>
+                <div className="flex flex-wrap items-center gap-2"><Badge tone={appointment.status === 'in-service' ? 'warning' : 'info'}>{appointment.status.replace('-', ' ')}</Badge><Badge tone={appointment.paymentCompleted ? 'success' : 'warning'}>{appointment.paymentCompleted ? 'Paid' : 'Payment pending'}</Badge><Button size="sm" onClick={() => onAddService(appointment)}>Add service</Button></div>
               </Card>
             ))}</section>
         </div>
