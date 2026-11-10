@@ -4,7 +4,9 @@ import { ReviewsApi } from '../lib/api';
 import { Button, Card, Field, Input, Select, Textarea, toast } from './ui';
 
 function PublicReview() {
-  const salonId = new URLSearchParams(window.location.search).get('salonId') || '';
+  const reviewParams = new URLSearchParams(window.location.search);
+  const salonId = reviewParams.get('salonId') || '';
+  const branchId = reviewParams.get('branchId') || '';
   const [form, setForm] = useState({ customerName: '', phone: '', serviceName: '', staffName: '', rating: 5, comment: '' });
   const [submitted, setSubmitted] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -13,7 +15,7 @@ function PublicReview() {
     event.preventDefault();
     setSaving(true);
     try {
-      await ReviewsApi.createPublic({ ...form, salonId });
+      await ReviewsApi.createPublic({ ...form, salonId, ...(branchId ? { branchId } : {}) });
       setSubmitted(true);
     } catch (cause: any) {
       toast(cause?.message || 'Could not submit your review.', 'error');

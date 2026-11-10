@@ -159,7 +159,7 @@ function App() {
   }, [account, tab]);
 
   const visibleTabs = TABS.filter(t => t.roles.includes(effectiveRole) && (t.key !== 'admin' || account?.role === 'admin'))
-    .filter(t => !attendanceLocked || t.key === 'attendance');
+    .filter(t => !attendanceLocked || t.key === 'attendance' || t.key === 'complaints');
   if (account?.role === 'admin') visibleTabs.sort((first, second) => (first.key === 'admin' ? -1 : second.key === 'admin' ? 1 : 0));
   const isOwner = effectiveRole === 'owner' || effectiveRole === 'admin';
 
@@ -273,7 +273,7 @@ function App() {
 
         <main id="main-content" className="mx-auto max-w-7xl px-2 pb-24 pt-3 sm:px-6 sm:pb-8 sm:pt-8">
           <div key={selectedBranchId} className="min-h-[75vh] rounded-[20px] bg-[#F5F5F7] p-3 text-[#1D1D1F] shadow-2xl sm:rounded-[32px] sm:p-8">
-            {attendanceLocked ? <Attendance role={effectiveRole} onCheckInComplete={finishCheckIn} /> : !ready ? (
+            {attendanceLocked && tab !== 'complaints' ? <Attendance role={effectiveRole} onCheckInComplete={finishCheckIn} /> : !ready ? (
               <div className="flex items-center justify-center py-24 text-[#6E6E73]" role="status">Loading BRAIDY SALON…</div>
             ) : (
               <AppErrorBoundary key={tab} onRecover={() => setTab(initialTabFor(account))}>

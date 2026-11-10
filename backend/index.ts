@@ -2901,6 +2901,7 @@ export const handler = router({
   'POST /api/public/reviews': [async ({ body }) => {
     const b: any = body;
     const salonId = String(b.salonId || '').trim();
+    const branchId = String(b.branchId || '').trim();
     const customerName = String(b.customerName || '').trim();
     const phone = String(b.phone || '').trim();
     const serviceName = String(b.serviceName || '').trim();
@@ -2909,7 +2910,12 @@ export const handler = router({
     const rating = Number(b.rating);
     if (!salonId || !customerName || !phone || !serviceName || !rating || rating < 1 || rating > 5) return error('Salon, name, phone, service and a rating from 1 to 5 are required', 400);
     if (customerName.length > 120 || phone.length > 40 || serviceName.length > 160 || staffName.length > 120 || comment.length > 2000) return error('Review details are too long', 400);
-    const [id] = await db.add('reviews', [{ tenantId: salonId, appointmentId: null, customerId: null, customerName, phone, staffId: null, staffName, serviceName, rating, comment, survey: b.survey || {}, source: 'public-qr', createdAt: Date.now() }]);
+    let branch: any = null;
+    if (branchId) {
+      [branch] = await db.get('branches', [branchId]);
+      if (!branch || branch.salonId !== salonId || branch.status !== 'active') return error('Choose an active branch for this review', 400);
+    }
+    const [id] = await db.add('reviews', [{ tenantId: salonId, branchId: branch?.id || null, appointmentId: null, customerId: null, customerName, phone, staffId: null, staffName, serviceName, rating, comment, survey: b.survey || {}, source: 'public-qr', createdAt: Date.now() }]);
     if (!id) return error('Failed to submit review', 500);
     await audit('created', 'public review', { id, customerName, staffName, serviceName, rating }, 'customer');
     return json({ id });

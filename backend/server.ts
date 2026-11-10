@@ -47,7 +47,7 @@ async function resolveContext(request: any) {
   return { accountId: account.id, tenantId: account.tenantId, salonName: account.salonName, branchId, role, name: account.name, staffId: account.staffId };
 }
 
-const publicRoutes = new Set(['/api/_healthcheck', '/api/public/salons', '/api/public/branches', '/api/auth/login', '/api/auth/signup', '/api/auth/demo', '/api/mpesa/callback', '/api/payroll/timeout', '/api/payroll/result', '/api/paystack/webhook']);
+const publicRoutes = new Set(['/api/_healthcheck', '/api/public/salons', '/api/public/branches', '/api/public/reviews', '/api/auth/login', '/api/auth/signup', '/api/auth/demo', '/api/mpesa/callback', '/api/payroll/timeout', '/api/payroll/result', '/api/paystack/webhook']);
 
 for (const [definition, [routeHandler]] of Object.entries(handler.routes)) {
   const [method, path] = definition.split(' ');

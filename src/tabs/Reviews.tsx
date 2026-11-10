@@ -15,7 +15,10 @@ function Reviews() {
   const [staffFilter, setStaffFilter] = useState('all');
   let salonId = '';
   try { salonId = JSON.parse(window.localStorage.getItem('safigroom_account') || '{}').salonId || ''; } catch { salonId = ''; }
-  const reviewLink = `${window.location.origin}/review?salonId=${encodeURIComponent(salonId)}`;
+  const reviewParams = new URLSearchParams({ salonId });
+  const branchId = window.localStorage.getItem('safigroom_selected_branch') || '';
+  if (branchId) reviewParams.set('branchId', branchId);
+  const reviewLink = `${window.location.origin}/review?${reviewParams.toString()}`;
   const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=1000x1000&data=${encodeURIComponent(reviewLink)}`;
 
   const loadReviews = () => ReviewsApi.list().then(setReviews).catch((cause: any) => toast(cause?.message || 'Could not load reviews.', 'error'));
