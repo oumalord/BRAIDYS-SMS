@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ShoppingCart } from 'lucide-react';
+import { Search, ShoppingCart, X } from 'lucide-react';
 import { Card, Button, Modal, Field, Input, Select, toast } from '../components/ui';
 import { CustomersApi, ServicesApi, StaffApi, OrdersApi, PosDraftsApi, AppointmentsApi, fmtMoney } from '../lib/api';
 import { MpesaPayModal } from '../components/MpesaPay';
@@ -12,6 +12,8 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [servingClients, setServingClients] = useState<Customer[]>([]);
   const [services, setServices] = useState<ServiceItem[]>([]);
+  const [serviceSearchOpen, setServiceSearchOpen] = useState(false);
+  const [serviceSearch, setServiceSearch] = useState('');
   const [staff, setStaff] = useState<Staff[]>([]);
   const [cart, setCart] = useState<CartLine[]>([]);
   const [customerId, setCustomerId] = useState('');
@@ -192,7 +194,11 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
     }
   };
 
-  const categories = Array.from(new Set(services.map(s => s.category)));
+  const searchTerm = serviceSearch.trim().toLowerCase();
+  const visibleServices = services.filter(service => !searchTerm
+    || service.name.toLowerCase().includes(searchTerm)
+    || service.category.toLowerCase().includes(searchTerm));
+  const categories = Array.from(new Set(visibleServices.map(service => service.category)));
   const assignableStaff = staff.filter(member => member.employmentStatus !== 'laid-off' && member.status !== 'off');
 
   return (
@@ -201,12 +207,22 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
 
       <div className="grid lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="font-semibold">Services</h2>
+            <div className="flex items-center gap-2">
+              {serviceSearchOpen && <Input autoFocus aria-label="Search services" placeholder="Search services" value={serviceSearch} onChange={event => setServiceSearch(event.target.value)} className="w-48" />}
+              <Button type="button" size="sm" variant="secondary" aria-label={serviceSearchOpen ? 'Close service search' : 'Search services'} title={serviceSearchOpen ? 'Close service search' : 'Search services'} aria-expanded={serviceSearchOpen} onClick={() => {
+                setServiceSearchOpen(open => !open);
+                if (serviceSearchOpen) setServiceSearch('');
+              }}>{serviceSearchOpen ? <X size={15} aria-hidden="true" /> : <Search size={15} aria-hidden="true" />}</Button>
+            </div>
+          </div>
           <div className="space-y-5">
-              {categories.map(cat => (
+              {categories.length === 0 ? <p className="text-sm text-[#6E6E73]">No services match your search.</p> : categories.map(cat => (
                 <div key={cat}>
                   <h3 className="text-xs font-semibold text-[#6E6E73] uppercase tracking-wide mb-2">{cat}</h3>
                   <div className="grid sm:grid-cols-2 gap-2">
-                    {services.filter(s => s.category === cat).map(s => (
+                    {visibleServices.filter(service => service.category === cat).map(s => (
                       <button key={s.id} onClick={() => addService(s)} className={`text-left rounded-2xl border p-3 hover:border-[#0071e3]/40 hover:shadow-sm transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0071e3] ${s.commissionPct === 40 ? 'border-amber-300 bg-amber-50/40' : s.commissionPct === 50 ? 'border-blue-300 bg-blue-50/40' : 'border-black/5 bg-white'}`}>
                         <div className="flex items-center justify-between gap-2"><p className="font-medium text-sm">{s.name}</p>{s.commissionPct === 40 ? <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800">40%</span> : s.commissionPct === 50 ? <span className="shrink-0 rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-semibold text-blue-800">50%</span> : null}</div>
                         <p className="text-xs text-[#6E6E73]">{fmtMoney(s.price, s.currency)} · {s.durationMin} min</p>
