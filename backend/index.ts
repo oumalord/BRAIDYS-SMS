@@ -7,6 +7,8 @@ const DAY = 24 * 3600 * 1000;
 const DEFAULT_STAFF_PIN = '1234';
 const ATTENDANCE_LOCATION = { latitude: -1.2154173, longitude: 36.888536 };
 const ATTENDANCE_RADIUS_METERS = 300;
+const KAMAKIS_ATTENDANCE_LOCATION = { latitude: -1.1679375, longitude: 36.9682031 };
+const KAMAKIS_ATTENDANCE_RADIUS_METERS = 200;
 const ATTENDANCE_ROLES = ['owner', 'admin', 'manager', 'receptionist', 'barber'];
 
 function saturdayFridayRange(date = new Date()) {
@@ -60,16 +62,22 @@ function attendanceRecordId(accountId: string, date: string) {
   return `attendance-${createHash('sha256').update(`${accountId}:${date}`).digest('hex')}`;
 }
 
-function attendanceDistanceMeters(latitude: number, longitude: number) {
+function attendancePolicy(branchName?: string) {
+  return branchName?.toLowerCase().includes('kamakis')
+    ? { location: KAMAKIS_ATTENDANCE_LOCATION, radiusMeters: KAMAKIS_ATTENDANCE_RADIUS_METERS, name: branchName }
+    : { location: ATTENDANCE_LOCATION, radiusMeters: ATTENDANCE_RADIUS_METERS, name: 'Braidy Saloon, Lumumba Drive' };
+}
+
+function attendanceDistanceMeters(latitude: number, longitude: number, location: { latitude: number; longitude: number }) {
   const radians = (degrees: number) => degrees * Math.PI / 180;
-  const latitudeDelta = radians(latitude - ATTENDANCE_LOCATION.latitude);
-  const longitudeDelta = radians(longitude - ATTENDANCE_LOCATION.longitude);
+  const latitudeDelta = radians(latitude - location.latitude);
+  const longitudeDelta = radians(longitude - location.longitude);
   const arc = Math.sin(latitudeDelta / 2) ** 2
-    + Math.cos(radians(ATTENDANCE_LOCATION.latitude)) * Math.cos(radians(latitude)) * Math.sin(longitudeDelta / 2) ** 2;
+    + Math.cos(radians(location.latitude)) * Math.cos(radians(latitude)) * Math.sin(longitudeDelta / 2) ** 2;
   return 6371000 * 2 * Math.atan2(Math.sqrt(arc), Math.sqrt(1 - arc));
 }
 
-function verifiedAttendanceLocation(body: any): { ok: false; error: string } | { ok: true; distanceMeters: number } {
+function verifiedAttendanceLocation(body: any, branchName?: string): { ok: false; error: string } | { ok: true; distanceMeters: number } {
   const latitude = Number(body?.latitude);
   const longitude = Number(body?.longitude);
   const accuracy = Number(body?.accuracy);
@@ -77,8 +85,14 @@ function verifiedAttendanceLocation(body: any): { ok: false; error: string } | {
     return { ok: false, error: 'A valid device location is required' };
   }
   if (!Number.isFinite(accuracy) || accuracy < 0 || accuracy > 150) return { ok: false, error: 'Location accuracy is too low. Try again outdoors.' };
-  const distanceMeters = attendanceDistanceMeters(latitude, longitude);
-  if (distanceMeters + accuracy > ATTENDANCE_RADIUS_METERS) return { ok: false, error: 'You are not at your work station so check in at your location' };
+  const policy = attendancePolicy(branchName);
+  const distanceMeters = attendanceDistanceMeters(latitude, longitude, policy.location);
+  if (distanceMeters + accuracy > policy.radiusMeters) {
+    const message = branchName?.toLowerCase().includes('kamakis')
+      ? 'You must be within 200 metres of the Kamakis location to record attendance.'
+      : 'You are not at your work station so check in at your location';
+    return { ok: false, error: message };
+  }
   return { ok: true, distanceMeters: Math.round(distanceMeters) };
 }
 
@@ -625,8 +639,9 @@ export const handler = router({
     if (!identifier || !credential) return error('Email or phone and a credential are required', 400);
     const { items } = await db.list('accounts', { limit: 5000 });
     const normalizedPhone = normalizeCustomerPhone(identifier);
-    const account = (items as any[]).find(item => String(item.email || '').toLowerCase() === identifier.toLowerCase() || (normalizedPhone && normalizeCustomerPhone(item.phone) === normalizedPhone));
-    if (!account || account.status !== 'active') return error('Invalid login details', 401);
+    const account = (items as any[]).find(item => item.status === 'active'
+      && (String(item.email || '').toLowerCase() === identifier.toLowerCase() || (normalizedPhone && normalizeCustomerPhone(item.phone) === normalizedPhone)));
+    if (!account) return error('Invalid login details', 401);
     const role = normalizeRole(account.role);
     const usesPassword = Boolean(account.passwordHash) || role === 'admin' || role === 'owner';
     const validCredential = usesPassword ? passwordMatches(credential, account.passwordHash) : /^\d{4}$/.test(credential) && passwordMatches(credential, account.pinHash);
@@ -735,9 +750,11 @@ export const handler = router({
   'GET /api/attendance/me': [async () => {
     const context = currentContext();
     if (!context || !ATTENDANCE_ROLES.includes(context.role)) return error('Attendance is only available to salon staff and administrators', 403);
+    const [branch] = context.branchId ? await db.get('branches', [context.branchId]) : [null];
     const date = nairobiDateString();
     const [item] = await db.get('attendance', [attendanceRecordId(context.accountId, date)]);
     let clients: any[] = [];
+    const policy = attendancePolicy(branch?.name);
     if (context.staffId && item?.checkInAt && !item.checkOutAt) {
       const { items: appointments } = await db.list('appointments', { limit: 3000 });
       clients = (appointments as any[])
@@ -745,14 +762,15 @@ export const handler = router({
           && [appointment.staffId, ...(Array.isArray(appointment.items) ? appointment.items.map((service: any) => service.staffId) : [])].some(staffId => String(staffId || '') === String(context.staffId)))
         .map(appointment => ({ id: appointment.id, customerName: appointment.customerName, serviceName: appointment.serviceName, time: appointment.time }));
     }
-    return json({ item: item || null, date, clients });
+    return json({ item: item || null, date, clients, attendanceLocation: { name: policy.name, radiusMeters: policy.radiusMeters } });
   }],
   'POST /api/attendance/check-in': [async ({ body }) => {
     const context = currentContext();
     if (!context || !ATTENDANCE_ROLES.includes(context.role)) return error('Attendance is only available to salon staff and administrators', 403);
+    const [branch] = context.branchId ? await db.get('branches', [context.branchId]) : [null];
     let distanceMeters: number | null = null;
     if (context.role !== 'owner') {
-      const location = verifiedAttendanceLocation(body);
+      const location = verifiedAttendanceLocation(body, branch?.name);
       if (!location.ok) return error(location.error, 403);
       distanceMeters = location.distanceMeters;
     }
@@ -760,7 +778,6 @@ export const handler = router({
     const id = attendanceRecordId(context.accountId, date);
     const [existing] = await db.get('attendance', [id]);
     if (existing) return error('You have already checked in today', 409);
-    const [branch] = context.branchId ? await db.get('branches', [context.branchId]) : [null];
     const item = {
       id, accountId: context.accountId, staffId: context.staffId || null, name: context.name,
       role: context.role, tenantId: context.tenantId, branchId: context.branchId || null,
@@ -777,9 +794,10 @@ export const handler = router({
   'POST /api/attendance/check-out': [async ({ body }) => {
     const context = currentContext();
     if (!context || !ATTENDANCE_ROLES.includes(context.role)) return error('Attendance is only available to salon staff and administrators', 403);
+    const [branch] = context.branchId ? await db.get('branches', [context.branchId]) : [null];
     let distanceMeters: number | null = null;
     if (context.role !== 'owner') {
-      const location = verifiedAttendanceLocation(body);
+      const location = verifiedAttendanceLocation(body, branch?.name);
       if (!location.ok) return error(location.error, 403);
       distanceMeters = location.distanceMeters;
     }

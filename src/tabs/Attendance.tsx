@@ -60,6 +60,7 @@ function Attendance({ role, onCheckInComplete }: { role: Role; onCheckInComplete
   const [date, setDate] = useState(nairobiDate);
   const [mine, setMine] = useState<AttendanceRecord | null>(null);
   const [clients, setClients] = useState<AttendanceClientAssignment[]>([]);
+  const [attendanceLocation, setAttendanceLocation] = useState({ name: 'Braidy Saloon, Lumumba Drive', radiusMeters: 300 });
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
   const [staff, setStaff] = useState<Staff[]>([]);
   const [loading, setLoading] = useState(true);
@@ -76,6 +77,7 @@ function Attendance({ role, onCheckInComplete }: { role: Role; onCheckInComplete
         if (!active) return;
         setMine(today.item);
         setClients(today.clients);
+        setAttendanceLocation(today.attendanceLocation);
         setRecords(daily.items);
         setStaff(roster);
       })
@@ -91,6 +93,7 @@ function Attendance({ role, onCheckInComplete }: { role: Role; onCheckInComplete
     const [today, [daily, roster]] = await Promise.all([AttendanceApi.mine(), dailyRequest]);
     setMine(today.item);
     setClients(today.clients);
+    setAttendanceLocation(today.attendanceLocation);
     setRecords(daily.items);
     setStaff(roster);
   };
@@ -151,7 +154,7 @@ function Attendance({ role, onCheckInComplete }: { role: Role; onCheckInComplete
           <div>
             <p className="text-sm font-medium text-[#6E6E73]">Today · {mine?.date || nairobiDate()}</p>
             <h2 className="mt-1 text-xl font-semibold">{checkedOut ? 'Shift complete' : checkedIn ? `Checked in at ${formatTime(mine?.checkInAt)}` : 'Ready to check in'}</h2>
-            <p className="mt-2 flex items-center gap-1.5 text-sm text-[#6E6E73]"><MapPin size={15} aria-hidden="true" />{role === 'owner' ? 'Owner attendance · any location' : 'Braidy Saloon, Lumumba Drive · within 300 m'}</p>
+            <p className="mt-2 flex items-center gap-1.5 text-sm text-[#6E6E73]"><MapPin size={15} aria-hidden="true" />{role === 'owner' ? 'Owner attendance · any location' : `${attendanceLocation.name} · within ${attendanceLocation.radiusMeters} m`}</p>
             {checkedOut && <p className="mt-1 text-sm text-[#6E6E73]">Checked out at {formatTime(mine?.checkOutAt)}</p>}
           </div>
           <Button onClick={() => void punch(checkedIn ? 'check-out' : 'check-in')} disabled={loading || saving || checkedOut} className="mx-auto min-h-14 min-w-40 sm:mx-4">
