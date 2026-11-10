@@ -151,8 +151,12 @@ function requireOwner() {
   if (!['owner', 'admin'].includes(currentContext()?.role || '')) throw new Error('Only the owner or administrator can edit records');
 }
 
-function isNelliusReceptionist(context = currentContext()) {
-  return context?.role === 'receptionist' && context.name.trim().toLowerCase() === 'nellius';
+async function hasReceptionistAppointmentPrivileges(context = currentContext()) {
+  if (context?.role !== 'receptionist') return false;
+  if (context.name.trim().toLowerCase() === 'nellius') return true;
+  if (!context.branchId) return false;
+  const [branch] = await db.get('branches', [context.branchId]);
+  return String(branch?.name || '').trim().toLowerCase().includes('kamakis');
 }
 
 function createTicketNumber(date: string): string {
@@ -1569,25 +1573,26 @@ export const handler = router({
   'PUT /api/appointments/:id': [async ({ params, body }) => {
     const context = currentContext();
     if (!context || !['owner', 'admin', 'manager', 'receptionist', 'barber'].includes(context.role)) return error('You are not allowed to update appointments', 403);
+    const receptionistHasAppointmentPrivileges = await hasReceptionistAppointmentPrivileges(context);
     const [existing] = await db.get('appointments', [params.id]);
     if (!existing) return error('Appointment not found', 404);
     const patch: any = body;
-    const canManageCardNumber = ['owner', 'admin'].includes(context.role) || isNelliusReceptionist(context);
-    if ('cardNumber' in patch && !canManageCardNumber && String(patch.cardNumber || '') !== String(existing.cardNumber || '')) return error('Only the owner, administrator or receptionist can change a card number', 403);
+    const canManageCardNumber = ['owner', 'admin'].includes(context.role) || receptionistHasAppointmentPrivileges;
+    if ('cardNumber' in patch && !canManageCardNumber && String(patch.cardNumber || '') !== String(existing.cardNumber || '')) return error('Only management or an authorized receptionist can change a card number', 403);
     if (existing.cardNumber && 'cardNumber' in patch && String(patch.cardNumber || '') !== String(existing.cardNumber)) return error('A card number cannot be changed after it is entered', 409);
     if ('cardNumber' in patch) {
       try { patch.cardNumber = appointmentCardNumber(patch.cardNumber); } catch (cause: any) { return error(cause.message, 400); }
     }
-    const canManageClosedAppointments = ['owner', 'admin'].includes(context.role) || isNelliusReceptionist(context);
+    const canManageClosedAppointments = ['owner', 'admin'].includes(context.role) || receptionistHasAppointmentPrivileges;
     const isCancellation = patch.status === 'cancelled' || patch.status === 'no-show';
     const isStatusOnlyChange = Object.keys(patch).length === 1 && 'status' in patch;
     if (context.role === 'receptionist' && 'status' in patch) return error('Receptionists cannot change appointment status', 403);
     if (context.role === 'barber' && existing.staffId !== context.staffId) return error('You can only update appointments assigned to you', 403);
-    const canEditAppointmentDetails = ['owner', 'admin', 'manager'].includes(context.role) || isNelliusReceptionist(context);
-    if (!isCancellation && !isStatusOnlyChange && !canEditAppointmentDetails) return error('Only the owner, administrator, manager or Nellius can edit appointment details', 403);
+    const canEditAppointmentDetails = ['owner', 'admin', 'manager'].includes(context.role) || receptionistHasAppointmentPrivileges;
+    if (!isCancellation && !isStatusOnlyChange && !canEditAppointmentDetails) return error('Only management or an authorized receptionist can edit appointment details', 403);
     const editsDetails = patch.date || patch.time || patch.serviceId || patch.durationMin || 'staffId' in patch;
-    if (editsDetails && !canEditAppointmentDetails) return error('Only the owner, administrator, manager or Nellius can edit appointment details', 403);
-    if (!canManageClosedAppointments && ['completed', 'cancelled', 'no-show'].includes(existing.status) && (patch.date || patch.time || patch.serviceId || 'staffId' in patch)) return error('Completed or closed appointments can only be edited by the owner or administrator', 409);
+    if (editsDetails && !canEditAppointmentDetails) return error('Only management or an authorized receptionist can edit appointment details', 403);
+    if (!canManageClosedAppointments && ['completed', 'cancelled', 'no-show'].includes(existing.status) && (patch.date || patch.time || patch.serviceId || 'staffId' in patch)) return error('Completed or closed appointments can only be edited by management or an authorized receptionist', 409);
     const nextDate = patch.date || existing.date;
     const nextTime = patch.time || existing.time;
     const nextStaffId = 'staffId' in patch ? patch.staffId : existing.staffId;
@@ -1643,6 +1648,7 @@ export const handler = router({
   }],
   'GET /api/appointments/:id/completion': [async ({ params }) => {
     const context = currentContext();
+    const receptionistHasAppointmentPrivileges = await hasReceptionistAppointmentPrivileges(context);
     const { items } = await db.list('orders', { limit: 5000 });
     const [appointment] = await db.get('appointments', [params.id]);
     const order = appointment ? findOrderForAppointment(items as any[], appointment) : null;
@@ -1651,7 +1657,7 @@ export const handler = router({
       const ownAppointment = Boolean(appointment && sameStaffIdentity(appointment.staffId, appointment.staffName, identity));
       const ownOrderItem = Boolean(order && Array.isArray(order.items) && order.items.some((item: any) => sameStaffIdentity(item.staffId, item.staffName, identity) || sameStaffIdentity(item.coStaffId, item.coStaffName, identity)));
       if (!ownAppointment && !ownOrderItem) return error('You can only view completion details for your own appointments', 403);
-    } else if (!context || (!['owner', 'admin'].includes(context.role) && !isNelliusReceptionist(context))) return error('Only the owner, administrator or Nellius can view appointment summaries', 403);
+    } else if (!context || (!['owner', 'admin'].includes(context.role) && !receptionistHasAppointmentPrivileges)) return error('Only management or an authorized receptionist can view appointment summaries', 403);
     if (!order) return error('No completed work was found for this appointment', 404);
     return json({ item: order });
   }],
@@ -1704,7 +1710,8 @@ export const handler = router({
   }],
   'DELETE /api/appointments/:id': [async ({ params }) => {
     const context = currentContext();
-    if (!context || (!['owner', 'admin'].includes(context.role) && !isNelliusReceptionist(context))) return error('Only the owner, administrator or Nellius can delete appointments', 403);
+    const receptionistHasAppointmentPrivileges = await hasReceptionistAppointmentPrivileges(context);
+    if (!context || (!['owner', 'admin'].includes(context.role) && !receptionistHasAppointmentPrivileges)) return error('Only management or an authorized receptionist can delete appointments', 403);
     const [appointment] = await db.get('appointments', [params.id]);
     if (!appointment || appointment.deletedAt) return error('Appointment not found', 404);
     const deletedAt = Date.now();
