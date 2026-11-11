@@ -159,7 +159,7 @@ export const db = {
     const isAdmin = context?.role === 'admin';
     await sql`
       UPDATE app_records
-      SET record = record || jsonb_build_object('deletedAt', ${deletedAt}, 'deletedBy', ${context?.name || 'retention policy'})
+      SET record = record || jsonb_build_object('deletedAt', ${deletedAt}::bigint, 'deletedBy', ${context?.name || 'retention policy'}::text)
       WHERE collection = ${collection}
         AND NOT (record ? 'deletedAt')
         AND CASE
