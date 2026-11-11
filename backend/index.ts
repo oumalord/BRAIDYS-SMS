@@ -178,6 +178,12 @@ function normalizeCustomerName(value: unknown) {
   return String(value || '').trim().replace(/\s+/g, ' ').toLocaleLowerCase();
 }
 
+function appointmentBelongsToBranch(appointment: any, branchId: string, branchName: string) {
+  const appointmentBranchId = String(appointment.branchId || '').trim();
+  if (appointmentBranchId) return appointmentBranchId === branchId;
+  return Boolean(branchName) && String(appointment.branchName || '').trim().toLocaleLowerCase() === branchName.trim().toLocaleLowerCase();
+}
+
 function hasSameDayCustomerDetails(appointment: any, date: string, name: unknown, phone: unknown, cardNumber: string) {
   return !appointment.deletedAt
     && appointment.date === date
@@ -1510,7 +1516,10 @@ export const handler = router({
 
     const { items: existing } = await db.listAllTenant('appointments', context?.tenantId || '', { limit: 5000, branchScope: false });
     if ((existing as any[]).some(appointment => hasSameDayCustomerDetails(appointment, appointmentDate, b.customerName, b.customerPhone, cardNumber))) return error('This customer already has an appointment with the same details on the selected date', 409);
-    if (cardNumber && (existing as any[]).some(appointment => !appointment.deletedAt && appointment.date === appointmentDate && String(appointment.cardNumber || '').trim() === cardNumber)) return error('This card number is already assigned on the selected date', 409);
+    if (cardNumber && (existing as any[]).some(appointment => !appointment.deletedAt
+      && appointment.date === appointmentDate
+      && appointmentBelongsToBranch(appointment, branch.id, branch.name)
+      && String(appointment.cardNumber || '').trim() === cardNumber)) return error('This card number is already assigned on the selected date at this branch', 409);
     const totalDurationMin = items.reduce((s: number, it: any) => s + (it.durationMin || 30), 0);
     const totalPrice = items.reduce((s: number, it: any) => s + (it.price || 0), 0);
     const currency = items[0]?.currency || 'KES';
@@ -1598,10 +1607,15 @@ export const handler = router({
     const nextStaffId = 'staffId' in patch ? patch.staffId : existing.staffId;
     const nextDuration = Number(patch.durationMin || existing.durationMin || 30);
     const nextCardNumber = String(patch.cardNumber || existing.cardNumber || '');
+    const appointmentBranchId = String(existing.branchId || context.branchId || '');
+    const appointmentBranchName = String(existing.branchName || '');
     const { items: appointments } = await db.listAllTenant('appointments', context.tenantId, { limit: 5000, branchScope: false });
     if (appointments.some(appointment => appointment.id !== existing.id && hasSameDayCustomerDetails(appointment, nextDate, existing.customerName, existing.customerPhone || existing.phone, nextCardNumber))) return error('This customer already has an appointment with the same details on the selected date', 409);
     if (nextCardNumber) {
-      if ((appointments as any[]).some(appointment => appointment.id !== existing.id && !appointment.deletedAt && appointment.date === nextDate && String(appointment.cardNumber || '').trim() === nextCardNumber)) return error('This card number is already assigned on the selected date', 409);
+      if ((appointments as any[]).some(appointment => appointment.id !== existing.id && !appointment.deletedAt
+        && appointment.date === nextDate
+        && appointmentBelongsToBranch(appointment, appointmentBranchId, appointmentBranchName)
+        && String(appointment.cardNumber || '').trim() === nextCardNumber)) return error('This card number is already assigned on the selected date at this branch', 409);
     }
     if (nextStaffId && nextStaffId !== existing.staffId) {
       const [assignedStaff] = await db.get('staff', [patch.staffId]);
