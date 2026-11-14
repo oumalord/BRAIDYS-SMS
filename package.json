@@ -18,8 +18,8 @@
         "db:inspect-alice-card-1": "tsx database/inspect-alice-card-1-2026-08-29.ts",
         "db:void-deleted-appointment-orders": "tsx database/void-orders-for-deleted-appointments-2026-08-31.ts",
         "db:clear-operational-records": "tsx database/clear-operational-records-2026-08-31.ts",
-        "build": "vite build",
-        "vercel-build": "node --input-type=module -e \"import { build } from 'esbuild'; await build({ entryPoints: ['backend/server.ts'], bundle: true, platform: 'node', format: 'cjs', outfile: 'api/server.cjs', target: ['node18'] });\" && vite build",
+        "build": "npx vite build",
+        "vercel-build": "npx esbuild backend/server.ts --bundle --platform=node --format=cjs --outfile=api/server.cjs && npx vite build",
         "preview": "vite preview"
     },
     "dependencies": {
