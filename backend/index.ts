@@ -848,6 +848,7 @@ export const handler = router({
     const context = currentContext();
     if (!context?.staffId || !['barber', 'receptionist'].includes(context.role)) return error('Only an employee can view this earnings summary', 403);
     const { from: weekFrom, to: weekTo } = currentSaturdayThroughFridayRange();
+    const { from: lastWeekFrom, to: lastWeekTo } = mostRecentSaturdayThroughFridayRange();
     const now = Date.now();
     const todayFrom = new Date(`${nairobiDateString()}T00:00:00+03:00`).getTime();
 
@@ -857,6 +858,8 @@ export const handler = router({
       db.list('appointments', { limit: 5000 }),
     ]);
     const weekEarnings = calculateUnpaidStaffEarnings(orders as any[], payoutItems as any[], appointments as any[], weekFrom, weekTo)
+      .filter(line => line.currency === 'KES' && line.staffId === String(context.staffId));
+    const lastWeekEarnings = calculateUnpaidStaffEarnings(orders as any[], payoutItems as any[], appointments as any[], lastWeekFrom, lastWeekTo)
       .filter(line => line.currency === 'KES' && line.staffId === String(context.staffId));
     const todayEarnings = calculateUnpaidStaffEarnings(orders as any[], payoutItems as any[], appointments as any[], todayFrom, now + 1)
       .filter(line => line.currency === 'KES' && line.staffId === String(context.staffId));
@@ -871,6 +874,8 @@ export const handler = router({
     let todayAssistant = 0;
     let weekCommission = 0;
     let weekAssistant = 0;
+    let lastWeekCommission = 0;
+    let lastWeekAssistant = 0;
     const completedWork = ownCurrentPeriodEarnings.map(line => {
       const order: any = ordersById.get(line.orderId);
       const appointment: any = appointmentsById.get(String(order?.appointmentId || ''));
@@ -890,6 +895,10 @@ export const handler = router({
       if (amountField === 'assistant') weekAssistant += earning.amount;
       else weekCommission += earning.amount;
     }
+    for (const earning of lastWeekEarnings) {
+      if (earning.role === 'assistant') lastWeekAssistant += earning.amount;
+      else lastWeekCommission += earning.amount;
+    }
     for (const earning of todayEarnings) {
       const amountField = earning.role === 'assistant' ? 'assistant' : 'commission';
       if (amountField === 'assistant') todayAssistant += earning.amount;
@@ -897,9 +906,27 @@ export const handler = router({
     }
 
     const weekly = { commission: weekCommission, assistant: weekAssistant, total: Math.round((weekCommission + weekAssistant) * 100) / 100 };
+    const lastWeekWork = lastWeekEarnings.map(line => {
+      const order: any = ordersById.get(line.orderId);
+      const appointment: any = appointmentsById.get(String(order?.appointmentId || ''));
+      return {
+        serviceName: line.serviceName,
+        appointmentDate: appointment?.date || null,
+        createdAt: line.createdAt,
+        role: line.role,
+        amount: line.amount,
+      };
+    });
     return json({
       today: { commission: todayCommission, assistant: todayAssistant, total: todayCommission + todayAssistant },
       week: weekly,
+      lastWeek: {
+        commission: lastWeekCommission,
+        assistant: lastWeekAssistant,
+        total: Math.round((lastWeekCommission + lastWeekAssistant) * 100) / 100,
+        period: { from: lastWeekFrom, to: lastWeekTo - 1 },
+      },
+      lastWeekWork: lastWeekWork.sort((left, right) => right.createdAt - left.createdAt),
       fortnight: weekly,
       completedWork: completedWork.sort((left, right) => right.createdAt - left.createdAt),
       paidHistory: paidHistory.sort((left, right) => right.createdAt - left.createdAt).slice(0, 100),

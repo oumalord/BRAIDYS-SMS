@@ -11,6 +11,8 @@ function EmployeeDashboard({ account, onAddService }: { account: { name?: string
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [dailyEarnings, setDailyEarnings] = useState(0);
   const [weekToDateEarnings, setWeekToDateEarnings] = useState(0);
+  const [lastWeekEarnings, setLastWeekEarnings] = useState({ commission: 0, assistant: 0, total: 0, period: { from: 0, to: 0 } });
+  const [lastWeekWork, setLastWeekWork] = useState<{ serviceName: string; appointmentDate: string | null; createdAt: number; role: 'commission' | 'assistant'; amount: number }[]>([]);
   const [dailyCommission, setDailyCommission] = useState(0);
   const [dailyAssistant, setDailyAssistant] = useState(0);
   const [completedWork, setCompletedWork] = useState<{ serviceName: string; customerName: string; appointmentDate: string | null; appointmentTime: string | null; appointmentId: string | null; createdAt: number; role: 'commission' | 'assistant'; amount: number }[]>([]);
@@ -47,6 +49,8 @@ function EmployeeDashboard({ account, onAddService }: { account: { name?: string
       setEarningsError('');
       setDailyEarnings(earnings.today.total || 0);
       setWeekToDateEarnings((earnings.week || earnings.fortnight).total || 0);
+      setLastWeekEarnings(earnings.lastWeek || { commission: 0, assistant: 0, total: 0, period: { from: 0, to: 0 } });
+      setLastWeekWork(earnings.lastWeekWork || []);
       setDailyCommission(earnings.today.commission || 0);
       setDailyAssistant(earnings.today.assistant || 0);
       setCompletedWork(earnings.completedWork || []);
@@ -96,6 +100,16 @@ function EmployeeDashboard({ account, onAddService }: { account: { name?: string
       <Card className="p-5">
           <p className="text-xs text-[#6E6E73]">My unpaid Saturday-to-Friday KES earnings</p>
           {earningsLoading ? <p className="mt-1 text-sm text-[#6E6E73]">Loading…</p> : earningsError ? <p role="status" className="mt-1 text-sm text-amber-700">{earningsError}</p> : <p className="text-xl font-semibold mt-1">{fmtExactKES(weekToDateEarnings)}</p>}
+      </Card>
+
+      <Card className="p-5">
+        <h2 className="font-semibold">Last Week’s Unpaid Earnings</h2>
+        <p className="text-xs text-[#6E6E73]">{lastWeekEarnings.period.from ? `${new Intl.DateTimeFormat(undefined, { timeZone: 'Africa/Nairobi', day: 'numeric', month: 'short' }).format(new Date(lastWeekEarnings.period.from))} – ${new Intl.DateTimeFormat(undefined, { timeZone: 'Africa/Nairobi', day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(lastWeekEarnings.period.to))}` : 'Previous Saturday–Friday period'}</p>
+        {earningsLoading ? <p className="mt-2 text-sm text-[#6E6E73]">Loading…</p> : earningsError ? <p role="status" className="mt-2 text-sm text-amber-700">{earningsError}</p> : <>
+          <p className="mt-1 text-xl font-semibold">{fmtExactKES(lastWeekEarnings.total)}</p>
+          <p className="text-xs text-[#6E6E73]">Commission {fmtExactKES(lastWeekEarnings.commission)} + assistant compensation {fmtExactKES(lastWeekEarnings.assistant)}</p>
+          {lastWeekWork.length > 0 && <div className="mt-3 space-y-2">{lastWeekWork.map((work, index) => <div key={`${work.createdAt}-${work.serviceName}-${index}`} className="flex items-center justify-between gap-3 border-t border-black/5 pt-2"><div><p className="text-sm font-medium">{work.serviceName}</p><p className="text-xs text-[#6E6E73]">{work.appointmentDate || new Date(work.createdAt).toLocaleDateString()} · {work.role === 'assistant' ? 'assistant compensation' : 'commission'}</p></div><p className="shrink-0 text-sm font-semibold">{fmtExactKES(work.amount)}</p></div>)}</div>}
+        </>}
       </Card>
 
       <Card className="p-5">
