@@ -12,3 +12,12 @@ export function toPaystackMinorAmount(amount: number, multiplier: number): numbe
   const minorAmount = Math.round(amount * multiplier);
   return Number.isSafeInteger(minorAmount) ? minorAmount : 0;
 }
+
+export function hasSufficientPaystackPrincipalBalance(availableMinorUnits: number, transferAmounts: number[]): boolean {
+  if (!Number.isSafeInteger(availableMinorUnits) || availableMinorUnits < 0) return false;
+  if (!transferAmounts.length || transferAmounts.some(amount => !Number.isSafeInteger(amount) || amount <= 0)) return false;
+  const requiredMinorUnits = transferAmounts.reduce((sum, amount) => sum + amount, 0);
+  return Number.isSafeInteger(requiredMinorUnits) && availableMinorUnits >= requiredMinorUnits;
+}
+
+export const hasSufficientPaystackPrincipal = hasSufficientPaystackPrincipalBalance;
