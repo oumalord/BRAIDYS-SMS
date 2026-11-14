@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { calculateUnpaidStaffEarnings, currentSaturdayThroughFridayRange, currentSundayThroughNowRange, mostRecentSaturdayThroughFridayRange, previousSaturdayThroughYesterdayRange, staffAppointmentMinutes } from '../backend/earnings.ts';
+import { calculateUnpaidStaffEarnings, currentSaturdayThroughFridayRange, currentSundayThroughNowRange, mostRecentSaturdayThroughFridayRange, paystackConfirmedPayoutItems, previousSaturdayThroughYesterdayRange, staffAppointmentMinutes } from '../backend/earnings.ts';
 
 const now = new Date(2026, 8, 26, 12, 0, 0).getTime();
 const startOfSunday = new Date(2026, 8, 20, 0, 0, 0).getTime();
@@ -174,6 +174,51 @@ test('paid transactions reappear in unpaid calculations only after payout lines 
   const cleared = calculateUnpaidStaffEarnings([order], [{ ...activePayout, itemKey: matchingKey, deletedAt: now }], [], startOfSunday, startOfNextSunday);
   assert.equal(active.length, 0);
   assert.equal(cleared.reduce((sum, line) => sum + line.amount, 0), 450);
+});
+
+test('only confirmed successful Paystack transfers suppress unpaid earnings', () => {
+  const orders = [
+    orderAt(now, { staffId: 'pending', commission: 100 }, { id: 'pending-order' }),
+    orderAt(now, { staffId: 'confirmed', commission: 200 }, { id: 'confirmed-order' }),
+    orderAt(now, { staffId: 'legacy', commission: 300 }, { id: 'legacy-order' }),
+  ];
+  const payoutItems = [
+    { itemKey: 'pending-order:0' },
+    { itemKey: 'confirmed-order:0' },
+    { itemKey: 'legacy-order:0' },
+  ];
+  const payrollItems = [
+    { provider: 'paystack', status: 'pending', itemKeys: ['pending-order:0'] },
+    { provider: 'paystack', status: 'success', itemKeys: ['confirmed-order:0'] },
+    { provider: 'legacy', status: 'success', itemKeys: ['legacy-order:0'] },
+  ];
+  const confirmedPayoutItems = paystackConfirmedPayoutItems(payoutItems, payrollItems);
+  const lines = calculateUnpaidStaffEarnings(orders, confirmedPayoutItems, [], startOfSunday, startOfNextSunday);
+
+  assert.deepEqual(confirmedPayoutItems.map(item => item.itemKey), ['confirmed-order:0']);
+  assert.deepEqual(lines.map(line => line.staffId), ['pending', 'legacy']);
+});
+
+test('raw payout rows still defer to successful Paystack confirmations when payroll data is supplied', () => {
+  const orders = [
+    orderAt(now, { staffId: 'pending', commission: 100 }, { id: 'pending-order' }),
+    orderAt(now, { staffId: 'confirmed', commission: 200 }, { id: 'confirmed-order' }),
+    orderAt(now, { staffId: 'legacy', commission: 300 }, { id: 'legacy-order' }),
+  ];
+  const payoutItems = [
+    { itemKey: 'pending-order:0' },
+    { itemKey: 'confirmed-order:0' },
+    { itemKey: 'legacy-order:0' },
+  ];
+  const payrollItems = [
+    { provider: 'paystack', status: 'pending', itemKeys: ['pending-order:0'] },
+    { provider: 'paystack', status: 'success', itemKeys: ['confirmed-order:0'] },
+    { provider: 'legacy', status: 'success', itemKeys: ['legacy-order:0'] },
+  ];
+
+  const lines = calculateUnpaidStaffEarnings(orders, payoutItems, [], startOfSunday, startOfNextSunday, payrollItems);
+
+  assert.deepEqual(lines.map(line => line.staffId), ['pending', 'legacy']);
 });
 
 test('appointment minutes use assigned service durations and legacy primary-staff fallback', () => {

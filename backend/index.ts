@@ -1,7 +1,7 @@
 import { router, json, error, db, ai, storage, currentContext, withRequestContext } from './runtime.ts';
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
-import { calculateUnpaidStaffEarnings, currentSaturdayThroughFridayRange, currentSundayThroughNowRange, mostRecentSaturdayThroughFridayRange, staffAppointmentMinutes, staffCommission } from './earnings.ts';
-import { toPaystackMinorAmount, verifyPaystackSignature } from './paystack.ts';
+import { calculateUnpaidStaffEarnings, currentSaturdayThroughFridayRange, currentSundayThroughNowRange, mostRecentSaturdayThroughFridayRange, paystackConfirmedPayoutItems, staffAppointmentMinutes, staffCommission } from './earnings.ts';
+import { hasSufficientPaystackPrincipalBalance, toPaystackMinorAmount, verifyPaystackSignature } from './paystack.ts';
 
 const DAY = 24 * 3600 * 1000;
 const DEFAULT_STAFF_PIN = '1234';
@@ -763,8 +763,8 @@ export const handler = router({
     const [branch] = context.branchId ? await db.get('branches', [context.branchId]) : [null];
     const date = nairobiDateString();
     const [item] = await db.get('attendance', [attendanceRecordId(context.accountId, date)]);
-    let clients: any[] = [];
     const policy = attendancePolicy(branch?.name);
+    let clients: any[] = [];
     if (context.staffId && item?.checkInAt && !item.checkOutAt) {
       const { items: appointments } = await db.list('appointments', { limit: 3000 });
       clients = (appointments as any[])
@@ -852,16 +852,17 @@ export const handler = router({
     const now = Date.now();
     const todayFrom = new Date(`${nairobiDateString()}T00:00:00+03:00`).getTime();
 
-    const [{ items: orders }, { items: payoutItems }, { items: appointments }] = await Promise.all([
+    const [{ items: orders }, { items: payoutItems }, { items: appointments }, { items: payrollItems }] = await Promise.all([
       db.list('orders', { limit: 5000 }),
       db.list('payout_items', { limit: 10000 }),
       db.list('appointments', { limit: 5000 }),
+      db.list('payroll_items', { limit: 5000 }),
     ]);
-    const weekEarnings = calculateUnpaidStaffEarnings(orders as any[], payoutItems as any[], appointments as any[], weekFrom, weekTo)
+    const weekEarnings = calculateUnpaidStaffEarnings(orders as any[], payoutItems as any[], appointments as any[], weekFrom, weekTo, payrollItems as any[])
       .filter(line => line.currency === 'KES' && line.staffId === String(context.staffId));
-    const lastWeekEarnings = calculateUnpaidStaffEarnings(orders as any[], payoutItems as any[], appointments as any[], lastWeekFrom, lastWeekTo)
+    const lastWeekEarnings = calculateUnpaidStaffEarnings(orders as any[], payoutItems as any[], appointments as any[], lastWeekFrom, lastWeekTo, payrollItems as any[])
       .filter(line => line.currency === 'KES' && line.staffId === String(context.staffId));
-    const todayEarnings = calculateUnpaidStaffEarnings(orders as any[], payoutItems as any[], appointments as any[], todayFrom, now + 1)
+    const todayEarnings = calculateUnpaidStaffEarnings(orders as any[], payoutItems as any[], appointments as any[], todayFrom, now + 1, payrollItems as any[])
       .filter(line => line.currency === 'KES' && line.staffId === String(context.staffId));
     const ownCurrentPeriodEarnings = weekEarnings;
     const orderCreatedAtById = new Map((orders as any[]).map(order => [String(order.id), Number(order.createdAt || 0)]));
@@ -884,6 +885,7 @@ export const handler = router({
         customerName: order?.customerName || appointment?.customerName || 'Client',
         appointmentDate: appointment?.date || null,
         appointmentTime: appointment?.time || null,
+        cardNumber: appointment?.cardNumber || null,
         appointmentId: appointment?.id || order?.appointmentId || null,
         createdAt: line.createdAt,
         role: line.role,
@@ -972,10 +974,9 @@ export const handler = router({
     const [id] = await db.add('staff', [{ tenantId: branch.salonId, salonName: branch.salonName || context?.salonName || '', name: b.name, role: b.role || 'Staff', specialties: b.specialties || [], branch: branch.name, branchId: branch.id, branchName: branch.name, chair: b.chair || '', phone: b.phone || '', accountEmail: b.accountEmail || '', accountStatus: b.accountStatus || 'pending', employmentStatus: 'active', commissionPct: 50, status: b.status || 'available' }]);
     if (!id) return error('Failed to add staff', 500);
     await audit('created', 'staff', { id, name: b.name, responsibility: b.role || 'Staff', accountEmail: b.accountEmail || '', commissionPct: 50 }, b.actor || 'owner');
-    let accountId: string | undefined;
     if (currentContext()) {
       const ownerContext = currentContext()!;
-      [accountId] = await db.add('accounts', [{ id: `account-${randomBytes(8).toString('hex')}`, tenantId: branch.salonId, salonName: branch.salonName || ownerContext.salonName, branchId: branch.id, name: b.name, email: String(b.accountEmail || '').trim().toLowerCase(), phone: b.phone, role: isReceptionist ? 'receptionist' : 'barber', status: 'active', pinHash: passwordHash(pin), staffId: id, createdAt: Date.now() }]);
+      await db.add('accounts', [{ id: `account-${randomBytes(8).toString('hex')}`, tenantId: branch.salonId, salonName: branch.salonName || ownerContext.salonName, branchId: branch.id, name: b.name, email: String(b.accountEmail || '').trim().toLowerCase(), phone: b.phone, role: isReceptionist ? 'receptionist' : 'barber', status: 'active', pinHash: passwordHash(pin), staffId: id, createdAt: Date.now() }]);
     }
     return json({ id });
   }],
@@ -1463,11 +1464,12 @@ export const handler = router({
     const period = String(query.period || '') === 'last-week'
       ? mostRecentSaturdayThroughFridayRange()
       : selectedDay || currentSaturdayThroughFridayRange();
-    const [{ items: staffRows }, { items: orders }, { items: appointmentRows }, { items: payoutItems }] = await Promise.all([
+    const [{ items: staffRows }, { items: orders }, { items: appointmentRows }, { items: payoutItems }, { items: payrollItems }] = await Promise.all([
       db.list('staff', { limit: 2000 }),
       db.list('orders', { limit: 5000 }),
       db.list('appointments', { limit: 5000 }),
       db.list('payout_items', { limit: 10000 }),
+      db.list('payroll_items', { limit: 5000 }),
     ]);
     const tenantStaff = (staffRows as any[]).filter(member => !member.deletedAt && contextIncludesPayrollRecord(member, context));
     let matchedStaff = tenantStaff.filter(member => (!context.branchId || member.branchId === context.branchId)
@@ -1484,7 +1486,7 @@ export const handler = router({
     const branchOrders = branchScopedPayrollOrders(orders as any[], tenantAppointments, staffById, context);
     const branchPayoutItems = branchScopedPayrollPayoutItems(payoutItems as any[], context);
     const activePaidKeys = new Set(branchPayoutItems.filter(item => !item.deletedAt).map(item => String(item.itemKey || '')));
-    const earningLines = calculateUnpaidStaffEarnings(branchOrders, branchPayoutItems, tenantAppointments, period.from, period.to)
+    const earningLines = calculateUnpaidStaffEarnings(branchOrders, branchPayoutItems, tenantAppointments, period.from, period.to, payrollItems as any[])
       .filter(line => line.currency === 'KES');
     const selectedStaffIds = new Set(matchedStaff.map(member => String(member.id)));
     const staffLineKey = (orderId: string, itemIndex: number) => `${orderId}:${itemIndex}`;
@@ -2195,10 +2197,11 @@ export const handler = router({
     const { items } = await db.list('staff', { limit: 2000 });
     const showLastWeek = String(query.period || '') === 'last-week';
     const period = showLastWeek ? mostRecentSaturdayThroughFridayRange() : currentSaturdayThroughFridayRange();
-    const [{ items: orders }, { items: payoutItems }, { items: appointments }] = await Promise.all([
+    const [{ items: orders }, { items: payoutItems }, { items: appointments }, { items: payrollItems }] = await Promise.all([
       db.list('orders', { limit: 5000 }),
       db.list('payout_items', { limit: 10000 }),
       db.list('appointments', { limit: 5000 }),
+      db.list('payroll_items', { limit: 5000 }),
     ]);
     const tenantStaff = (items as any[]).filter(member => !member.deletedAt && contextIncludesPayrollRecord(member, context));
     const payrollStaff = tenantStaff.filter(member => !context.branchId || member.branchId === context.branchId);
@@ -2207,7 +2210,7 @@ export const handler = router({
     const tenantAppointments = (appointments as any[]).filter(appointment => contextIncludesPayrollRecord(appointment, context));
     const branchOrders = branchScopedPayrollOrders(orders as any[], tenantAppointments, staffById, context);
     const branchPayoutItems = branchScopedPayrollPayoutItems(payoutItems as any[], context);
-    const unpaidEarnings = calculateUnpaidStaffEarnings(branchOrders, branchPayoutItems, tenantAppointments, period.from, period.to)
+    const unpaidEarnings = calculateUnpaidStaffEarnings(branchOrders, branchPayoutItems, tenantAppointments, period.from, period.to, payrollItems as any[])
       .filter(earning => earning.currency === 'KES' && staffById.has(earning.staffId));
     const totals = new Map<string, { commission: number; assistant: number; count: number; revenue: number; helperDeductions: number }>();
     for (const earning of unpaidEarnings) {
@@ -2371,8 +2374,8 @@ export const handler = router({
     const tenantAppointments = (appointments as any[]).filter(item => contextIncludesPayrollRecord(item, context));
     const scopedBranchOrders = branchScopedPayrollOrders(orders as any[], tenantAppointments, staffById, context);
     const branchPayoutItems = branchScopedPayrollPayoutItems(payoutItems as any[], context);
-    const { from, to } = currentSaturdayThroughFridayRange();
-    const earnings = calculateUnpaidStaffEarnings(scopedBranchOrders, branchPayoutItems, tenantAppointments, from, to)
+    const { from, to } = mostRecentSaturdayThroughFridayRange();
+    const earnings = calculateUnpaidStaffEarnings(scopedBranchOrders, branchPayoutItems, tenantAppointments, from, to, previousPayrollItems as any[])
       .filter(line => staffById.has(line.staffId) && line.currency === 'KES');
     for (const earning of earnings) {
       const lines = earningsByStaffId.get(earning.staffId) || [];
@@ -2387,9 +2390,9 @@ export const handler = router({
     const transfers: any[] = [];
     for (const member of members) {
       const lines = earningsByStaffId.get(String(member.id)) || [];
-      if (!lines.length) return error(`No unpaid KES earnings are available for ${member.name}. Refresh payroll before sending.`, 409);
-      if (lines.some(line => lockedItemKeys.has(String(line.itemKey)))) return error(`A transfer for ${member.name}'s payroll is already pending. Check transfer status before retrying.`, 409);
       const amountKES = Math.round(lines.reduce((sum, line) => sum + Number(line.amount || 0), 0));
+      if (!lines.length || amountKES <= 0) continue;
+      if (lines.some(line => lockedItemKeys.has(String(line.itemKey)))) return error(`A transfer for ${member.name}'s payroll is already pending. Check transfer status before retrying.`, 409);
       const expectedAmountKES = Number(body?.expectedAmountsKES?.[member.id]);
       if (!Number.isSafeInteger(expectedAmountKES) || expectedAmountKES !== amountKES) return error(`Unpaid earnings changed for ${member.name}. Refresh payroll and confirm the updated total.`, 409);
       const amount = toPaystackMinorAmount(amountKES, multiplier);
@@ -2401,9 +2404,43 @@ export const handler = router({
       || !/^RCP_[A-Za-z0-9]+$/.test(String(member.paystackRecipientCode || '')));
     if (missingRecipient) return error(`Sync Paystack recipients before sending. ${missingRecipient.member.name} does not have a live recipient code.`, 409);
     if (new Set(transfers.map(transfer => transfer.member.paystackRecipientCode)).size !== transfers.length) return error('Each staff member must have a unique Paystack recipient code.', 400);
+    const invalidTransfer = transfers.find(transfer => {
+      const { member, amountKES, amount, reference } = transfer;
+      const phone = normalizeCustomerPhone(member.phone);
+      return !Number.isSafeInteger(amountKES) || amountKES <= 0
+        || !Number.isSafeInteger(amount) || amount <= 0
+        || !/^254[17]\d{8}$/.test(phone)
+        || member.paystackRecipientMode !== 'live'
+        || !/^RCP_[A-Za-z0-9]+$/.test(String(member.paystackRecipientCode || ''))
+        || !/^[a-z0-9_-]{16,50}$/.test(String(reference || ''));
+    });
+    if (invalidTransfer) return error(`Payroll entry for ${invalidTransfer.member.name} failed local Paystack validation. Sync recipients and refresh payroll; no payment was sent.`, 400);
+    const paystackTransfers = transfers.map(transfer => ({
+      amount: transfer.amount,
+      recipient: String(transfer.member.paystackRecipientCode),
+      reference: transfer.reference,
+      reason: `BRAIDY SALON payroll ${randomBytes(8).toString('hex')}`,
+    }));
+
+    const totalKES = transfers.reduce((sum, transfer) => sum + transfer.amountKES, 0);
+    let balanceBody: any;
+    try {
+      const balanceResponse = await fetch('https://api.paystack.co/balance', {
+        headers: { Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}` },
+        signal: AbortSignal.timeout(10000),
+      });
+      balanceBody = await balanceResponse.json().catch(() => ({}));
+      if (!balanceResponse.ok || !balanceBody.status) return error('Could not verify Paystack KES balance. No payroll was submitted.', 502);
+    } catch {
+      return error('Could not verify Paystack KES balance. No payroll was submitted.', 502);
+    }
+    const balances = Array.isArray(balanceBody.data) ? balanceBody.data : [balanceBody.data];
+    const availableBalanceMinor = Number(balances.find((balance: any) => String(balance?.currency || '').toUpperCase() === 'KES')?.balance);
+    if (!hasSufficientPaystackPrincipalBalance(availableBalanceMinor, paystackTransfers.map(transfer => transfer.amount))) {
+      return error(`Insufficient Paystack KES balance for the KES ${totalKES.toLocaleString('en-KE')} payroll principal, before transfer fees. Add funds and refresh payroll; no transfer was submitted.`, 409);
+    }
 
     const now = Date.now();
-    const totalKES = transfers.reduce((sum, transfer) => sum + transfer.amountKES, 0);
     const [batchId] = await db.add('payroll_batches', [{ tenantId: context.tenantId, branchId: context.branchId || null, provider: 'paystack', status: 'submitting', totalKES, employeeCount: transfers.length, createdAt: now }]);
     const payrollRecords = transfers.map(transfer => ({
       tenantId: context.tenantId, branchId: context.branchId || transfer.member.branchId || null, provider: 'paystack', batchId,
@@ -2417,9 +2454,7 @@ export const handler = router({
       const response = await fetch('https://api.paystack.co/transfer/bulk', {
         method: 'POST',
         headers: { Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ source: 'balance', currency: 'KES', transfers: transfers.map(transfer => ({
-          amount: transfer.amount, recipient: transfer.member.paystackRecipientCode, reference: transfer.reference, reason: `BRAIDY SALON payroll ${batchId}`,
-        })) }),
+        body: JSON.stringify({ source: 'balance', currency: 'KES', transfers: paystackTransfers }),
       });
       const resultBody: any = await response.json().catch(() => ({}));
       if (!response.ok || !resultBody.status) {
@@ -2561,7 +2596,14 @@ export const handler = router({
     const productById = new Map(productsAll.map((p: any) => [p.id, p]));
     const appointmentById = new Map(appts.map((appointment: any) => [appointment.id, appointment]));
 
-    const rangeOrders = (orders as any[]).filter(o => !o.deletedAt && o.createdAt >= cutoff && (rangeEnd === null || o.createdAt < rangeEnd));
+    const rangeOrders = (orders as any[]).filter(order => {
+      if (order.deletedAt) return false;
+      const createdAt = Number(order.createdAt || 0);
+      if (!selectedDay) return createdAt >= cutoff && (rangeEnd === null || createdAt < rangeEnd);
+      if (!order.appointmentId) return createdAt >= selectedDay.from && createdAt < selectedDay.to;
+      const appointment: any = appointmentById.get(String(order.appointmentId));
+      return Boolean(appointment && !appointment.deletedAt && appointment.status === 'completed' && appointment.date === requestedDate);
+    });
     const paymentMethodTotals: Record<'Cash' | 'Card' | 'M-Pesa', number> = { Cash: 0, Card: 0, 'M-Pesa': 0 };
     const revenueByCurrency: Record<string, number> = {};
     for (const o of rangeOrders) {
@@ -2696,13 +2738,14 @@ export const handler = router({
     const byCustomer = new Map<string, number[]>();
     for (const o of orders as any[]) {
       if (!o.customerId) continue;
-      const arr = byCustomer.get(o.customerId) || [];
+      const customerId = String(o.customerId);
+      const arr = byCustomer.get(customerId) || [];
       arr.push(o.createdAt);
-      byCustomer.set(o.customerId, arr);
+      byCustomer.set(customerId, arr);
     }
     const results: any[] = [];
     for (const c of customers as any[]) {
-      const dates = (byCustomer.get(c.id) || []).sort((a, b) => a - b);
+      const dates = (byCustomer.get(String(c.id)) || []).sort((a, b) => a - b);
       if (dates.length < 2) continue;
       let gaps = 0;
       for (let i = 1; i < dates.length; i++) gaps += dates[i] - dates[i - 1];

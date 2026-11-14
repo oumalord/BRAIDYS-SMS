@@ -45,6 +45,13 @@ export interface StaffEarningLine {
   branchId: string | null;
 }
 
+export function paystackConfirmedPayoutItems(payoutItems: any[], payrollItems: any[]) {
+  const confirmedKeys = new Set(payrollItems
+    .filter(item => item.provider === 'paystack' && item.status === 'success')
+    .flatMap(item => Array.isArray(item.itemKeys) ? item.itemKeys.map(String) : []));
+  return payoutItems.filter(item => !item.deletedAt && confirmedKeys.has(String(item.itemKey || '')));
+}
+
 export function currentSundayThroughNowRange(date = new Date()) {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Africa/Nairobi', year: 'numeric', month: '2-digit', day: '2-digit',
@@ -103,8 +110,10 @@ export function calculateUnpaidStaffEarnings(
   appointments: any[],
   from: number,
   to: number,
+  payrollItems: any[] = [],
 ): StaffEarningLine[] {
-  const paidKeys = new Set(payoutItems.filter(item => !item.deletedAt).map(item => String(item.itemKey || '')));
+  const activePayouts = payrollItems.length ? paystackConfirmedPayoutItems(payoutItems, payrollItems) : payoutItems;
+  const paidKeys = new Set(activePayouts.filter(item => !item.deletedAt).map(item => String(item.itemKey || '')));
   const appointmentsById = new Map(appointments.map(appointment => [String(appointment.id), appointment]));
   const lines: StaffEarningLine[] = [];
   const addLine = (order: any, item: any, itemKey: string, staffId: unknown, role: 'commission' | 'assistant', amount: number, revenue: number, commissionBase: number, helperDeduction: number, productCost: number) => {
