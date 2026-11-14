@@ -19,7 +19,7 @@
         "db:void-deleted-appointment-orders": "tsx database/void-orders-for-deleted-appointments-2026-08-31.ts",
         "db:clear-operational-records": "tsx database/clear-operational-records-2026-08-31.ts",
         "build": "vite build",
-           "vercel-build": "node node_modules/esbuild/bin/esbuild backend/server.ts --bundle --platform=node --format=cjs --outfile=api/server.cjs && node node_modules/vite/bin/vite.js build",
+        "vercel-build": "node --input-type=module -e \"import { build } from 'esbuild'; await build({ entryPoints: ['backend/server.ts'], bundle: true, platform: 'node', format: 'cjs', outfile: 'api/server.cjs', target: ['node18'] });\" && vite build",
         "preview": "vite preview"
     },
     "dependencies": {
@@ -40,6 +40,7 @@
         "@types/react-dom": "^19.0.0",
         "@vitejs/plugin-react": "^4.3.0",
         "autoprefixer": "^10.4.0",
+        "esbuild": "^0.25.0",
         "postcss": "^8.4.0",
         "tailwindcss": "^3.4.0",
         "tsx": "^4.19.2",
