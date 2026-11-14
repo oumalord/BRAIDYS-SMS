@@ -1,6 +1,6 @@
 import { router, json, error, db, ai, storage, currentContext, withRequestContext } from './runtime.ts';
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
-import { calculateUnpaidStaffEarnings, currentSaturdayThroughFridayRange, currentSundayThroughNowRange, staffAppointmentMinutes, staffCommission } from './earnings.ts';
+import { calculateUnpaidStaffEarnings, currentSaturdayThroughFridayRange, currentSundayThroughNowRange, mostRecentSaturdayThroughFridayRange, staffAppointmentMinutes, staffCommission } from './earnings.ts';
 import { toPaystackMinorAmount, verifyPaystackSignature } from './paystack.ts';
 
 const DAY = 24 * 3600 * 1000;
@@ -1433,7 +1433,9 @@ export const handler = router({
     const selectedDate = String(query.date || '').trim();
     const selectedDay = selectedDate ? nairobiDayRange(selectedDate) : null;
     if (selectedDate && !selectedDay) return error('Choose a valid earnings date', 400);
-    const period = selectedDay || currentSaturdayThroughFridayRange();
+    const period = String(query.period || '') === 'last-week'
+      ? mostRecentSaturdayThroughFridayRange()
+      : selectedDay || currentSaturdayThroughFridayRange();
     const [{ items: staffRows }, { items: orders }, { items: appointmentRows }, { items: payoutItems }] = await Promise.all([
       db.list('staff', { limit: 2000 }),
       db.list('orders', { limit: 5000 }),
@@ -2160,11 +2162,12 @@ export const handler = router({
     const { items } = await db.list('payout_batches', { limit: 100 });
     return json({ items: (items as any[]).filter(batch => !batch.deletedAt).sort((a, b) => b.createdAt - a.createdAt) });
   }],
-  'GET /api/payroll/staff': [async () => {
+  'GET /api/payroll/staff': [async ({ query }) => {
     const context = currentContext();
     if (!context || !['owner', 'admin'].includes(context.role)) return error('Only the owner or administrator can view payroll staff', 403);
     const { items } = await db.list('staff', { limit: 2000 });
-    const period = currentSaturdayThroughFridayRange();
+    const showLastWeek = String(query.period || '') === 'last-week';
+    const period = showLastWeek ? mostRecentSaturdayThroughFridayRange() : currentSaturdayThroughFridayRange();
     const [{ items: orders }, { items: payoutItems }, { items: appointments }] = await Promise.all([
       db.list('orders', { limit: 5000 }),
       db.list('payout_items', { limit: 10000 }),

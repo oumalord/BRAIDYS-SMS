@@ -51,6 +51,17 @@ test('active earnings period rolls from Saturday through the following Friday in
   assert.deepEqual(lines.map(line => line.amount), [100, 200]);
 });
 
+test('earnings week changes at Saturday midnight in Nairobi', () => {
+  const justBeforeMidnight = currentSaturdayThroughFridayRange(new Date('2026-11-13T23:59:59.999+03:00'));
+  const atMidnight = currentSaturdayThroughFridayRange(new Date('2026-11-14T00:00:00+03:00'));
+  const lastWeek = mostRecentSaturdayThroughFridayRange(new Date('2026-11-14T00:00:00+03:00'));
+
+  assert.equal(new Date(justBeforeMidnight.from).toISOString(), '2026-11-06T21:00:00.000Z');
+  assert.equal(new Date(atMidnight.from).toISOString(), '2026-11-13T21:00:00.000Z');
+  assert.equal(lastWeek.from, justBeforeMidnight.from);
+  assert.equal(lastWeek.to, atMidnight.from);
+});
+
 test('linked earnings follow appointment date when the order is entered after the payroll cutoff', () => {
   const range = mostRecentSaturdayThroughFridayRange(new Date('2026-11-07T12:00:00+03:00'));
   const orderCreatedOnSaturday = orderAt(new Date('2026-11-07T09:24:49+03:00').getTime(), {

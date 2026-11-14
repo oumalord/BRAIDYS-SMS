@@ -29,6 +29,10 @@ function Finance() {
   const [paystackBatches, setPaystackBatches] = useState<PaystackPayrollBatch[]>([]);
   const [staff, setStaff] = useState<Staff[]>([]);
   const [payrollPeriod, setPayrollPeriod] = useState<{ from: number; to: number } | null>(null);
+  const [lastWeekStaff, setLastWeekStaff] = useState<Staff[]>([]);
+  const [lastWeekPeriod, setLastWeekPeriod] = useState<{ from: number; to: number } | null>(null);
+  const [lastWeekLoading, setLastWeekLoading] = useState(true);
+  const [lastWeekError, setLastWeekError] = useState('');
   const [payrollLoading, setPayrollLoading] = useState(true);
   const [payrollError, setPayrollError] = useState('');
   const [paystackConfigured, setPaystackConfigured] = useState(false);
@@ -54,6 +58,12 @@ function Finance() {
       .then(payroll => { setStaff(payroll.items); setPayrollPeriod(payroll.period); })
       .catch((cause: any) => setPayrollError(cause?.message || 'Could not load this week’s payroll data.'))
       .finally(() => setPayrollLoading(false));
+    setLastWeekLoading(true);
+    setLastWeekError('');
+    PayrollApi.staff('last-week')
+      .then(payroll => { setLastWeekStaff(payroll.items); setLastWeekPeriod(payroll.period); })
+      .catch((cause: any) => setLastWeekError(cause?.message || 'Could not load last week’s unpaid earnings.'))
+      .finally(() => setLastWeekLoading(false));
     PayrollApi.paystackStatus().then(status => { setPaystackConfigured(status.configured); setCanSendPaystack(status.canSend); }).catch(() => { setPaystackConfigured(false); setCanSendPaystack(false); });
   };
   const load = (refreshPayroll = true) => {
@@ -177,7 +187,10 @@ function Finance() {
   const payrollDateRange = payrollPeriod
     ? `${payrollDateFormatter.format(new Date(payrollPeriod.from))} – ${payrollDateFormatter.format(new Date(payrollPeriod.to))}`
     : 'Saturday through Friday';
-  const selectedEarningsLabel = payrollDateRange;
+  const lastWeekDateRange = lastWeekPeriod
+    ? `${payrollDateFormatter.format(new Date(lastWeekPeriod.from))} – ${payrollDateFormatter.format(new Date(lastWeekPeriod.to))}`
+    : 'previous Saturday through Friday';
+  const selectedEarningsLabel = lastWeekDateRange;
   const totalUnpaidEarnings = (member: Staff) => Number(member.commissionEarnedWeek || 0) + Number(member.assistantEarnedWeek || 0);
   const payrollStaff = staff.filter(member => member.employmentStatus !== 'laid-off')
     .sort((first, second) => totalUnpaidEarnings(second) - totalUnpaidEarnings(first) || first.name.localeCompare(second.name));
@@ -185,7 +198,8 @@ function Finance() {
   const paystackRecipientsMissingCount = paystackRecipients.filter(({ member }) => member.paystackRecipientMode !== 'live'
     || !/^RCP_[A-Za-z0-9]+$/.test(String(member.paystackRecipientCode || ''))).length;
   const paystackDepositTotalKES = paystackRecipients.reduce((sum, recipient) => sum + recipient.amountKES, 0);
-  const weeklyStaffEarnings = payrollStaff.map(member => {
+  const lastWeekPayrollStaff = lastWeekStaff.filter(member => member.employmentStatus !== 'laid-off');
+  const weeklyStaffEarnings = lastWeekPayrollStaff.map(member => {
     const commission = Number(member.commissionEarnedWeek || 0);
     const assistantEarnings = Number(member.assistantEarnedWeek || 0);
     return {
@@ -203,7 +217,7 @@ function Finance() {
     setBreakdown(null);
     setBreakdownError('');
     setBreakdownLoading(true);
-    try { setBreakdown(await AppointmentsApi.staffWeeklyWork(member.id)); }
+    try { setBreakdown(await AppointmentsApi.staffWeeklyWork(member.id, undefined, 'last-week')); }
     catch (cause: any) { setBreakdownError(cause?.message || 'Could not load this staff member’s appointment earnings.'); }
     finally { setBreakdownLoading(false); }
   };
@@ -328,8 +342,8 @@ function Finance() {
             </div>
           </Card>
           <Card className="p-6">
-            <div className="mb-3"><h2 className="font-semibold mb-1">Unpaid Staff Earnings</h2><p className="text-xs text-[#6E6E73]">Unpaid KES commissions and assistant compensation for {selectedEarningsLabel}. Already-paid earnings are excluded.</p></div>
-            {payrollLoading ? <p className="text-sm text-[#6E6E73]">Loading unpaid earnings…</p> : weeklyStaffEarnings.length === 0 ? <p className="text-sm text-[#6E6E73]">No staff records are available.</p> : (
+            <div className="mb-3"><h2 className="font-semibold mb-1">Last Week’s Unpaid Staff Earnings</h2><p className="text-xs text-[#6E6E73]">Unpaid KES commissions and assistant compensation for {selectedEarningsLabel}. Already-paid earnings are excluded.</p></div>
+            {lastWeekLoading ? <p className="text-sm text-[#6E6E73]">Loading last week’s unpaid earnings…</p> : lastWeekError ? <p role="status" className="text-sm text-amber-700">{lastWeekError}</p> : weeklyStaffEarnings.length === 0 ? <p className="text-sm text-[#6E6E73]">No staff records are available.</p> : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <caption className="sr-only">Commission and assistant earnings by staff for {selectedEarningsLabel}</caption>

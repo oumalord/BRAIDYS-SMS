@@ -118,7 +118,7 @@ export const CustomersApi = {
 
 export const AppointmentsApi = {
   list: (date?: string) => api.get(date ? `/api/appointments?date=${date}` : '/api/appointments').then(r => r.data.items as Appointment[]),
-  staffWeeklyWork: (staffId: string, date?: string) => api.get(`/api/appointments/staff-weekly?staffId=${encodeURIComponent(staffId)}${date ? `&date=${encodeURIComponent(date)}` : ''}`).then(r => r.data as WeeklyStaffWorkReport),
+  staffWeeklyWork: (staffId: string, date?: string, period?: 'last-week') => api.get(`/api/appointments/staff-weekly?staffId=${encodeURIComponent(staffId)}${date ? `&date=${encodeURIComponent(date)}` : ''}${period ? `&period=${period}` : ''}`).then(r => r.data as WeeklyStaffWorkReport),
   create: (a: unknown) => api.post('/api/appointments', a).then(r => { invalidate('dashboard'); invalidate('customers'); return r; }),
   update: (id: string, patch: Partial<Appointment>) => api.put(`/api/appointments/${id}`, patch).then(r => { invalidate('dashboard'); return r; }),
   reopenCompleted: (id: string) => api.post(`/api/appointments/${id}/reopen`).then(r => { invalidate('appointments'); invalidate('customers'); invalidate('dashboard'); return r; }),
@@ -176,7 +176,7 @@ export const PayoutsApi = {
 };
 
 export const PayrollApi = {
-  staff: () => api.get('/api/payroll/staff').then(r => ({ items: r.data.items as Staff[], period: r.data.period as { from: number; to: number } })),
+  staff: (period: 'current' | 'last-week' = 'current') => api.get(`/api/payroll/staff${period === 'last-week' ? '?period=last-week' : ''}`).then(r => ({ items: r.data.items as Staff[], period: r.data.period as { from: number; to: number } })),
   send: (recipients: { staffId: string; amountKES: number; phone: string }[]) => api.post('/api/payroll/send', { recipients }),
   paystackStatus: () => api.get('/api/payroll/paystack/status').then(r => r.data as { configured: boolean; canSend: boolean; currency: 'KES'; amountMultiplier: number | null; webhookPath: string }),
   paystackBatches: () => api.get('/api/payroll/paystack/batches').then(r => r.data.items as PaystackPayrollBatch[]),

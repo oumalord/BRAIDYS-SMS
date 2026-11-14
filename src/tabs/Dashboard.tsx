@@ -34,7 +34,7 @@ function Dashboard() {
     RebookingApi.list()
       .then(items => { if (alive) setRebooking(items); })
       .catch(() => { if (alive) toast('Could not load rebooking suggestions.', 'error'); });
-    PayrollApi.staff()
+    PayrollApi.staff('last-week')
       .then(payroll => {
         if (!alive) return;
         setOwnerStaffEarnings(payroll.items);
@@ -56,9 +56,10 @@ function Dashboard() {
   const revenueKES = data.revenueByCurrency.KES || 0;
   const revenueUSD = data.revenueByCurrency.USD || 0;
   const profitKES = data.estimatedProfitByCurrency.KES || 0;
+  const earningsDateFormatter = new Intl.DateTimeFormat(undefined, { timeZone: 'Africa/Nairobi', year: 'numeric', month: 'short', day: 'numeric' });
   const earningsDateRange = earningsPeriod
-    ? `${new Date(earningsPeriod.from).toLocaleDateString()} – ${new Date(earningsPeriod.to).toLocaleDateString()}`
-    : 'Sunday–Saturday';
+    ? `${earningsDateFormatter.format(new Date(earningsPeriod.from))} – ${earningsDateFormatter.format(new Date(earningsPeriod.to))}`
+    : 'Saturday–Friday';
 
   return (
     <div className="space-y-6">
@@ -85,7 +86,7 @@ function Dashboard() {
       </div>
 
       <Card className="p-4 sm:p-6">
-        <div className="mb-4"><h2 className="font-semibold">Staff Earnings · Sunday–Saturday</h2><p className="text-xs text-[#6E6E73]">Unpaid earnings from {earningsDateRange}. Includes commission and assistant-only earnings for every staff member.</p></div>
+        <div className="mb-4"><h2 className="font-semibold">Last Week’s Unpaid Staff Earnings · Saturday–Friday</h2><p className="text-xs text-[#6E6E73]">Unpaid commission and assistant compensation from {earningsDateRange}.</p></div>
         {earningsLoading ? <p className="text-sm text-[#6E6E73]">Loading weekly staff earnings…</p> : earningsError ? <p role="status" className="text-sm text-amber-700">{earningsError} Business metrics are available above.</p> : ownerStaffEarnings.length === 0 ? <p className="text-sm text-[#6E6E73]">No staff records are available.</p> : <div className="space-y-2">{[...ownerStaffEarnings].sort((first, second) => ((second.commissionEarnedWeek || 0) + (second.assistantEarnedWeek || 0)) - ((first.commissionEarnedWeek || 0) + (first.assistantEarnedWeek || 0))).map(member => { const commission = member.commissionEarnedWeek || 0; const assistant = member.assistantEarnedWeek || 0; return <div key={member.id} className="flex items-center justify-between gap-3 border-b border-black/5 pb-2 last:border-0"><div><p className="text-sm font-medium">{member.name}</p><p className="text-xs text-[#6E6E73]">Commission {fmtMoney(commission, 'KES')} · assistant earnings {fmtMoney(assistant, 'KES')}</p></div><p className="shrink-0 text-sm font-semibold">{fmtMoney(commission + assistant, 'KES')}</p></div>; })}</div>}
       </Card>
 
