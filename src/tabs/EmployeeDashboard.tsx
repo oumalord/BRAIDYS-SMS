@@ -15,7 +15,7 @@ function EmployeeDashboard({ account, onAddService }: { account: { name?: string
   const [lastWeekWork, setLastWeekWork] = useState<{ serviceName: string; appointmentDate: string | null; createdAt: number; role: 'commission' | 'assistant'; amount: number }[]>([]);
   const [dailyCommission, setDailyCommission] = useState(0);
   const [dailyAssistant, setDailyAssistant] = useState(0);
-  const [completedWork, setCompletedWork] = useState<{ serviceName: string; customerName: string; appointmentDate: string | null; appointmentTime: string | null; appointmentId: string | null; createdAt: number; role: 'commission' | 'assistant'; amount: number }[]>([]);
+  const [completedWork, setCompletedWork] = useState<{ serviceName: string; customerName: string; appointmentDate: string | null; appointmentTime: string | null; appointmentId: string | null; cardNumber: string | null; createdAt: number; role: 'commission' | 'assistant'; amount: number }[]>([]);
   const [paidHistory, setPaidHistory] = useState<{ serviceName: string; createdAt: number; paidAt?: number; role: 'commission' | 'assistant'; amount: number }[]>([]);
   const [waitingClients, setWaitingClients] = useState<Appointment[]>([]);
   const [earningsLoading, setEarningsLoading] = useState(true);
@@ -114,7 +114,6 @@ function EmployeeDashboard({ account, onAddService }: { account: { name?: string
 
       <Card className="p-5">
         <h2 className="font-semibold mb-3">Completed Services</h2>
-        {earningsLoading ? <p className="text-sm text-[#6E6E73]">Loading completed service earnings…</p> : earningsError ? <p className="text-sm text-amber-700">{earningsError}</p> : completedWork.length === 0 ? <p className="text-sm text-[#6E6E73]">Completed services and their earnings will appear here.</p> : <div className="space-y-2">{completedWork.map((work, index) => <div key={`${work.appointmentId || work.createdAt}-${work.serviceName}-${index}`} className="flex items-center justify-between gap-3 border-b border-black/5 pb-2 last:border-0"><div><p className="text-sm font-medium">{work.serviceName} · {work.customerName}</p><p className="text-xs text-[#6E6E73]">{work.appointmentDate || new Date(work.createdAt).toLocaleDateString()}{work.appointmentTime ? ` at ${work.appointmentTime}` : ''} · {work.role === 'assistant' ? 'Assistant earnings' : 'Commission'}</p></div><p className="shrink-0 text-sm font-semibold">{fmtExactKES(work.amount)}</p></div>)}</div>}
       </Card>
 
       <Card className="p-5">
