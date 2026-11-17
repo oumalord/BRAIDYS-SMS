@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Pencil, Plus, Tag } from 'lucide-react';
+import { Pencil, Plus, Search, Tag, X } from 'lucide-react';
 import { Card, Button, Modal, Field, Input, Select, EmptyState, LoadingState, toast } from '../components/ui';
 import { ServicesApi, fmtMoney } from '../lib/api';
 import type { ServiceItem, Currency, Role } from '../types';
@@ -33,6 +33,8 @@ async function resizeServiceImage(file: File): Promise<string> {
 function Services({ role }: { role: Role }) {
   const [services, setServices] = useState<ServiceItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [serviceSearchOpen, setServiceSearchOpen] = useState(false);
+  const [serviceSearch, setServiceSearch] = useState('');
   const [open, setOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [form, setForm] = useState({ name: '', category: '', price: 0, currency: 'KES' as Currency, durationMin: 30, description: '', imageUrl: '', staffCount: 1 as 1 | 2, commissionPct: 50 as 30 | 33.35 | 40 | 50 });
@@ -77,25 +79,36 @@ function Services({ role }: { role: Role }) {
     load();
   };
 
-  const categories = Array.from(new Set(services.map(s => s.category)));
+  const searchTerm = serviceSearch.trim().toLowerCase();
+  const visibleServices = services.filter(service => !searchTerm
+    || service.name.toLowerCase().includes(searchTerm)
+    || service.category.toLowerCase().includes(searchTerm));
+  const categories = Array.from(new Set(visibleServices.map(service => service.category)));
   const canEdit = role === 'owner' || role === 'admin';
 
   if (loading) return <LoadingState label="Loading services…" />;
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div><h1 className="text-2xl font-semibold tracking-tight">Services Catalog</h1><p className="text-sm text-[#6E6E73]">{services.length} services across {categories.length} categories. Owner and admin accounts can edit services after adding them.</p></div>
-        <Button onClick={() => { setEditId(null); setOpen(true); }}><Plus size={16} aria-hidden="true" />Add Service</Button>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0"><h1 className="text-2xl font-semibold tracking-tight">Services Catalog</h1><p className="text-sm text-[#6E6E73]">{visibleServices.length} services across {categories.length} categories. Owner and admin accounts can edit services after adding them.</p></div>
+        <div className="flex items-center justify-between gap-2 sm:justify-end">
+          {serviceSearchOpen && <Input autoFocus aria-label="Search services" placeholder="Search services" value={serviceSearch} onChange={event => setServiceSearch(event.target.value)} className="w-32 sm:w-48" />}
+          <Button type="button" size="sm" variant="secondary" aria-label={serviceSearchOpen ? 'Close service search' : 'Search services'} title={serviceSearchOpen ? 'Close service search' : 'Search services'} aria-expanded={serviceSearchOpen} onClick={() => {
+            setServiceSearchOpen(open => !open);
+            if (serviceSearchOpen) setServiceSearch('');
+          }}>{serviceSearchOpen ? <X size={15} aria-hidden="true" /> : <Search size={15} aria-hidden="true" />}</Button>
+          {canEdit && <Button onClick={() => { setEditId(null); setOpen(true); }}><Plus size={16} aria-hidden="true" />Add Service</Button>}
+        </div>
       </div>
 
-      {services.length === 0 ? <EmptyState icon={Tag} title="No services yet" description="Add your first service to the catalog." /> : (
+      {services.length === 0 ? <EmptyState icon={Tag} title="No services yet" description="Add your first service to the catalog." /> : visibleServices.length === 0 ? <EmptyState icon={Tag} title="No services match your search" description="Try another service name or category." /> : (
         <div className="space-y-6">
           {categories.map(cat => (
             <div key={cat}>
               <h2 className="text-xs font-semibold text-[#6E6E73] uppercase tracking-wide mb-2">{cat}</h2>
               <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                {services.filter(s => s.category === cat).map(s => (
+                {visibleServices.filter(s => s.category === cat).map(s => (
                   <Card key={s.id} className={`p-4 ${s.commissionPct === 40 ? 'border-amber-300 bg-amber-50/40' : ''}`}>
                     {s.imageUrl && <img src={s.imageUrl} alt={`${s.name} service`} className="mb-3 aspect-[4/3] w-full rounded-lg object-cover" />}
                     <div className="flex items-center justify-between gap-2"><p className="font-medium text-sm">{s.name}</p>{s.commissionPct === 40 && <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800">40% commission</span>}</div>

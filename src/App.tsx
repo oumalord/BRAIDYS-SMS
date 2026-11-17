@@ -35,7 +35,7 @@ const TABS: { key: TabKey; label: string; icon: any; roles: Role[] }[] = [
   { key: 'appointments', label: 'Appointments', icon: Calendar, roles: ['owner', 'manager', 'receptionist', 'barber', 'admin'] },
   { key: 'attendance', label: 'Attendance', icon: Fingerprint, roles: ['owner', 'manager', 'receptionist', 'barber', 'admin'] },
   { key: 'staff', label: 'Staff & Chairs', icon: Scissors, roles: ['owner', 'manager', 'receptionist', 'admin'] },
-  { key: 'services', label: 'Services', icon: Tag, roles: ['owner', 'manager', 'receptionist', 'admin'] },
+  { key: 'services', label: 'Services', icon: Tag, roles: ['owner', 'manager', 'receptionist', 'barber', 'customer', 'admin'] },
   { key: 'memberships', label: 'Memberships', icon: CreditCard, roles: ['owner', 'admin'] },
   { key: 'promotions', label: 'Promotions', icon: Percent, roles: ['owner', 'manager', 'receptionist', 'admin'] },
   { key: 'reviews', label: 'Reviews', icon: MessageSquare, roles: ['owner', 'admin'] },
