@@ -2374,7 +2374,7 @@ export const handler = router({
     const tenantAppointments = (appointments as any[]).filter(item => contextIncludesPayrollRecord(item, context));
     const scopedBranchOrders = branchScopedPayrollOrders(orders as any[], tenantAppointments, staffById, context);
     const branchPayoutItems = branchScopedPayrollPayoutItems(payoutItems as any[], context);
-    const { from, to } = mostRecentSaturdayThroughFridayRange();
+    const { from, to } = currentSaturdayThroughFridayRange();
     const earnings = calculateUnpaidStaffEarnings(scopedBranchOrders, branchPayoutItems, tenantAppointments, from, to, previousPayrollItems as any[])
       .filter(line => staffById.has(line.staffId) && line.currency === 'KES');
     for (const earning of earnings) {
