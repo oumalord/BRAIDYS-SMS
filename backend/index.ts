@@ -831,6 +831,10 @@ export const handler = router({
     if (!nairobiDayRange(date)) return error('Choose a valid attendance date', 400);
     const { items } = await db.list('attendance', { limit: 5000 });
    
+
+   
+
+   
     const visible = (items as any[]).filter(item => item.date === date && (context.role !== 'receptionist' || item.role !== 'owner') && (!context.branchId || item.branchId === context.branchId));
     visible.sort((first, second) => Number(first.checkInAt || 0) - Number(second.checkInAt || 0));
     const activeAttendanceByStaffId = new Map(visible.filter(item => item.staffId && item.checkInAt && !item.checkOutAt).map(item => [String(item.staffId), item]));
@@ -1222,7 +1226,8 @@ export const handler = router({
       db.list('queue', { limit: 5000 }),
       db.list('reviews', { limit: 5000 }),
     ]);
-    const visibleStaff = (staffRows as any[]).filter(member => !member.deletedAt && (!context.branchId || String(member.branchId || '') === context.branchId));
+    const visibleStaff = (staffRows as any[]).filter(member => !member.deletedAt && contextIncludesPayrollRecord(member, context)
+      && (!context.branchId || member.branchId === context.branchId));
     const staffById = new Map(visibleStaff.map(member => [String(member.id), member]));
     const reportById = new Map<string, any>();
     const ensureReport = (staffId: unknown, fallback: any = {}) => {
@@ -1513,17 +1518,8 @@ export const handler = router({
       if (!response.ok || !resultBody.status) {
         const providerMessage = String(resultBody.message || `Paystack rejected the batch (${response.status}).`);
         const thirdPartyPayoutsDisabled = /cannot initiate third[ -]party payouts/i.test(providerMessage);
-        const providerFailures = Array.isArray(resultBody.data?.errors) ? resultBody.data.errors : [];
-        const successRows = Array.isArray(resultBody.data?.success) ? resultBody.data.success : [];
-        for (const recipient of requestSucceeded ? successRows : []) {
-          const phone = normalizeCustomerPhone(recipient?.details?.account_number);
-          const code = String(recipient?.recipient_code || '');
-          if (/^254[17]\d{8}$/.test(phone) && /^RCP_[A-Za-z0-9]+$/.test(code)) recipientCodesByPhone.set(phone, code);
-        }
-        const providerMessage = String(providerFailures[0]?.message || result?.message || 'Paystack could not register this M-PESA recipient.');
-        for (const { member, phone } of validMembers) {
-          if (!requestSucceeded || !recipientCodesByPhone.has(phone)) failures.push({ member, error: providerMessage });
-        }
+        await db.update('payroll_batches', [{ id: batchId, record: { id: batchId, tenantId: context.tenantId, branchId: context.branchId || null, provider: 'paystack', status: 'failed', totalKES, employeeCount: transfers.length, createdAt: now, error: providerMessage } }]);
+        await db.update('payroll_items', itemIds.map((id: string, index: number) => ({ id, record: { ...payrollRecords[index], id, status: 'failed', error: providerMessage } })));
         return error(providerMessage, thirdPartyPayoutsDisabled ? 503 : 502);
       }
       const acceptedRows = Array.isArray(resultBody.data) ? resultBody.data : Array.isArray(resultBody.data?.success) ? resultBody.data.success : [];
@@ -1702,136 +1698,6 @@ export const handler = router({
     const parts = [kesLines, usdLines].filter(Boolean);
     return json({ answer: parts.length ? `Commission earned by staff (all recorded orders) \u2014 ${parts.join(' | ')}.` : 'No commission-generating sales recorded yet.', grounded: true });
   }],
-  'GET /api/analytics/rebooking': [async () => {
-    const orders = (await db.list('orders', { limit: 1000 })).items;
-    const customerIds = Array.from(new Set((orders as any[]).map(order => String(order.customerId || '')).filter(Boolean)));
-    if (!customerIds.length) return json({ items: [] });
-    const customers = (await db.get('customers', customerIds)).filter(Boolean);
-    const byCustomer = new Map<string, number[]>();
-    for (const o of orders as any[]) {
-      if (!o.customerId) continue;
-      const customerId = String(o.customerId);
-      const arr = byCustomer.get(customerId) || [];
-      arr.push(o.createdAt);
-      byCustomer.set(customerId, arr);
-    }
-    const results: any[] = [];
-    for (const c of customers as any[]) {
-      const dates = (byCustomer.get(String(c.id)) || []).sort((a, b) => a - b);
-      if (dates.length < 2) continue;
-      let gaps = 0;
-      for (let i = 1; i < dates.length; i++) gaps += dates[i] - dates[i - 1];
-      const avgGap = gaps / (dates.length - 1);
-      const last = dates[dates.length - 1];
-      const predicted = last + avgGap;
-      const daysUntil = Math.round((predicted - Date.now()) / DAY);
-      if (daysUntil <= 7) {
-        results.push({ customerId: c.id, customerName: c.name, avgIntervalDays: Math.round(avgGap / DAY), predictedDate: new Date(predicted).toISOString().slice(0, 10), daysUntil, lastVisit: new Date(last).toISOString().slice(0, 10) });
-      }
-    }
-    results.sort((a, b) => a.daysUntil - b.daysUntil);
-    return json({ items: results });
-  }],
-
-  'POST /api/ai/ask': [async ({ body }) => {
-    const q = (((body as any)?.question) || '').toLowerCase().trim();
-    if (!q) return error('Question is required', 400);
-    const { items: orders } = await db.list('orders', { limit: 1000 });
-    const { items: staffAll } = await db.list('staff', { limit: 200 });
-    const { items: productsAll } = await db.list('products', { limit: 500 });
-    const { items: customersAll } = await db.list('customers', { limit: 1000 });
-
-    const now = Date.now();
-    const monthAgo = now - 30 * DAY;
-    const weekAgo = saturdayFridayRange().from;
-    const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
-
-    const sumRange = (cutoff: number) => {
-      const res: Record<string, number> = {};
-      for (const o of orders as any[]) {
-        if (o.createdAt >= cutoff) {
-          const t = o.totalByCurrency || (typeof o.total === 'number' ? { KES: o.total } : {});
-          for (const c of Object.keys(t)) res[c] = (res[c] || 0) + t[c];
-        }
-      }
-      return res;
-    };
-
-    if (q.includes('revenue') || q.includes('sales') || q.includes('earn')) {
-      let cutoff = monthAgo; let label = 'this month (last 30 days)';
-      if (q.includes('today')) { cutoff = todayStart.getTime(); label = 'today'; }
-      else if (q.includes('week')) { cutoff = weekAgo; label = 'this week'; }
-      const totals = sumRange(cutoff);
-      const count = (orders as any[]).filter(o => o.createdAt >= cutoff).length;
-      const parts = Object.entries(totals).map(([c, v]) => c === 'USD' ? `$${(v as number).toFixed(2)}` : `KES ${Math.round(v as number).toLocaleString()}`);
-      const text = parts.length ? parts.join(' and ') : 'KES 0';
-      return json({ answer: `Revenue ${label} is ${text} across ${count} transaction${count === 1 ? '' : 's'}. This is computed directly from your recorded orders.`, grounded: true });
-    }
-
-    if (q.includes('top') && (q.includes('staff') || q.includes('barber') || q.includes('stylist'))) {
-      const kesMap = new Map<string, number>(); const usdMap = new Map<string, number>();
-      for (const o of orders as any[]) for (const it of (o.items || [])) if (it.type === 'service' && it.staffId) {
-        const m = it.currency === 'USD' ? usdMap : kesMap;
-        m.set(it.staffName, (m.get(it.staffName) || 0) + it.price * it.qty);
-      }
-      const kesSorted = Array.from(kesMap.entries()).sort((a, b) => b[1] - a[1]);
-      const usdSorted = Array.from(usdMap.entries()).sort((a, b) => b[1] - a[1]);
-      if (kesSorted.length === 0 && usdSorted.length === 0) return json({ answer: 'No completed sales with staff assigned yet, so I cannot determine a top performer.', grounded: true });
-      const bits: string[] = [];
-      if (kesSorted.length) bits.push(`${kesSorted[0][0]} leads KES sales with KES ${Math.round(kesSorted[0][1]).toLocaleString()}`);
-      if (usdSorted.length) bits.push(`${usdSorted[0][0]} leads USD sales with $${usdSorted[0][1].toFixed(2)}`);
-      return json({ answer: bits.join('; ') + '.', grounded: true });
-    }
-
-    if (q.includes('low stock') || q.includes('run out') || q.includes('restock') || q.includes('inventory')) {
-      const low = (productsAll as any[]).filter(p => p.stock <= p.lowStockThreshold);
-      if (low.length === 0) return json({ answer: 'No products are currently below their low-stock threshold.', grounded: true });
-      const list = low.map(p => `${p.name} (${p.stock} ${p.unit} left, threshold ${p.lowStockThreshold})`).join(', ');
-      return json({ answer: `${low.length} product${low.length === 1 ? '' : 's'} at or below the reorder threshold: ${list}.`, grounded: true });
-    }
-
-    if (q.includes('inactive') || (q.includes('customer') && (q.includes("haven't") || q.includes('not visited') || q.includes('havent')))) {
-      const match = q.match(/(\d+)\s*day/);
-      const days = match ? parseInt(match[1], 10) : 60;
-      const cutoff = now - days * DAY;
-      const inactive = (customersAll as any[]).filter(c => c.lastVisit && c.lastVisit < cutoff);
-      if (inactive.length === 0) return json({ answer: `No customers with a recorded visit are inactive for more than ${days} days.`, grounded: true });
-      const names = inactive.slice(0, 10).map(c => c.name).join(', ');
-      return json({ answer: `${inactive.length} customer${inactive.length === 1 ? '' : 's'} haven't visited in over ${days} days: ${names}${inactive.length > 10 ? ', and others' : ''}.`, grounded: true });
-    }
-
-    if (q.includes('busiest') || q.includes('busy hour')) {
-      const hourCounts = new Array(24).fill(0);
-      for (const o of orders as any[]) hourCounts[new Date(o.createdAt).getHours()]++;
-      const maxCount = Math.max(...hourCounts);
-      if (maxCount === 0) return json({ answer: 'Not enough transaction history yet to determine peak hours.', grounded: true });
-      const maxHour = hourCounts.indexOf(maxCount);
-      return json({ answer: `Based on recorded transactions, your busiest hour is around ${maxHour}:00\u2013${maxHour + 1}:00.`, grounded: true });
-    }
-
-    if (q.includes('staff') && q.includes('commission')) {
-      const kesMap = new Map<string, number>(); const usdMap = new Map<string, number>();
-      for (const o of orders as any[]) for (const it of (o.items || [])) {
-        if (it.type === 'service' && it.staffId) {
-          const staff: any = (staffAll as any[]).find(s => s.id === it.staffId);
-          const pct = staff ? 40 : 0;
-          const m = it.currency === 'USD' ? usdMap : kesMap;
-          m.set(it.staffName, (m.get(it.staffName) || 0) + it.price * it.qty * (pct / 100));
-        }
-      }
-      const kesLines = Array.from(kesMap.entries()).sort((a, b) => b[1] - a[1]).map(([n, c]) => `${n}: KES ${Math.round(c).toLocaleString()}`).join('; ');
-      const usdLines = Array.from(usdMap.entries()).sort((a, b) => b[1] - a[1]).map(([n, c]) => `${n}: $${c.toFixed(2)}`).join('; ');
-      const parts = [kesLines, usdLines].filter(Boolean);
-      return json({ answer: parts.length ? `Commission earned by staff (all recorded orders) \u2014 ${parts.join(' | ')}.` : 'No commission-generating sales recorded yet.', grounded: true });
-    }
-
-    if (q.includes('salary') || q.includes('salaries') || q.includes('payroll')) {
-      return json({ answer: 'BRAIDY SALON has no salary payroll. Employees are paid 50% of service revenue after product cost and helper deductions.', grounded: true });
-    }
-
-    return json({ answer: "I can only answer from your actual recorded data right now \u2014 try asking about revenue (today/this week/this month), top staff, low stock, inactive customers, busiest hours, staff commissions, or expenses.", grounded: false });
-  }],
-
   'GET /api/messages': [async ({ query }) => {
     const channel = query.channel || 'team';
     const { items } = await db.list('messages', { limit: 500 });
