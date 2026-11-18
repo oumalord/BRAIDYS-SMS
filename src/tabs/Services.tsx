@@ -84,6 +84,7 @@ function Services({ role }: { role: Role }) {
     || service.name.toLowerCase().includes(searchTerm)
     || service.category.toLowerCase().includes(searchTerm));
   const categories = Array.from(new Set(visibleServices.map(service => service.category)));
+  const canAdd = role === 'owner' || role === 'admin' || role === 'receptionist';
   const canEdit = role === 'owner' || role === 'admin';
 
   if (loading) return <LoadingState label="Loading services…" />;
@@ -91,14 +92,14 @@ function Services({ role }: { role: Role }) {
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="min-w-0"><h1 className="text-2xl font-semibold tracking-tight">Services Catalog</h1><p className="text-sm text-[#6E6E73]">{visibleServices.length} services across {categories.length} categories. Owner and admin accounts can edit services after adding them.</p></div>
+        <div className="min-w-0"><h1 className="text-2xl font-semibold tracking-tight">Services Catalog</h1><p className="text-sm text-[#6E6E73]">{visibleServices.length} services across {categories.length} categories. Receptionists can add services; only owners and administrators can edit them.</p></div>
         <div className="flex items-center justify-between gap-2 sm:justify-end">
           {serviceSearchOpen && <Input autoFocus aria-label="Search services" placeholder="Search services" value={serviceSearch} onChange={event => setServiceSearch(event.target.value)} className="w-32 sm:w-48" />}
           <Button type="button" size="sm" variant="secondary" aria-label={serviceSearchOpen ? 'Close service search' : 'Search services'} title={serviceSearchOpen ? 'Close service search' : 'Search services'} aria-expanded={serviceSearchOpen} onClick={() => {
             setServiceSearchOpen(open => !open);
             if (serviceSearchOpen) setServiceSearch('');
           }}>{serviceSearchOpen ? <X size={15} aria-hidden="true" /> : <Search size={15} aria-hidden="true" />}</Button>
-          {canEdit && <Button onClick={() => { setEditId(null); setOpen(true); }}><Plus size={16} aria-hidden="true" />Add Service</Button>}
+          {canAdd && <Button onClick={() => { setEditId(null); setOpen(true); }}><Plus size={16} aria-hidden="true" />Add Service</Button>}
         </div>
       </div>
 
@@ -133,7 +134,7 @@ function Services({ role }: { role: Role }) {
           <div className="space-y-4">
             <Field label="Service name" htmlFor="sv-name"><Input id="sv-name" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></Field>
             <Field label="Category" htmlFor="sv-cat"><Input id="sv-cat" value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))} placeholder="e.g. Barber, Salon, Spa" /></Field>
-            {canEdit && <Field label="Service image" htmlFor="sv-image" hint="JPG, PNG, or WebP. Images are resized before saving.">
+            {canAdd && <Field label="Service image" htmlFor="sv-image" hint="JPG, PNG, or WebP. Images are resized before saving.">
               <Input id="sv-image" type="file" accept="image/jpeg,image/png,image/webp" disabled={processingImage} onChange={async event => {
                 const file = event.target.files?.[0];
                 event.target.value = '';

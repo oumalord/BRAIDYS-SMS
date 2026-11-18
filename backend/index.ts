@@ -77,7 +77,7 @@ function attendanceDistanceMeters(latitude: number, longitude: number, location:
   return 6371000 * 2 * Math.atan2(Math.sqrt(arc), Math.sqrt(1 - arc));
 }
 
-function verifiedAttendanceLocation(body: any, branchName?: string): { ok: false; error: string } | { ok: true; distanceMeters: number } {
+function verifiedAttendanceLocation(body: any, branchName?: string): { ok: false; error: string } | { ok: true, distanceMeters: number } {
   const latitude = Number(body?.latitude);
   const longitude = Number(body?.longitude);
   const accuracy = Number(body?.accuracy);
@@ -149,6 +149,10 @@ function requireAdmin() {
 
 function requireOwner() {
   if (!['owner', 'admin'].includes(currentContext()?.role || '')) throw new Error('Only the owner or administrator can edit records');
+}
+
+function requireServiceCreator() {
+  return ['owner', 'admin', 'receptionist'].includes(currentContext()?.role || '');
 }
 
 async function hasReceptionistAppointmentPrivileges(context = currentContext()) {
@@ -826,7 +830,7 @@ export const handler = router({
     const date = String(query.date || nairobiDateString());
     if (!nairobiDayRange(date)) return error('Choose a valid attendance date', 400);
     const { items } = await db.list('attendance', { limit: 5000 });
-    const visible = (items as any[]).filter(item => item.date === date && (context.role !== 'receptionist' || item.role !== 'owner') && (!context.branchId || item.branchId === context.branchId));
+    const visible = (items as any[]).filter(item => item.date === date && ( context.role !== 'receptionist' || item.role !== 'owner') && (!context.branchId || item.branchId === context.branchId));
     visible.sort((first, second) => Number(first.checkInAt || 0) - Number(second.checkInAt || 0));
     const activeAttendanceByStaffId = new Map(visible.filter(item => item.staffId && item.checkInAt && !item.checkOutAt).map(item => [String(item.staffId), item]));
     const { items: appointments } = await db.list('appointments', { limit: 3000 });
@@ -1045,13 +1049,14 @@ export const handler = router({
 
   'GET /api/services': [async () => { const { items } = await db.list('services', { limit: 500 }); return json({ items }); }],
   'POST /api/services': [async ({ body }) => {
+    requireServiceCreator();
     const b: any = body;
     if (!b.name || !b.price) return error('Name and price are required', 400);
     if (b.imageUrl && (typeof b.imageUrl !== 'string' || b.imageUrl.length > 800000 || !/^data:image\/(jpeg|png|webp);base64,/.test(b.imageUrl))) return error('Service image must be a supported image smaller than 800 KB.', 400);
     const staffCount = serviceStaffCount(b.staffCount);
     const [id] = await db.add('services', [{ name: b.name, category: b.category || 'General', price: b.price, currency: b.currency === 'USD' ? 'USD' : 'KES', durationMin: b.durationMin || 30, description: b.description || '', imageUrl: b.imageUrl || '', staffCount, commissionPct: commissionPct(b.commissionPct, staffCount) }]);
     if (!id) return error('Failed to add service', 500);
-    await audit('created', 'service', { id, name: b.name, category: b.category || 'General', price: b.price, currency: b.currency === 'USD' ? 'USD' : 'KES' }, b.actor || 'owner');
+    await audit('created', 'service', { id, name: b.name, category: b.category || 'General', price: b.price, currency: b.currency === 'USD' ? 'USD' : 'KES' }, currentContext()?.name || 'owner');
     return json({ id });
   }],
   'PUT /api/services/:id': [async ({ params, body }) => {
@@ -1270,23 +1275,20 @@ export const handler = router({
       const assignedStaffIds = [item.staffId, ...(Array.isArray(item.items) ? item.items.map((service: any) => service.staffId) : [])].filter(Boolean);
       return !context.branchId || inBranch(item) || assignedStaffIds.some(staffId => inBranch(item, undefined, staffId));
     });
-    for (const appointment of weekAppointments) {
-      const staffIds = new Set([appointment.staffId, ...(Array.isArray(appointment.items) ? appointment.items.map((item: any) => item.staffId) : [])].filter(Boolean).map(String));
+    for (const record of weekAppointments) {
+      const staffIds = new Set([record.staffId, ...(Array.isArray(record.items) ? record.items.map((item: any) => item.staffId) : [])].filter(Boolean).map(String));
       for (const staffId of staffIds) {
-        if (!inBranch(appointment, undefined, staffId)) continue;
-        const assignedItems = Array.isArray(appointment.items) ? appointment.items.filter((item: any) => String(item.staffId || '') === staffId) : [];
-        const services = assignedItems.map((item: any) => item.serviceName);
-        const bookedMinutes = staffAppointmentMinutes(appointment, staffId);
-        const report = ensureReport(staffId, { name: appointment.staffName || appointment.items?.find((item: any) => String(item.staffId || '') === staffId)?.staffName, branchId: appointment.branchId });
+        if (!inBranch(record, undefined, staffId)) continue;
+        const report = ensureReport(staffId, { name: record.staffName || record.items?.find((item: any) => String(item.staffId || '') === staffId)?.staffName, branchId: record.branchId });
         if (!report) continue;
-        const status = String(appointment.status || 'pending');
+        const status = String(record.status || 'pending');
         report.appointments.total += 1;
-        report.appointments.minutes += bookedMinutes;
+        report.appointments.minutes += staffAppointmentMinutes(record, staffId);
         if (status === 'completed') report.appointments.completed += 1;
         else if (status === 'cancelled') report.appointments.cancelled += 1;
         else if (status === 'no-show') report.appointments.noShow += 1;
         else report.appointments.open += 1;
-        report.appointments.items.push({ id: appointment.id, date: appointment.date, time: appointment.time || '', customerName: appointment.customerName || 'Customer', serviceName: services.join(', ') || appointment.serviceName || 'Service', status, durationMin: bookedMinutes });
+        report.appointments.items.push({ id: record.id, date: record.date, time: record.time || '', customerName: record.customerName || 'Customer', serviceName: record.serviceName || 'Service', status, durationMin: staffAppointmentMinutes(record, staffId) });
       }
     }
 
@@ -1399,7 +1401,7 @@ export const handler = router({
     let rangeEnd: number | null = null;
     if (selectedDay) { cutoff = selectedDay.from; rangeEnd = selectedDay.to; }
     else if (period === 'today') { const d = new Date(); d.setHours(0, 0, 0, 0); cutoff = d.getTime(); }
-    else if (period === 'week') cutoff = currentSundayThroughNowRange().from;
+    else if (period === 'week') cutoff = currentSaturdayThroughFridayRange().from;
     else if (period === 'month') cutoff = now - 30 * DAY;
     else cutoff = 0;
 
@@ -1411,7 +1413,7 @@ export const handler = router({
       db.list('payroll_items', { limit: 5000 }),
     ]);
     const members = (staffRows as any[]).filter(member => !member.deletedAt && member.employmentStatus !== 'laid-off' && contextIncludesPayrollRecord(member, context)
-      && (!context.branchId || member.branchId === context.branchId) && requestedIds.includes(String(member.id)));
+      && (!context.branchId || member.branchId === context.tenantId) && requestedIds.includes(String(member.id)));
     if (!members.length) return error('No active staff records are available for this payroll batch.', 400);
     if (members.length !== requestedIds.length) return error('One or more selected staff members are not available in this salon or branch.', 400);
 
