@@ -15,6 +15,14 @@ function todayInNairobi() {
   return `${part('year')}-${part('month')}-${part('day')}`;
 }
 
+function nextSaturdayMidnightInNairobi() {
+  const [year, month, day] = todayInNairobi().split('-').map(Number);
+  const target = new Date(Date.UTC(year, month - 1, day));
+  const daysUntilSaturday = (6 - target.getUTCDay() + 7) % 7 || 7;
+  target.setUTCDate(target.getUTCDate() + daysUntilSaturday);
+  return Date.UTC(target.getUTCFullYear(), target.getUTCMonth(), target.getUTCDate()) - 3 * 60 * 60 * 1000;
+}
+
 function Finance() {
   const isOwner = AuthApi.account()?.role === 'owner';
   const [range, setRange] = useState<Range>('week');
@@ -83,6 +91,20 @@ function Finance() {
     const refresh = window.setInterval(() => load(false), 15000);
     return () => window.clearInterval(refresh);
   }, [range]);
+
+  useEffect(() => {
+    const refreshAtWeekStart = () => loadPayroll();
+    let rolloverRetry: number | undefined;
+    const timeout = window.setTimeout(() => {
+      refreshAtWeekStart();
+      const retry = window.setInterval(refreshAtWeekStart, 60_000);
+      rolloverRetry = retry;
+    }, Math.max(0, nextSaturdayMidnightInNairobi() - Date.now()));
+    return () => {
+      window.clearTimeout(timeout);
+      if (rolloverRetry !== undefined) window.clearInterval(rolloverRetry);
+    };
+  }, [payrollPeriod?.from]);
 
   useEffect(() => {
     if (!isOwner || financeView !== 'daily') return;
@@ -190,7 +212,7 @@ function Finance() {
   const lastWeekDateRange = lastWeekPeriod
     ? `${payrollDateFormatter.format(new Date(lastWeekPeriod.from))} – ${payrollDateFormatter.format(new Date(lastWeekPeriod.to))}`
     : 'previous Saturday through Friday';
-  const selectedEarningsLabel = lastWeekDateRange;
+  const selectedEarningsLabel = payrollDateRange;
   const totalUnpaidEarnings = (member: Staff) => Number(member.commissionEarnedWeek || 0) + Number(member.assistantEarnedWeek || 0);
   const payrollStaff = staff.filter(member => member.employmentStatus !== 'laid-off')
     .sort((first, second) => totalUnpaidEarnings(second) - totalUnpaidEarnings(first) || first.name.localeCompare(second.name));
@@ -199,7 +221,7 @@ function Finance() {
   const paystackRecipientsMissingCount = paystackRecipients.filter(({ member }) => member.paystackRecipientMode !== 'live'
     || !/^RCP_[A-Za-z0-9]+$/.test(String(member.paystackRecipientCode || ''))).length;
   const paystackDepositTotalKES = paystackRecipients.reduce((sum, recipient) => sum + recipient.amountKES, 0);
-  const weeklyStaffEarnings = lastWeekPayrollStaff.map(member => {
+  const weeklyStaffEarnings = payrollStaff.filter(member => totalUnpaidEarnings(member) > 0).map(member => {
     const commission = Number(member.commissionEarnedWeek || 0);
     const assistantEarnings = Number(member.assistantEarnedWeek || 0);
     return {
@@ -217,7 +239,7 @@ function Finance() {
     setBreakdown(null);
     setBreakdownError('');
     setBreakdownLoading(true);
-    try { setBreakdown(await AppointmentsApi.staffWeeklyWork(member.id, undefined, 'last-week')); }
+    try { setBreakdown(await AppointmentsApi.staffWeeklyWork(member.id)); }
     catch (cause: any) { setBreakdownError(cause?.message || 'Could not load this staff member’s appointment earnings.'); }
     finally { setBreakdownLoading(false); }
   };
@@ -342,8 +364,8 @@ function Finance() {
             </div>
           </Card>
           <Card className="p-6">
-            <div className="mb-3"><h2 className="font-semibold mb-1">Last Week’s Unpaid Staff Earnings</h2><p className="text-xs text-[#6E6E73]">Unpaid KES commissions and assistant compensation for {selectedEarningsLabel}. Already-paid earnings are excluded.</p></div>
-            {lastWeekLoading ? <p className="text-sm text-[#6E6E73]">Loading last week’s unpaid earnings…</p> : lastWeekError ? <p role="status" className="text-sm text-amber-700">{lastWeekError}</p> : weeklyStaffEarnings.length === 0 ? <p className="text-sm text-[#6E6E73]">No staff records are available.</p> : (
+            <div className="mb-3"><h2 className="font-semibold mb-1">This Week’s Unpaid Staff Earnings</h2><p className="text-xs text-[#6E6E73]">Unpaid KES commissions and assistant compensation for {selectedEarningsLabel}. Paid earnings are excluded; the period starts again Saturday at midnight.</p></div>
+            {payrollLoading ? <p className="text-sm text-[#6E6E73]">Loading this week’s unpaid earnings…</p> : payrollError ? <p role="status" className="text-sm text-amber-700">{payrollError}</p> : weeklyStaffEarnings.length === 0 ? <p className="text-sm text-[#6E6E73]">No unpaid staff earnings this week.</p> : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <caption className="sr-only">Commission and assistant earnings by staff for {selectedEarningsLabel}</caption>
