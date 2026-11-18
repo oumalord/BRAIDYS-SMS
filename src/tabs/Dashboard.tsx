@@ -34,7 +34,7 @@ function Dashboard() {
     RebookingApi.list()
       .then(items => { if (alive) setRebooking(items); })
       .catch(() => { if (alive) toast('Could not load rebooking suggestions.', 'error'); });
-    PayrollApi.staff('last-week')
+    PayrollApi.staff()
       .then(payroll => {
         if (!alive) return;
         setOwnerStaffEarnings(payroll.items);
@@ -49,6 +49,30 @@ function Dashboard() {
     return () => { alive = false; };
   }, [range]);
 
+  useEffect(() => {
+    if (!earningsPeriod) return;
+    let retry: number | undefined;
+    const refreshEarnings = () => {
+      setEarningsLoading(true);
+      PayrollApi.staff()
+        .then(payroll => {
+          setOwnerStaffEarnings(payroll.items);
+          setEarningsPeriod(payroll.period);
+          setEarningsError('');
+        })
+        .catch((cause: any) => setEarningsError(cause?.message || 'Weekly staff earnings are temporarily unavailable.'))
+        .finally(() => setEarningsLoading(false));
+    };
+    const timeout = window.setTimeout(() => {
+      refreshEarnings();
+      retry = window.setInterval(refreshEarnings, 60_000);
+    }, Math.max(0, earningsPeriod.to + 1 - Date.now()));
+    return () => {
+      window.clearTimeout(timeout);
+      if (retry !== undefined) window.clearInterval(retry);
+    };
+  }, [earningsPeriod?.from, earningsPeriod?.to]);
+
   if (loading && !data) return <LoadingState label="Loading dashboard…" />;
   if (!data) return <EmptyState icon={AlertTriangle} title="Dashboard data unavailable" description={dashboardError || 'Could not load your business data. Please try again shortly.'} />;
 
@@ -59,7 +83,8 @@ function Dashboard() {
   const earningsDateFormatter = new Intl.DateTimeFormat(undefined, { timeZone: 'Africa/Nairobi', year: 'numeric', month: 'short', day: 'numeric' });
   const earningsDateRange = earningsPeriod
     ? `${earningsDateFormatter.format(new Date(earningsPeriod.from))} – ${earningsDateFormatter.format(new Date(earningsPeriod.to))}`
-    : 'Saturday–Friday';
+    : 'this Saturday–Friday';
+  const unpaidStaffEarnings = ownerStaffEarnings.filter(member => (member.commissionEarnedWeek || 0) + (member.assistantEarnedWeek || 0) > 0);
 
   return (
     <div className="space-y-6">
@@ -86,8 +111,8 @@ function Dashboard() {
       </div>
 
       <Card className="p-4 sm:p-6">
-        <div className="mb-4"><h2 className="font-semibold">Last Week’s Unpaid Staff Earnings · Saturday–Friday</h2><p className="text-xs text-[#6E6E73]">Unpaid commission and assistant compensation from {earningsDateRange}.</p></div>
-        {earningsLoading ? <p className="text-sm text-[#6E6E73]">Loading weekly staff earnings…</p> : earningsError ? <p role="status" className="text-sm text-amber-700">{earningsError} Business metrics are available above.</p> : ownerStaffEarnings.length === 0 ? <p className="text-sm text-[#6E6E73]">No staff records are available.</p> : <div className="space-y-2">{[...ownerStaffEarnings].sort((first, second) => ((second.commissionEarnedWeek || 0) + (second.assistantEarnedWeek || 0)) - ((first.commissionEarnedWeek || 0) + (first.assistantEarnedWeek || 0))).map(member => { const commission = member.commissionEarnedWeek || 0; const assistant = member.assistantEarnedWeek || 0; return <div key={member.id} className="flex items-center justify-between gap-3 border-b border-black/5 pb-2 last:border-0"><div><p className="text-sm font-medium">{member.name}</p><p className="text-xs text-[#6E6E73]">Commission {fmtMoney(commission, 'KES')} · assistant earnings {fmtMoney(assistant, 'KES')}</p></div><p className="shrink-0 text-sm font-semibold">{fmtMoney(commission + assistant, 'KES')}</p></div>; })}</div>}
+        <div className="mb-4"><h2 className="font-semibold">This Week’s Unpaid Staff Earnings · Saturday–Friday</h2><p className="text-xs text-[#6E6E73]">Unpaid commission and assistant compensation from {earningsDateRange}.</p></div>
+        {earningsLoading ? <p className="text-sm text-[#6E6E73]">Loading weekly staff earnings…</p> : earningsError ? <p role="status" className="text-sm text-amber-700">{earningsError} Business metrics are available above.</p> : unpaidStaffEarnings.length === 0 ? <p className="text-sm text-[#6E6E73]">No unpaid staff earnings this week.</p> : <div className="space-y-2">{[...unpaidStaffEarnings].sort((first, second) => ((second.commissionEarnedWeek || 0) + (second.assistantEarnedWeek || 0)) - ((first.commissionEarnedWeek || 0) + (first.assistantEarnedWeek || 0))).map(member => { const commission = member.commissionEarnedWeek || 0; const assistant = member.assistantEarnedWeek || 0; return <div key={member.id} className="flex items-center justify-between gap-3 border-b border-black/5 pb-2 last:border-0"><div><p className="text-sm font-medium">{member.name}</p><p className="text-xs text-[#6E6E73]">Commission {fmtMoney(commission, 'KES')} · assistant earnings {fmtMoney(assistant, 'KES')}</p></div><p className="shrink-0 text-sm font-semibold">{fmtMoney(commission + assistant, 'KES')}</p></div>; })}</div>}
       </Card>
 
       <div className="grid grid-cols-1 gap-4">
