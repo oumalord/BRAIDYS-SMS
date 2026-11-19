@@ -1153,11 +1153,12 @@ export const handler = router({
       const commissionBase = Math.max(0, lineTotalAfterDiscount - productCost - assistantPayment);
       const hasSplit = Boolean(coStaffId || thirdStaffId);
       const commissionPct = Number(item.commissionPct || 50);
+      const defaultCommission = commissionBase * commissionPct / 100;
       const primaryCommission = item.primaryCommission === undefined || item.primaryCommission === null
-        ? (hasSplit ? Number.NaN : commissionBase * commissionPct / 100)
+        ? defaultCommission
         : Number(item.primaryCommission);
-      const coStaffCommission = coStaffId ? Number(item.coStaffCommission) : 0;
-      const thirdStaffCommission = thirdStaffId ? Number(item.thirdStaffCommission) : 0;
+      const coStaffCommission = coStaffId ? Number(item.coStaffCommission ?? defaultCommission) : 0;
+      const thirdStaffCommission = thirdStaffId ? Number(item.thirdStaffCommission ?? defaultCommission) : 0;
       if (!Number.isFinite(commissionPct) || commissionPct < 0 || commissionPct > 100
         || !Number.isFinite(primaryCommission) || primaryCommission < 0
         || (coStaffId && (!Number.isFinite(coStaffCommission) || coStaffCommission < 0))

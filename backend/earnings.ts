@@ -10,12 +10,22 @@ export function serviceCommission(item: any): number {
   return commissionBase * (Number.isFinite(rate) ? rate / 100 : 0.5);
 }
 
+function serviceCommissionAtRate(item: any): number {
+  if (item?.type !== 'service') return 0;
+  const revenue = Number(item.lineTotalAfterDiscount ?? Number(item.price || 0) * Number(item.qty || 1)) || 0;
+  const productCost = Math.max(0, Number(item.productCost || 0));
+  const assistantFee = Math.max(0, Number(item.assistantPayment ?? item.helperDeduction ?? 0));
+  const commissionBase = Math.max(0, Number(item.commissionBase ?? revenue - productCost - assistantFee) || 0);
+  const rate = Number(item.commissionPct ?? item.commissionRate ?? 50);
+  return commissionBase * (Number.isFinite(rate) ? rate / 100 : 0.5);
+}
+
 export function staffCommission(item: any, staffId: unknown): number {
   if (!staffId) return 0;
   const hasMultipleStaff = Boolean(item.coStaffId || item.thirdStaffId || item.helperStaffId);
-  if (String(item.staffId || '') === String(staffId)) return hasMultipleStaff ? Number(item.primaryCommission ?? serviceCommission(item)) || 0 : serviceCommission(item);
-  if (String(item.coStaffId || '') === String(staffId)) return Number(item.coStaffCommission ?? serviceCommission(item)) || 0;
-  if (String(item.thirdStaffId || '') === String(staffId)) return Number(item.thirdStaffCommission ?? 0) || 0;
+  if (String(item.staffId || '') === String(staffId)) return hasMultipleStaff ? Number(item.primaryCommission ?? item.commission ?? serviceCommissionAtRate(item)) || 0 : serviceCommission(item);
+  if (String(item.coStaffId || '') === String(staffId)) return Number(item.coStaffCommission ?? serviceCommissionAtRate(item)) || 0;
+  if (String(item.thirdStaffId || '') === String(staffId)) return Number(item.thirdStaffCommission ?? serviceCommissionAtRate(item)) || 0;
   return 0;
 }
 

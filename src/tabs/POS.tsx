@@ -137,6 +137,11 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
     ? Number(membershipPlans.find(plan => plan.id === selectedCustomer?.membershipPlanId || plan.name === selectedCustomer?.membershipTier)?.discountPct || 0)
     : 0;
   const effectiveDiscountPct = Math.max(discountPct, Number(validPromo?.discountPct || 0), membershipDiscount);
+  const defaultCommissionForLine = (line: CartLine) => {
+    const lineRevenue = Math.round(line.price * line.qty * (1 - effectiveDiscountPct / 100));
+    const commissionBase = Math.max(0, lineRevenue - Number(line.assistantPayment || 0));
+    return commissionBase * Number(line.commissionPct || 50) / 100;
+  };
   const currencies = Array.from(new Set(cart.map(l => l.currency)));
   const subtotalByCurrency: Record<string, number> = {};
   for (const l of cart) subtotalByCurrency[l.currency] = (subtotalByCurrency[l.currency] || 0) + l.price * l.qty;
@@ -152,9 +157,11 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
   const expectedIncome = cart.reduce((sum, line) => {
     const lineRevenue = Math.round(line.price * line.qty * (1 - effectiveDiscountPct / 100));
     const commissionBase = Math.max(0, lineRevenue - Number(line.assistantPayment || 0));
-    const splitEntered = Boolean(line.coStaffId || line.thirdStaffId);
-    const primary = line.primaryCommission ?? (splitEntered ? 0 : commissionBase * Number(line.commissionPct || 50) / 100);
-    return sum + Number(primary || 0) + Number(line.coStaffCommission || 0) + Number(line.thirdStaffCommission || 0) + Number(line.assistantPayment || 0);
+    const defaultCommission = commissionBase * Number(line.commissionPct || 50) / 100;
+    const primary = line.primaryCommission ?? defaultCommission;
+    const coStaff = line.coStaffId ? line.coStaffCommission ?? defaultCommission : 0;
+    const thirdStaff = line.thirdStaffId ? line.thirdStaffCommission ?? defaultCommission : 0;
+    return sum + Number(primary || 0) + Number(coStaff || 0) + Number(thirdStaff || 0) + Number(line.assistantPayment || 0);
   }, 0);
 
   const applyDraft = (draft: Record<string, any>) => {
@@ -230,8 +237,10 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
       const hasCoStaff = Boolean(line.coStaffId);
       const hasThirdStaff = Boolean(line.thirdStaffId);
       if (!hasCoStaff && !hasThirdStaff) return false;
-      if (line.primaryCommission === undefined || (hasCoStaff && line.coStaffCommission === undefined) || (hasThirdStaff && line.thirdStaffCommission === undefined)) return true;
-      const splitTotal = Number(line.primaryCommission) + (hasCoStaff ? Number(line.coStaffCommission) : 0) + (hasThirdStaff ? Number(line.thirdStaffCommission) : 0);
+      const defaultCommission = commissionBase * Number(line.commissionPct || 50) / 100;
+      const splitTotal = Number(line.primaryCommission ?? defaultCommission)
+        + (hasCoStaff ? Number(line.coStaffCommission ?? defaultCommission) : 0)
+        + (hasThirdStaff ? Number(line.thirdStaffCommission ?? defaultCommission) : 0);
       return !Number.isFinite(splitTotal) || splitTotal < 0 || splitTotal > commissionBase;
     });
     if (invalidSplit) { toast(`Enter each staff member's earnings for ${invalidSplit.name}, keeping the total within the service balance.`, 'error'); return; }
@@ -315,12 +324,12 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
                         {assignableStaff.filter(s => s.id !== l.staffId).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                       </Select>
                       {(l.staffCount === 2 || l.thirdStaffId !== undefined || l.helperStaffId) && <div className="grid grid-cols-2 gap-2">
-                        <Field label="Primary earns (KES)" htmlFor={`primary-commission-${l.key}`}><Input id={`primary-commission-${l.key}`} type="number" min={0} value={l.primaryCommission ?? ''} onChange={e => setManualAmount(l.key, 'primaryCommission', Number(e.target.value))} className="py-1.5 text-xs" /></Field>
-                        {l.staffCount === 2 && <Field label="Co-staff earns (KES)" htmlFor={`co-commission-${l.key}`}><Input id={`co-commission-${l.key}`} type="number" min={0} value={l.coStaffCommission ?? ''} onChange={e => setManualAmount(l.key, 'coStaffCommission', Number(e.target.value))} className="py-1.5 text-xs" /></Field>}
-                        {l.thirdStaffId !== undefined && <Field label="Third staff earns (KES)" htmlFor={`third-commission-${l.key}`}><Input id={`third-commission-${l.key}`} type="number" min={0} value={l.thirdStaffCommission ?? ''} onChange={e => setManualAmount(l.key, 'thirdStaffCommission', Number(e.target.value))} className="py-1.5 text-xs" /></Field>}
+                        <Field label="Primary earns (KES)" htmlFor={`primary-commission-${l.key}`}><Input id={`primary-commission-${l.key}`} type="number" min={0} value={l.primaryCommission ?? defaultCommissionForLine(l)} onChange={e => setManualAmount(l.key, 'primaryCommission', Number(e.target.value))} className="py-1.5 text-xs" /></Field>
+                        {l.staffCount === 2 && <Field label="Co-staff earns (KES)" htmlFor={`co-commission-${l.key}`}><Input id={`co-commission-${l.key}`} type="number" min={0} value={l.coStaffCommission ?? defaultCommissionForLine(l)} onChange={e => setManualAmount(l.key, 'coStaffCommission', Number(e.target.value))} className="py-1.5 text-xs" /></Field>}
+                        {l.thirdStaffId !== undefined && <Field label="Third staff earns (KES)" htmlFor={`third-commission-${l.key}`}><Input id={`third-commission-${l.key}`} type="number" min={0} value={l.thirdStaffCommission ?? defaultCommissionForLine(l)} onChange={e => setManualAmount(l.key, 'thirdStaffCommission', Number(e.target.value))} className="py-1.5 text-xs" /></Field>}
                         {l.helperStaffId && <Field label="Assistant fee (KES)" htmlFor={`assistant-fee-${l.key}`}><Input id={`assistant-fee-${l.key}`} type="number" min={0} value={l.assistantPayment ?? 0} onChange={e => setAssistantPayment(l.key, Number(e.target.value))} className="py-1.5 text-xs" /></Field>}
                       </div>}
-                      {l.staffCount === 2 && <p className="text-xs text-[#6E6E73]">Choose both staff members, then enter each person's exact earnings.</p>}
+                      {(l.staffCount === 2 || l.thirdStaffId) && <p className="text-xs text-[#6E6E73]">Earnings default to the service commission rate; adjust the split if needed.</p>}
                       {l.helperStaffId && <p className="text-xs text-[#6E6E73]">Enter the assistant's agreed fee before payment.</p>}
                     </div>
                 </div>

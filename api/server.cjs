@@ -29788,12 +29788,21 @@ function serviceCommission(item) {
   const rate = Number(item.commissionPct ?? item.commissionRate ?? 50);
   return commissionBase * (Number.isFinite(rate) ? rate / 100 : 0.5);
 }
+function serviceCommissionAtRate(item) {
+  if (item?.type !== "service") return 0;
+  const revenue = Number(item.lineTotalAfterDiscount ?? Number(item.price || 0) * Number(item.qty || 1)) || 0;
+  const productCost = Math.max(0, Number(item.productCost || 0));
+  const assistantFee = Math.max(0, Number(item.assistantPayment ?? item.helperDeduction ?? 0));
+  const commissionBase = Math.max(0, Number(item.commissionBase ?? revenue - productCost - assistantFee) || 0);
+  const rate = Number(item.commissionPct ?? item.commissionRate ?? 50);
+  return commissionBase * (Number.isFinite(rate) ? rate / 100 : 0.5);
+}
 function staffCommission(item, staffId) {
   if (!staffId) return 0;
   const hasMultipleStaff = Boolean(item.coStaffId || item.thirdStaffId || item.helperStaffId);
-  if (String(item.staffId || "") === String(staffId)) return hasMultipleStaff ? Number(item.primaryCommission ?? serviceCommission(item)) || 0 : serviceCommission(item);
-  if (String(item.coStaffId || "") === String(staffId)) return Number(item.coStaffCommission ?? serviceCommission(item)) || 0;
-  if (String(item.thirdStaffId || "") === String(staffId)) return Number(item.thirdStaffCommission ?? 0) || 0;
+  if (String(item.staffId || "") === String(staffId)) return hasMultipleStaff ? Number(item.primaryCommission ?? item.commission ?? serviceCommissionAtRate(item)) || 0 : serviceCommission(item);
+  if (String(item.coStaffId || "") === String(staffId)) return Number(item.coStaffCommission ?? serviceCommissionAtRate(item)) || 0;
+  if (String(item.thirdStaffId || "") === String(staffId)) return Number(item.thirdStaffCommission ?? serviceCommissionAtRate(item)) || 0;
   return 0;
 }
 function paystackConfirmedPayoutItems(payoutItems, payrollItems) {
@@ -30730,9 +30739,10 @@ New temporary password: ${newPassword}`, account.id);
       const commissionBase = Math.max(0, lineTotalAfterDiscount - productCost - assistantPayment);
       const hasSplit = Boolean(coStaffId || thirdStaffId);
       const commissionPct2 = Number(item.commissionPct || 50);
-      const primaryCommission = item.primaryCommission === void 0 || item.primaryCommission === null ? hasSplit ? Number.NaN : commissionBase * commissionPct2 / 100 : Number(item.primaryCommission);
-      const coStaffCommission = coStaffId ? Number(item.coStaffCommission) : 0;
-      const thirdStaffCommission = thirdStaffId ? Number(item.thirdStaffCommission) : 0;
+      const defaultCommission = commissionBase * commissionPct2 / 100;
+      const primaryCommission = item.primaryCommission === void 0 || item.primaryCommission === null ? defaultCommission : Number(item.primaryCommission);
+      const coStaffCommission = coStaffId ? Number(item.coStaffCommission ?? defaultCommission) : 0;
+      const thirdStaffCommission = thirdStaffId ? Number(item.thirdStaffCommission ?? defaultCommission) : 0;
       if (!Number.isFinite(commissionPct2) || commissionPct2 < 0 || commissionPct2 > 100 || !Number.isFinite(primaryCommission) || primaryCommission < 0 || coStaffId && (!Number.isFinite(coStaffCommission) || coStaffCommission < 0) || thirdStaffId && (!Number.isFinite(thirdStaffCommission) || thirdStaffCommission < 0)) return error("Enter valid earnings for every service participant", 400);
       if (primaryCommission + coStaffCommission + thirdStaffCommission > commissionBase) return error("Combined staff commissions cannot exceed the service balance after assistant compensation", 400);
       normalizedItems.push({
