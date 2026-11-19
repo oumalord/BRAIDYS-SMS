@@ -375,7 +375,7 @@ function Appointments({ role }: { role: Role }) {
                 <p className="font-medium">{a.customerName}{a.customerId ? <span className="ml-2 text-xs font-normal text-[#6E6E73]">{customers.find(customer => customer.id === a.customerId)?.visits ?? 0} visits</span> : null}</p>
                 <p className="text-sm text-[#6E6E73]">{a.customerPhone ? `${a.customerPhone} · ` : ''}{a.serviceName} · {a.staffName || 'Awaiting employee assignment'} · {fmtKES(a.price)}{a.cardNumber ? ` · Card ${a.cardNumber}` : ''}</p>
               </div>
-              <Badge tone={STATUS_TONE[a.status]}>{role === 'receptionist' ? a.status === 'completed' && a.paymentCompleted ? 'Completed' : 'Pending' : a.status.replace('-', ' ')}</Badge>
+              <Badge tone={STATUS_TONE[a.status]}>{a.status.replace('-', ' ')}</Badge>
               {(canEditAppointments || canDeleteAppointments || canViewCompletionSummary || (role === 'receptionist' && !['completed', 'cancelled', 'no-show'].includes(a.status)) || (role === 'barber' && a.staffId === account?.staffId)) && <div className="flex flex-wrap gap-2">
                 {role === 'receptionist' && !['completed', 'cancelled', 'no-show'].includes(a.status) && <Button size="sm" variant="secondary" onClick={() => setCheckoutAppointment(a)}><Plus size={14} aria-hidden="true" />Add service</Button>}
                 {canEditAppointments && (canEditClosedAppointments || !['completed', 'cancelled', 'no-show'].includes(a.status)) && <Button size="sm" variant="secondary" onClick={() => beginEdit(a)}><Pencil size={14} aria-hidden="true" />Edit</Button>}
