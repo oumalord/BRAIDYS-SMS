@@ -30337,7 +30337,7 @@ var handler = router({
       const ownAppointment = [appointment.staffId, ...Array.isArray(appointment.items) ? appointment.items.map((item) => item.staffId) : []].some((staffId) => sameStaffIdentity(staffId, null, identity));
       const ownOrderItem = Boolean(order && (order.items || []).some((item) => sameStaffIdentity(item.staffId, item.staffName, identity) || sameStaffIdentity(item.coStaffId, item.coStaffName, identity)));
       if (!ownAppointment && !ownOrderItem) return error("You can only view completion details for your own appointments", 403);
-    } else if (!context || !["owner", "admin"].includes(context.role)) return error("Only the owner or assigned employee can view completed work", 403);
+    } else if (!context || !["owner", "admin", "receptionist"].includes(context.role)) return error("Only salon management or receptionists can view completed work", 403);
     if (!order) return error("No completed work was found for this appointment", 404);
     return json({ item: order });
   }],
@@ -31427,6 +31427,41 @@ New temporary password: ${newPassword}`, account.id);
     const context = currentContext();
     const { items } = await db.list("staff", { limit: 200 });
     return json({ items: items.filter((item) => !item.deletedAt && (context?.role === "admin" || !context?.tenantId || item.tenantId === context.tenantId) && (!context?.branchId || !item.branchId || item.branchId === context.branchId)) });
+  }],
+  "GET /api/memberships": [async () => {
+    const context = currentContext();
+    if (!context) return error("Please log in.", 401);
+    const { items } = await db.list("membership_plans", { limit: 100 });
+    return json({ items: items.filter((item) => !item.deletedAt) });
+  }],
+  "POST /api/memberships": [async ({ body }) => {
+    const context = currentContext();
+    if (!context || !["owner", "manager", "admin"].includes(context.role)) return error("Only the owner, manager or administrator can create membership plans", 403);
+    if (!context.tenantId) return error("Salon context is required", 400);
+    const name = String(body?.name || "").trim();
+    const discountPct = Number(body?.discountPct);
+    const priceKES = Number(body?.priceKES);
+    const durationDays = Number(body?.durationDays);
+    const benefits = Array.isArray(body?.benefits) ? body.benefits.map((benefit) => String(benefit || "").trim()).filter(Boolean).slice(0, 20) : [];
+    if (!name) return error("Plan name is required", 400);
+    if (name.length > 80) return error("Plan name must be 80 characters or fewer", 400);
+    if (!Number.isFinite(discountPct) || discountPct < 0 || discountPct > 100) return error("Discount must be between 0 and 100 percent", 400);
+    if (!Number.isFinite(priceKES) || priceKES < 0) return error("Price must be zero or more", 400);
+    if (!Number.isInteger(durationDays) || durationDays < 1 || durationDays > 3650) return error("Duration must be between 1 and 3650 days", 400);
+    const item = {
+      id: `membership-${(0, import_node_crypto3.randomBytes)(8).toString("hex")}`,
+      name,
+      discountPct,
+      priceKES,
+      durationDays,
+      benefits,
+      createdAt: Date.now(),
+      createdBy: context.name
+    };
+    const [id] = await db.add("membership_plans", [item]);
+    if (!id) return error("Failed to add membership plan", 500);
+    await audit("created", "membership_plan", item, context.name);
+    return json({ id, item });
   }],
   "GET /api/services": [async () => {
     const { items } = await db.list("services", { limit: 500 });
