@@ -71,9 +71,6 @@ for (const [definition, [routeHandler]] of Object.entries(handler.routes)) {
 export { app };
 export default app;
 
-// Vercel's api/*.cjs serverless entry invokes the exported Express app.
-if (typeof module !== 'undefined') module.exports = app;
-
 if (process.env.VERCEL !== '1') {
   const initialization = process.env.SKIP_PLATFORM_ADMIN_INIT === '1' ? Promise.resolve() : ensurePlatformAdmin();
   initialization.then(() => {

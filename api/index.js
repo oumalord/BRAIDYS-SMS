@@ -1,7 +1,13 @@
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
-const server = require('./server.cjs');
+const loaded = require('./server.cjs');
+const app = loaded.default || loaded.app || loaded;
 
-export default server.app;
-export const app = server.app;
+export default function handler(req, res) {
+  if (typeof app !== 'function') {
+    res.status(500).json({ error: 'Bundled API server is not callable.' });
+    return;
+  }
+  return app(req, res);
+}

@@ -30086,7 +30086,6 @@ for (const [definition, [routeHandler]] of Object.entries(handler.routes)) {
   });
 }
 var server_default = app;
-if (typeof module !== "undefined") module.exports = app;
 if (process.env.VERCEL !== "1") {
   const initialization = process.env.SKIP_PLATFORM_ADMIN_INIT === "1" ? Promise.resolve() : ensurePlatformAdmin();
   initialization.then(() => {
