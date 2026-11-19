@@ -1289,8 +1289,8 @@ export const handler = router({
         const assigned = String(appointment.staffId || '') === String(context.staffId || '')
           || (Array.isArray(appointment.items) && appointment.items.some((item: any) => String(item.staffId || '') === String(context.staffId || '')));
         if (!assigned) return error('You cannot view this completed deal', 403);
-      } else {
-        return error('Receptionists cannot view deal summaries', 403);
+      } else if (!['owner', 'admin', 'receptionist'].includes(context.role)) {
+        return error('You cannot view completed deal summaries', 403);
       }
     }
     const { items: orders } = await db.list('orders', { limit: 5000 });
