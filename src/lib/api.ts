@@ -26,7 +26,7 @@ async function request(path: string, method = 'GET', body?: unknown): Promise<an
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
-    return data;
+    return data && typeof data === 'object' ? data : {};
   } catch (error) {
     if (controller.signal.aborted) {
       throw new Error('Request timed out after 60 seconds. Check your connection and try again.');

@@ -15,10 +15,20 @@ function normalizeRole(role: unknown) {
 const app = express();
 const port = Number(process.env.PORT || 8787);
 app.use(express.json({ limit: '1mb', verify: (request: any, _response, buffer) => { request.rawBody = Buffer.from(buffer); } }));
+app.use((request, _response, next) => {
+  const url = String(request.url || '/');
+  const pathname = url.split('?')[0];
+  if (pathname.startsWith('/api/') || pathname === '/api') {
+    next();
+  } else {
+    request.url = `/api${url.startsWith('/') ? '' : '/'}${url}`;
+    next();
+  }
+});
 app.use((request, response, next) => {
   const origin = String(request.headers.origin || '');
   if (/^https?:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin)) response.header('Access-Control-Allow-Origin', origin);
-  response.header('Access-Control-Allow-Headers', 'Content-Type');
+  response.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Branch-ID');
   response.header('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
   if (request.method === 'OPTIONS') return response.sendStatus(204);
   next();
@@ -67,6 +77,14 @@ for (const [definition, [routeHandler]] of Object.entries(handler.routes)) {
     }
   });
 }
+
+app.use((request, response) => {
+  response.status(404).json({ error: 'Not found' });
+});
+
+app.use((request, response) => {
+  response.status(405).json({ error: 'Method not allowed' });
+});
 
 export { app };
 export default app;
