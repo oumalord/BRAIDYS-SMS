@@ -1062,6 +1062,81 @@ export const handler = router({
     const { items } = await db.list('orders', { limit: 10000 });
     return json({ items: (items as any[]).filter(item => !item.deletedAt && (context?.role === 'admin' || !context?.branchId || !item.branchId || item.branchId === context.branchId)) });
   }],
+  'POST /api/orders': [async ({ body }) => {
+    const context = currentContext();
+    if (!context || !['owner', 'admin', 'manager', 'receptionist', 'barber'].includes(context.role)) return error('Staff access is required to complete checkout', 403);
+    const submittedItems = Array.isArray(body?.items) ? body.items : [];
+    if (!submittedItems.length) return error('Add a service before checkout', 400);
+    if (submittedItems.length > 100) return error('Checkout supports up to 100 service lines', 400);
+    const discountPct = Number(body?.discountPct || 0);
+    if (!Number.isFinite(discountPct) || discountPct < 0 || discountPct > 100) return error('Discount must be between 0 and 100 percent', 400);
+    const paymentMethod = String(body?.paymentMethod || 'Cash');
+    if (!['Cash', 'Card', 'M-Pesa'].includes(paymentMethod)) return error('Choose a valid payment method', 400);
+
+    const appointmentId = String(body?.appointmentId || '').trim();
+    let appointment: any = null;
+    if (appointmentId) {
+      [appointment] = await db.get('appointments', [appointmentId]);
+      if (!appointment || appointment.deletedAt || !contextIncludesRecord(appointment, context)
+        || (context.branchId && appointment.branchId && appointment.branchId !== context.branchId)) return error('Appointment not found in this salon or branch', 404);
+      if (['cancelled', 'no-show'].includes(String(appointment.status))) return error('A cancelled or no-show appointment cannot be completed', 409);
+      if (appointment.status === 'completed') return error('This appointment is already completed', 409);
+      if (context.role === 'barber') {
+        const assignedStaffIds = [appointment.staffId, ...(Array.isArray(appointment.items) ? appointment.items.map((item: any) => item.staffId) : [])];
+        if (!assignedStaffIds.some(staffId => String(staffId || '') === String(context.staffId || ''))) return error('You can only complete appointments assigned to you', 403);
+      }
+      const { items: orders } = await db.list('orders', { limit: 10000 });
+      if ((orders as any[]).some(order => !order.deletedAt && String(order.appointmentId || '') === appointmentId)) return error('A sale has already been recorded for this appointment', 409);
+    }
+
+    const normalizedItems: any[] = [];
+    const subtotalByCurrency: Record<string, number> = { KES: 0, USD: 0 };
+    for (const item of submittedItems) {
+      if (item?.type !== 'service') return error('Only service lines can be checked out from this screen', 400);
+      const price = Number(item.price);
+      const qty = Number(item.qty || 1);
+      if (!Number.isFinite(price) || price < 0 || !Number.isInteger(qty) || qty < 1) return error('Each service needs a valid price and quantity', 400);
+      const currency = item.currency === 'USD' ? 'USD' : 'KES';
+      const revenue = price * qty;
+      subtotalByCurrency[currency] += revenue;
+      const assistantPayment = Math.max(0, Number(item.assistantPayment || 0));
+      const productCost = Math.max(0, Number(item.productCost || 0));
+      normalizedItems.push({
+        ...item, type: 'service', refId: String(item.refId || ''), name: String(item.name || 'Service'),
+        price, qty, currency,
+        lineTotalAfterDiscount: Math.round(revenue * (1 - discountPct / 100)),
+        commissionBase: Math.max(0, Math.round(revenue * (1 - discountPct / 100)) - productCost - assistantPayment),
+      });
+    }
+    if (normalizedItems.some(item => !item.staffId)) return error('Assign a staff member to every service before checkout', 400);
+
+    const discountByCurrency = {
+      KES: Math.round(subtotalByCurrency.KES * discountPct / 100),
+      USD: Math.round(subtotalByCurrency.USD * discountPct / 100),
+    };
+    const totalByCurrency = {
+      KES: Math.max(0, subtotalByCurrency.KES - discountByCurrency.KES),
+      USD: Math.max(0, subtotalByCurrency.USD - discountByCurrency.USD),
+    };
+    const now = Date.now();
+    const id = `order-${randomBytes(8).toString('hex')}`;
+    const order = {
+      id, tenantId: context.tenantId, branchId: context.branchId || appointment?.branchId || '',
+      appointmentId: appointmentId || null,
+      customerId: appointment?.customerId || body?.customerId || null,
+      customerName: appointment?.customerName || String(body?.customerName || 'Walk-in Customer'),
+      items: normalizedItems, discountPct, discountByCurrency, subtotalByCurrency, totalByCurrency,
+      promoCode: String(body?.promoCode || '').trim() || null,
+      pointsRedeemed: Math.max(0, Math.floor(Number(body?.redeemPoints || 0))),
+      paymentMethod, mpesaReceiptNumber: body?.mpesaReceiptNumber || null, createdAt: now,
+    };
+    await db.add('orders', [order]);
+    if (appointment) {
+      await db.update('appointments', [{ id: appointmentId, record: { ...appointment, status: 'completed', paymentCompleted: true, completedAt: now, completedBy: context.name, completedOrderId: id } }]);
+    }
+    await audit('checkout', 'order', { id, appointmentId: appointmentId || null, totalByCurrency, paymentMethod }, context.name);
+    return json({ id, item: order, totalByCurrency, createdAt: now });
+  }],
   'GET /api/expenses': [async () => {
     const context = currentContext();
     const { items } = await db.list('expenses', { limit: 5000 });
