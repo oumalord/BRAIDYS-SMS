@@ -636,16 +636,145 @@ async function seedDemoData() {
 }
 
 export const handler = router({
-  'PUT /api/orders/:id/completion': [async ({ params, body }) => {
+  'GET /api/public/salons': [async () => {
+    const { items } = await db.list('salons', { limit: 5000 });
+    return json({ items: (items as any[]).filter(salon => salon.status === 'active').map(salon => ({ id: salon.id, name: salon.name })) });
+  }],
+  'GET /api/public/branches': [async ({ query }) => {
+    const salonId = String(query.salonId || '').trim();
+    if (!salonId) return error('Salon is required', 400);
+    const { items } = await db.list('branches', { limit: 5000 });
+    return json({ items: (items as any[]).filter(branch => branch.salonId === salonId && branch.status === 'active') });
+  }],
+  'POST /api/auth/login': [async ({ body }) => {
+    const identifier = String(body?.identifier || '').trim().toLowerCase();
+    const credential = String(body?.credential || '').trim();
+    if (!identifier || !credential) return error('Email or phone and password or PIN are required', 400);
+    const { items } = await db.list('accounts', { limit: 5000 });
+    const normalizedPhone = normalizeCustomerPhone(identifier);
+    const account = (items as any[]).find(item => !item.deletedAt && item.status === 'active' && (
+      String(item.email || '').toLowerCase() === identifier
+      || String(item.phone || '').replace(/\D/g, '') === normalizedPhone
+      || normalizeCustomerPhone(item.phone) === normalizedPhone
+    ));
+    if (!account) return error('Invalid login details', 401);
+    const matchesPassword = account.passwordHash ? passwordMatches(credential, account.passwordHash) : false;
+    const matchesPin = account.pinHash ? passwordMatches(credential, account.pinHash) : false;
+    if (!matchesPassword && !matchesPin) return error('Invalid login details', 401);
+    const token = sessionToken();
+    await db.add('sessions', [sessionRecord(token, account)]);
+    return json({ token, account: { id: account.id, name: account.name, email: account.email, phone: account.phone, role: normalizeRole(account.role), salonId: account.tenantId, salonName: account.salonName, branchId: account.branchId, staffId: account.staffId, requiresPinChange: account.requiresPinChange } });
+  }],
+  'POST /api/auth/signup': [async ({ body }) => {
+    const name = String(body?.name || '').trim();
+    const phone = String(body?.phone || '').trim();
+    const pin = String(body?.pin || '').trim();
+    const email = String(body?.email || '').trim().toLowerCase();
+    const salonId = String(body?.salonId || '').trim();
+    const branchId = String(body?.branchId || '').trim();
+    if (!name || !phone || !/^\d{4}$/.test(pin) || !salonId || !branchId) return error('Name, phone, 4-digit PIN, salon and branch are required', 400);
+    const { items: accounts } = await db.list('accounts', { limit: 5000 });
+    if ((accounts as any[]).some(account => !account.deletedAt && (String(account.phone || '').replace(/\D/g, '') === normalizeCustomerPhone(phone) || (email && String(account.email || '').toLowerCase() === email)))) return error('An account already exists for these details', 409);
+    const accountId = `account-${randomBytes(8).toString('hex')}`;
+    const [salon] = await db.get('salons', [salonId]);
+    const [branch] = await db.get('branches', [branchId]);
+    if (!salon || !branch || branch.salonId !== salonId) return error('Choose a valid salon and branch', 400);
+    const account = { id: accountId, tenantId: salonId, salonName: salon.name, branchId, name, email, phone, role: 'customer', status: 'active', pinHash: passwordHash(pin), createdAt: Date.now() };
+    await db.add('accounts', [account]);
+    const customerId = `customer-${randomBytes(8).toString('hex')}`;
+    await db.add('customers', [{ id: customerId, tenantId: salonId, branchId, name, phone, email, loyaltyPoints: 0, totalSpent: 0, totalSpentUSD: 0, visits: 0, lastVisit: null, createdAt: Date.now() }]);
+    const token = sessionToken();
+    await db.add('sessions', [sessionRecord(token, account)]);
+    return json({ token, account: { id: account.id, name, email, phone, role: account.role, salonId, salonName: salon.name, branchId } });
+  }],
+  'GET /api/staff': [async () => {
     const context = currentContext();
-    if (!context || !['owner', 'admin'].includes(context.role)) return error('Only owners and administrators can adjust completed work', 403);
-    const [existing] = await db.get('orders', [params.id]);
-    if (!existing) return error('Order not found', 404);
-    const patch: any = body || {};
-    const updated = { ...existing, items: Array.isArray(patch.items) ? patch.items : existing.items, updatedAt: Date.now() };
-    await db.update('orders', [{ id: params.id, record: updated }]);
-    await audit('adjusted completion', 'order', { id: params.id }, context.name);
+    const { items } = await db.list('staff', { limit: 500 });
+    return json({ items: (items as any[]).filter(item => !item.deletedAt && (context?.role === 'admin' || !context?.tenantId || item.tenantId === context.tenantId) && (!context?.branchId || !item.branchId || item.branchId === context.branchId)) });
+  }],
+  'GET /api/services': [async () => {
+    const { items } = await db.list('services', { limit: 500 });
+    return json({ items: (items as any[]).filter(item => !item.deletedAt) });
+  }],
+  'GET /api/appointments': [async ({ query }) => {
+    const context = currentContext();
+    const { items: appointments } = await db.list('appointments', { limit: 5000 });
+    const { items: orders } = await db.list('orders', { limit: 5000 });
+    const active = (appointments as any[]).filter(item => !item.deletedAt);
+    const visible = context?.role === 'barber' && context.staffId
+      ? active.filter(item => String(item.staffId || '') === String(context.staffId) || (Array.isArray(item.items) && item.items.some((line: any) => String(line.staffId || '') === String(context.staffId))))
+      : active;
+    const paidIds = new Set((orders as any[]).filter(order => !order.deletedAt && order.appointmentId).map(order => String(order.appointmentId)));
+    const items = visible.map(item => ({ ...item, paymentCompleted: paidIds.has(String(item.id)) }));
+    const date = String(query.date || '').trim();
+    return json({ items: date ? items.filter(item => item.date === date) : items });
+  }],
+  'POST /api/appointments': [async ({ body }) => {
+    const context = currentContext();
+    if (!context || !['owner', 'admin', 'manager', 'receptionist', 'barber'].includes(context.role)) return error('You cannot create appointments', 403);
+    const name = String(body?.customerName || '').trim();
+    const date = String(body?.date || '').trim();
+    const time = String(body?.time || '').trim();
+    const serviceName = String(body?.serviceName || '').trim();
+    if (!name || !date || !time || !serviceName) return error('Customer, date, time and service are required', 400);
+    const id = `appointment-${randomBytes(8).toString('hex')}`;
+    const ticketNumber = createTicketNumber(date);
+    const cardNumber = appointmentCardNumber(body?.cardNumber);
+    const [branch] = context.branchId ? await db.get('branches', [context.branchId]) : [null];
+    const appointment = { id, tenantId: context.tenantId, branchId: context.branchId || '', branchName: branch?.name || '', customerId: body?.customerId || null, customerName: name, customerPhone: String(body?.customerPhone || '').trim(), serviceId: body?.serviceId || null, serviceName, staffId: body?.staffId || null, staffName: body?.staffName || null, date, time, durationMin: Number(body?.durationMin || 30), price: Number(body?.price || 0), currency: body?.currency || 'KES', cardNumber, ticketNumber, status: 'pending', createdAt: Date.now() };
+    await db.add('appointments', [appointment]);
+    await audit('created', 'appointment', { id, customerName: name, date, time, serviceName, ticketNumber }, context.name);
+    return json({ id, ticketNumber });
+  }],
+  'PUT /api/appointments/:id': [async ({ params, body }) => {
+    const context = currentContext();
+    if (!context) return error('Please log in.', 401);
+    const [existing] = await db.get('appointments', [params.id]);
+    if (!existing) return error('Appointment not found', 404);
+    const allowed = ['owner', 'admin', 'manager', 'receptionist'].includes(context.role);
+    const barberStatus = context.role === 'barber' && body?.status !== undefined;
+    if (!allowed && !barberStatus) return error('You cannot edit appointments', 403);
+    const updated = { ...existing };
+    if (allowed) {
+      for (const key of ['customerName', 'customerPhone', 'serviceId', 'serviceName', 'staffId', 'staffName', 'date', 'time', 'durationMin', 'price', 'currency', 'cardNumber', 'status']) if (body?.[key] !== undefined) updated[key] = body[key];
+    } else if (body?.status !== undefined) updated.status = body.status;
+    await db.update('appointments', [{ id: params.id, record: updated }]);
+    await audit('updated', 'appointment', { id: params.id, status: updated.status }, context.name);
     return json({ ok: true, item: updated });
+  }],
+  'DELETE /api/appointments/:id': [async ({ params }) => {
+    const context = currentContext();
+    if (!context || !['owner', 'admin', 'receptionist'].includes(context.role)) return error('Only owners, administrators and receptionists can delete appointments', 403);
+    if (params.id === 'cancelled') {
+      const { items } = await db.list('appointments', { limit: 5000 });
+      const records = (items as any[]).filter(item => item.status === 'cancelled' && !item.deletedAt);
+      for (const record of records) await db.update('appointments', [{ id: record.id, record: { ...record, deletedAt: Date.now(), deletedBy: context.name } }]);
+      return json({ ok: true, deleted: records.length });
+    }
+    const [existing] = await db.get('appointments', [params.id]);
+    if (!existing) return error('Appointment not found', 404);
+    await db.update('appointments', [{ id: params.id, record: { ...existing, deletedAt: Date.now(), deletedBy: context.name } }]);
+    await audit('deleted', 'appointment', { id: params.id, customerName: existing.customerName }, context.name);
+    return json({ ok: true });
+  }],
+  'POST /api/orders': [async ({ body }) => {
+    const context = currentContext();
+    if (!context) return error('Please log in.', 401);
+    const items = Array.isArray(body?.items) ? body.items : [];
+    if (!items.length) return error('Add a service or product before checkout', 400);
+    const id = `order-${randomBytes(8).toString('hex')}`;
+    const totals: Record<string, number> = { KES: 0, USD: 0 };
+    for (const item of items) { const currency = item.currency === 'USD' ? 'USD' : 'KES'; totals[currency] += Number(item.price || 0) * Number(item.qty || 1); }
+    const discountPct = Math.max(0, Math.min(100, Number(body?.discountPct || 0)));
+    const totalByCurrency = { KES: Math.round(totals.KES * (1 - discountPct / 100)), USD: Math.round(totals.USD * (1 - discountPct / 100)) };
+    const order = { id, tenantId: context.tenantId, branchId: context.branchId || '', appointmentId: body?.appointmentId || null, customerId: body?.customerId || null, customerName: String(body?.customerName || 'Walk-in Customer'), items, discountPct, paymentMethod: body?.paymentMethod || 'Cash', mpesaReceiptNumber: body?.mpesaReceiptNumber || null, totalByCurrency, createdAt: Date.now() };
+    await db.add('orders', [order]);
+    if (body?.appointmentId) {
+      const [appointment] = await db.get('appointments', [String(body.appointmentId)]);
+      if (appointment) await db.update('appointments', [{ id: String(body.appointmentId), record: { ...appointment, status: 'completed', paymentCompleted: true } }]);
+    }
+    await audit('checkout', 'order', { id, appointmentId: body?.appointmentId || null, totalByCurrency, paymentMethod: order.paymentMethod }, context.name);
+    return json({ id, item: order, totalByCurrency, createdAt: order.createdAt });
   }],
   'GET /api/_healthcheck': [async () => json({ ok: true })],
   'GET /api/dashboard': [async ({ query }) => {
@@ -655,8 +784,7 @@ export const handler = router({
       db.list('orders', { limit: 10000 }), db.list('appointments', { limit: 10000 }), db.list('staff', { limit: 5000 }),
       db.list('customers', { limit: 10000 }), db.list('queue', { limit: 10000 }), db.list('expenses', { limit: 10000 }),
     ]);
-    const inScope = (record: any) => !record.deletedAt && (context.role === 'admin' || !context.tenantId || !record.tenantId || record.tenantId === context.tenantId)
-      && (!context.branchId || !record.branchId || record.branchId === context.branchId);
+    const inScope = (record: any) => !record.deletedAt && (context.role === 'admin' || !context.tenantId || !record.tenantId || record.tenantId === context.tenantId) && (!context.branchId || !record.branchId || record.branchId === context.branchId);
     const range = String(query.range || 'today');
     const dayStart = new Date(`${nairobiDateString()}T00:00:00+03:00`).getTime();
     const from = range === 'today' ? dayStart : range === 'week' ? mostRecentSaturdayThroughFridayRange().from : range === 'month' ? new Date(`${nairobiDateString().slice(0, 7)}-01T00:00:00+03:00`).getTime() : 0;
@@ -665,53 +793,22 @@ export const handler = router({
     const paymentMethodTotals: Record<'Cash' | 'Card' | 'M-Pesa', number> = { Cash: 0, Card: 0, 'M-Pesa': 0 };
     for (const order of scopedOrders) {
       const totals = order.totalByCurrency || {};
-      revenueByCurrency.KES += Number(totals.KES || 0);
-      revenueByCurrency.USD += Number(totals.USD || 0);
+      revenueByCurrency.KES += Number(totals.KES || 0); revenueByCurrency.USD += Number(totals.USD || 0);
       const method = String(order.paymentMethod || 'Cash');
-      if (method === 'Card' || method === 'M-Pesa') paymentMethodTotals[method] += Number(totals.KES || 0);
-      else paymentMethodTotals.Cash += Number(totals.KES || 0);
+      if (method === 'Card' || method === 'M-Pesa') paymentMethodTotals[method] += Number(totals.KES || 0); else paymentMethodTotals.Cash += Number(totals.KES || 0);
     }
-    const expenseTotal = (expenses as any[]).filter(inScope).filter(expense => range === 'all' || Number(expense.createdAt || 0) >= from).reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
     const today = nairobiDateString();
+    const expenseTotal = (expenses as any[]).filter(inScope).reduce((sum, expense) => sum + Number(expense.amount || 0), 0);
     const scopedAppointments = (appointments as any[]).filter(inScope);
-    const activeStaff = (staff as any[]).filter(inScope).filter(member => member.employmentStatus !== 'laid-off');
-    return json({
-      range, revenueByCurrency, ordersCount: scopedOrders.length, paymentMethodTotals, expenseTotal,
-      productCost: 0, commissionsByCurrency: { KES: 0, USD: 0 },
-      estimatedProfitByCurrency: { KES: revenueByCurrency.KES - expenseTotal, USD: revenueByCurrency.USD },
-      todaysAppointmentsCount: scopedAppointments.filter(item => item.date === today).length,
-      upcomingAppointments: scopedAppointments.filter(item => item.date >= today && !['cancelled', 'no-show', 'completed'].includes(item.status)).sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`)).slice(0, 20),
-      activeStaffCount: activeStaff.length,
-      totalStaffCount: (staff as any[]).filter(inScope).length,
-      waitingQueueCount: (queue as any[]).filter(inScope).filter(item => item.status !== 'completed').length,
-      customersCount: (customers as any[]).filter(inScope).length,
-      customers: (customers as any[]).filter(inScope).slice(0, 100),
-      topStaff: [], commissionByClient: [], staffEarnings: [],
-    });
+    const scopedCustomers = (customers as any[]).filter(inScope);
+    const scopedStaff = (staff as any[]).filter(inScope);
+    return json({ range, revenueByCurrency, ordersCount: scopedOrders.length, paymentMethodTotals, expenseTotal, productCost:  0, commissionsByCurrency: { KES: 0, USD: 0 }, estimatedProfitByCurrency: { KES: revenueByCurrency.KES - expenseTotal, USD: revenueByCurrency.USD }, todaysAppointmentsCount: scopedAppointments.filter(item => item.date === today).length, upcomingAppointments: scopedAppointments.filter(item => item.date >= today && !['cancelled', 'no-show', 'completed'].includes(item.status)).slice(0, 20), activeStaffCount: scopedStaff.filter(item => item.employmentStatus !== 'laid-off').length, totalStaffCount: scopedStaff.length, waitingQueueCount: (queue as any[]).filter(inScope).filter(item => item.status !== 'completed').length, customersCount: scopedCustomers.length, customers: scopedCustomers.slice(0, 100), topStaff: [], commissionByClient: [], staffEarnings: [] });
   }],
   'GET /api/analytics/rebooking': [async () => {
     const context = currentContext();
     if (!context) return error('Please log in.', 401);
-    const [{ items: appointments }] = await Promise.all([db.list('appointments', { limit: 10000 })]);
-    const items = (appointments as any[]).filter(item => !item.deletedAt && (context.role === 'admin' || !context.branchId || !item.branchId || item.branchId === context.branchId) && item.status === 'completed').slice(0, 500).map(item => ({
-      id: item.id, customerId: item.customerId || null, customerName: item.customerName || 'Customer',
-      lastAppointmentDate: item.date, lastServiceName: item.serviceName || 'Service',
-      daysSinceCompleted: Math.max(0, Math.floor((Date.now() - new Date(`${item.date}T00:00:00+03:00`).getTime()) / 86400000)),
-      isRebooked: false,
-    }));
+    const { items: appointments } = await db.list('appointments', { limit: 10000 });
+    const items = (appointments as any[]).filter(item => !item.deletedAt && item.status === 'completed' && (context.role === 'admin' || !context.branchId || !item.branchId || item.branchId === context.branchId)).map(item => ({ id: item.id, customerId: item.customerId || null, customerName: item.customerName || 'Customer', lastAppointmentDate: item.date, lastServiceName: item.serviceName || 'Service', daysSinceCompleted: Math.max(0, Math.floor((Date.now() - new Date(`${item.date}T00:00:00+03:00`).getTime()) / 86400000)), isRebooked: false })).slice(0, 500);
     return json({ items });
-  }],
-  'GET /api/payroll/staff': [async ({ query }) => {
-    const context = currentContext();
-    if (!context) return error('Please log in.', 401);
-    const [{ items: staff }, { items: orders }, { items: payoutItems }, { items: appointments }, { items: payrollItems }] = await Promise.all([
-      db.list('staff', { limit: 5000 }), db.list('orders', { limit: 10000 }), db.list('payouts', { limit: 10000 }), db.list('appointments', { limit: 10000 }), db.list('payroll', { limit: 10000 }),
-    ]);
-    const period = String(query.period || 'current');
-    const range = period === 'last-week' ? mostRecentSaturdayThroughFridayRange(new Date(Date.now() - 7 * 86400000)) : mostRecentSaturdayThroughFridayRange();
-    const tenantStaff = (staff as any[]).filter(member => !member.deletedAt && (context.role === 'admin' || member.tenantId === context.tenantId) && (!context.branchId || member.branchId === context.branchId));
-    const earnings = calculateUnpaidStaffEarnings((orders as any[]).filter(order => !order.deletedAt), payoutItems as any[], appointments as any[], range.from, range.to, payrollItems as any[]);
-    const items = tenantStaff.map(member => ({ ...member, unpaidCommissionKES: earnings.filter(line => line.staffId === member.id).reduce((sum, line) => sum + (line.currency === 'KES' ? line.amount : 0), 0) }));
-    return json({ items, period: { from: range.from, to: range.to } });
   }],
 });
