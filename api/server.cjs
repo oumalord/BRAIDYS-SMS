@@ -29757,6 +29757,21 @@ function error(message, status = 500) {
 function router(routes) {
   return { routes };
 }
+var images = /* @__PURE__ */ new Map();
+var emptyPng = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/3X5wNwAAAABJRU5ErkJggg==";
+var ai = { imageGen: async () => ({ image: { data: emptyPng, mimeType: "image/png" } }) };
+var storage = {
+  async read(paths) {
+    return paths.map((path) => ({ content: images.get(path) || null }));
+  },
+  async write(entries) {
+    entries.forEach((entry) => images.set(entry.path, entry.content));
+    return entries.map(() => true);
+  },
+  async url(paths) {
+    return paths.map((path) => ({ url: images.has(path) ? `data:image/png;base64,${images.get(path)}` : "" }));
+  }
+};
 
 // backend/index.ts
 var import_node_crypto3 = require("node:crypto");
@@ -29885,6 +29900,7 @@ function hasSufficientPaystackPrincipalBalance(availableMinorUnits, transferAmou
 
 // backend/index.ts
 var DAY = 24 * 3600 * 1e3;
+var DEFAULT_STAFF_PIN = "1234";
 var ATTENDANCE_LOCATION = { latitude: -1.2154173, longitude: 36.888536 };
 var ATTENDANCE_RADIUS_METERS = 300;
 var KAMAKIS_ATTENDANCE_LOCATION = { latitude: -1.1679375, longitude: 36.9682031 };
@@ -29996,6 +30012,14 @@ function normalizeRole(role) {
   if (value.includes("reception")) return "receptionist";
   if (value.includes("manager")) return "manager";
   return "barber";
+}
+function serviceStaffCount(value) {
+  return Number(value) === 2 ? 2 : 1;
+}
+function commissionPct(value, staffCount) {
+  const rate = Number(value);
+  if (rate === 30 || rate === 33.35 || rate === 40 || rate === 50) return rate;
+  return serviceStaffCount(staffCount) === 2 ? 33.35 : 50;
 }
 function sameStaffIdentity(staffId, staffName, context) {
   if (staffId && String(staffId) === String(context.staffId || "")) return true;
@@ -30622,8 +30646,8 @@ New temporary password: ${newPassword}`, account.id);
     const submittedItems = Array.isArray(body?.items) ? body.items : [];
     if (!submittedItems.length) return error("Add a service before checkout", 400);
     if (submittedItems.length > 100) return error("Checkout supports up to 100 service lines", 400);
-    const discountPct = Number(body?.discountPct || 0);
-    if (!Number.isFinite(discountPct) || discountPct < 0 || discountPct > 100) return error("Discount must be between 0 and 100 percent", 400);
+    const manualDiscountPct = Number(body?.discountPct || 0);
+    if (!Number.isFinite(manualDiscountPct) || manualDiscountPct < 0 || manualDiscountPct > 100) return error("Discount must be between 0 and 100 percent", 400);
     const paymentMethod = String(body?.paymentMethod || "Cash");
     if (!["Cash", "Card", "M-Pesa"].includes(paymentMethod)) return error("Choose a valid payment method", 400);
     const appointmentId = String(body?.appointmentId || "").trim();
@@ -30640,6 +30664,37 @@ New temporary password: ${newPassword}`, account.id);
       const { items: orders } = await db.list("orders", { limit: 1e4 });
       if (orders.some((order2) => !order2.deletedAt && String(order2.appointmentId || "") === appointmentId)) return error("A sale has already been recorded for this appointment", 409);
     }
+    const customerId = String(appointment?.customerId || body?.customerId || "").trim();
+    let customer = null;
+    if (customerId) {
+      [customer] = await db.get("customers", [customerId]);
+      if (!customer || customer.deletedAt || !contextIncludesRecord(customer, context)) return error("Customer not found in this salon", 404);
+      if (context.branchId && customer.branchId && customer.branchId !== context.branchId) return error("Customer does not belong to the active branch", 403);
+    }
+    let discountPct = manualDiscountPct;
+    let discountSource = discountPct > 0 ? "manual" : "none";
+    const promoCode = String(body?.promoCode || "").trim().toUpperCase();
+    if (promoCode) {
+      const { items: promotions } = await db.list("promotions", { limit: 1e3 });
+      const today = nairobiDateString();
+      const promotion = promotions.find((item) => !item.deletedAt && item.code === promoCode && item.active && item.approved && (context.role === "admin" || !item.tenantId || item.tenantId === context.tenantId) && (!item.startDate || item.startDate <= today) && (!item.endDate || item.endDate >= today));
+      if (!promotion) return error("That promo code is invalid, inactive, or expired", 400);
+      if (Number(promotion.discountPct) > discountPct) {
+        discountPct = Number(promotion.discountPct);
+        discountSource = "promo";
+      }
+    }
+    if (customer?.membershipTier && customer.membershipTier !== "none" && (!customer.membershipExpiry || Number(customer.membershipExpiry) >= Date.now())) {
+      const { items: plans } = await db.list("membership_plans", { limit: 1e3 });
+      const plan = plans.find((item) => !item.deletedAt && (item.id === customer.membershipPlanId || item.name === customer.membershipTier));
+      if (plan && Number(plan.discountPct) > discountPct) {
+        discountPct = Number(plan.discountPct);
+        discountSource = "membership";
+      }
+    }
+    const { items: staffRows } = await db.list("staff", { limit: 5e3 });
+    const staffById = new Map(staffRows.filter((member) => !member.deletedAt && member.employmentStatus !== "laid-off").map((member) => [String(member.id), member]));
+    const appointmentBranchId = String(appointment?.branchId || context.branchId || "");
     const normalizedItems = [];
     const subtotalByCurrency = { KES: 0, USD: 0 };
     for (const item of submittedItems) {
@@ -30652,6 +30707,34 @@ New temporary password: ${newPassword}`, account.id);
       subtotalByCurrency[currency] += revenue;
       const assistantPayment = Math.max(0, Number(item.assistantPayment || 0));
       const productCost = Math.max(0, Number(item.productCost || 0));
+      const primary = staffById.get(String(item.staffId || ""));
+      const coStaffId = String(item.coStaffId || "");
+      const thirdStaffId = String(item.thirdStaffId || "");
+      const helperStaffId = String(item.helperStaffId || "");
+      const coStaff = coStaffId ? staffById.get(coStaffId) : null;
+      const thirdStaff = thirdStaffId ? staffById.get(thirdStaffId) : null;
+      const helper = helperStaffId ? staffById.get(helperStaffId) : null;
+      if (!primary || !item.staffId) return error("Choose an active primary staff member for every service", 400);
+      if (coStaffId && !coStaff) return error("Choose an active co-staff member", 400);
+      if (thirdStaffId && !thirdStaff) return error("Choose an active third staff member", 400);
+      if (helperStaffId && !helper) return error("Choose an active assistant", 400);
+      const participantIds = [String(primary.id), coStaffId, thirdStaffId, helperStaffId].filter(Boolean);
+      if (new Set(participantIds).size !== participantIds.length) return error("Each service participant must be a different staff member", 400);
+      if (participantIds.some((staffId) => {
+        const member = staffById.get(staffId);
+        return Boolean(appointmentBranchId && member?.branchId && String(member.branchId) !== appointmentBranchId);
+      })) return error("All service participants must belong to the appointment branch", 400);
+      if (helperStaffId && assistantPayment <= 0) return error("Enter a positive assistant fee for every assigned assistant", 400);
+      if (!helperStaffId && assistantPayment !== 0) return error("Assign an assistant before entering assistant compensation", 400);
+      const lineTotalAfterDiscount = Math.round(revenue * (1 - discountPct / 100));
+      const commissionBase = Math.max(0, lineTotalAfterDiscount - productCost - assistantPayment);
+      const hasSplit = Boolean(coStaffId || thirdStaffId);
+      const commissionPct2 = Number(item.commissionPct || 50);
+      const primaryCommission = item.primaryCommission === void 0 || item.primaryCommission === null ? hasSplit ? Number.NaN : commissionBase * commissionPct2 / 100 : Number(item.primaryCommission);
+      const coStaffCommission = coStaffId ? Number(item.coStaffCommission) : 0;
+      const thirdStaffCommission = thirdStaffId ? Number(item.thirdStaffCommission) : 0;
+      if (!Number.isFinite(commissionPct2) || commissionPct2 < 0 || commissionPct2 > 100 || !Number.isFinite(primaryCommission) || primaryCommission < 0 || coStaffId && (!Number.isFinite(coStaffCommission) || coStaffCommission < 0) || thirdStaffId && (!Number.isFinite(thirdStaffCommission) || thirdStaffCommission < 0)) return error("Enter valid earnings for every service participant", 400);
+      if (primaryCommission + coStaffCommission + thirdStaffCommission > commissionBase) return error("Combined staff commissions cannot exceed the service balance after assistant compensation", 400);
       normalizedItems.push({
         ...item,
         type: "service",
@@ -30660,11 +30743,25 @@ New temporary password: ${newPassword}`, account.id);
         price,
         qty,
         currency,
-        lineTotalAfterDiscount: Math.round(revenue * (1 - discountPct / 100)),
-        commissionBase: Math.max(0, Math.round(revenue * (1 - discountPct / 100)) - productCost - assistantPayment)
+        staffId: primary.id,
+        staffName: primary.name,
+        coStaffId: coStaff?.id || null,
+        coStaffName: coStaff?.name || null,
+        thirdStaffId: thirdStaff?.id || null,
+        thirdStaffName: thirdStaff?.name || null,
+        helperStaffId: helper?.id || null,
+        helperStaffName: helper?.name || null,
+        commissionPct: commissionPct2,
+        assistantPayment,
+        helperDeduction: assistantPayment,
+        primaryCommission,
+        commission: primaryCommission,
+        coStaffCommission,
+        thirdStaffCommission,
+        lineTotalAfterDiscount,
+        commissionBase
       });
     }
-    if (normalizedItems.some((item) => !item.staffId)) return error("Assign a staff member to every service before checkout", 400);
     const discountByCurrency = {
       KES: Math.round(subtotalByCurrency.KES * discountPct / 100),
       USD: Math.round(subtotalByCurrency.USD * discountPct / 100)
@@ -30673,6 +30770,20 @@ New temporary password: ${newPassword}`, account.id);
       KES: Math.max(0, subtotalByCurrency.KES - discountByCurrency.KES),
       USD: Math.max(0, subtotalByCurrency.USD - discountByCurrency.USD)
     };
+    const requestedPoints = Number(body?.redeemPoints || 0);
+    if (!Number.isFinite(requestedPoints) || requestedPoints < 0) return error("Loyalty point redemption must be a non-negative number", 400);
+    const pointsRedeemed = Math.min(Math.floor(requestedPoints), Number(customer?.loyaltyPoints || 0), totalByCurrency.KES);
+    totalByCurrency.KES = Math.max(0, totalByCurrency.KES - pointsRedeemed);
+    const mpesaReferenceId = String(body?.mpesaReferenceId || "").trim();
+    const mpesaReceiptNumber = String(body?.mpesaReceiptNumber || "").trim();
+    let mpesaTransaction = null;
+    if (paymentMethod === "M-Pesa" && totalByCurrency.KES > 0) {
+      if (!mpesaReferenceId || !mpesaReceiptNumber) return error("Complete and verify the M-Pesa prompt before checkout", 402);
+      const { items: transactions } = await db.list("mpesa_transactions", { limit: 1e4 });
+      mpesaTransaction = transactions.find((item) => !item.deletedAt && item.status === "completed" && item.purpose === "pos_sale" && item.referenceId === mpesaReferenceId && item.mpesaReceiptNumber === mpesaReceiptNumber && item.initiatedByAccountId === context.accountId && item.tenantId === context.tenantId && (!context.branchId || item.branchId === context.branchId) && Number(item.amountKES) === totalByCurrency.KES);
+      if (!mpesaTransaction) return error("No verified M-Pesa payment matches this checkout amount and reference", 402);
+      if (mpesaTransaction.consumedByOrderId) return error("This M-Pesa payment has already been used", 409);
+    }
     const now = Date.now();
     const id = `order-${(0, import_node_crypto3.randomBytes)(8).toString("hex")}`;
     const order = {
@@ -30680,25 +30791,92 @@ New temporary password: ${newPassword}`, account.id);
       tenantId: context.tenantId,
       branchId: context.branchId || appointment?.branchId || "",
       appointmentId: appointmentId || null,
-      customerId: appointment?.customerId || body?.customerId || null,
-      customerName: appointment?.customerName || String(body?.customerName || "Walk-in Customer"),
+      customerId: customer?.id || null,
+      customerName: customer?.name || appointment?.customerName || String(body?.customerName || "Walk-in Customer"),
       items: normalizedItems,
       discountPct,
+      discountSource,
       discountByCurrency,
       subtotalByCurrency,
       totalByCurrency,
-      promoCode: String(body?.promoCode || "").trim() || null,
-      pointsRedeemed: Math.max(0, Math.floor(Number(body?.redeemPoints || 0))),
+      promoCode: promoCode || null,
+      pointsRedeemed,
       paymentMethod,
-      mpesaReceiptNumber: body?.mpesaReceiptNumber || null,
+      mpesaReceiptNumber: mpesaTransaction?.mpesaReceiptNumber || null,
+      mpesaTransactionId: mpesaTransaction?.id || null,
+      mpesaReferenceId: mpesaTransaction?.referenceId || null,
       createdAt: now
     };
     await db.add("orders", [order]);
+    if (mpesaTransaction) await db.update("mpesa_transactions", [{ id: mpesaTransaction.id, record: { ...mpesaTransaction, consumedByOrderId: id } }]);
+    if (customer) {
+      const updatedCustomer = {
+        ...customer,
+        totalSpent: Number(customer.totalSpent || 0) + Number(totalByCurrency.KES || 0),
+        totalSpentUSD: Number(customer.totalSpentUSD || 0) + Number(totalByCurrency.USD || 0),
+        loyaltyPoints: Math.max(0, Number(customer.loyaltyPoints || 0) - pointsRedeemed + Math.floor(Number(totalByCurrency.KES || 0) / 100)),
+        visits: Number(customer.visits || 0) + 1,
+        lastVisit: now
+      };
+      await db.update("customers", [{ id: customer.id, record: updatedCustomer }]);
+    }
     if (appointment) {
       await db.update("appointments", [{ id: appointmentId, record: { ...appointment, status: "completed", paymentCompleted: true, completedAt: now, completedBy: context.name, completedOrderId: id } }]);
     }
     await audit("checkout", "order", { id, appointmentId: appointmentId || null, totalByCurrency, paymentMethod }, context.name);
     return json({ id, item: order, totalByCurrency, createdAt: now });
+  }],
+  "PUT /api/orders/:id/completion": [async ({ params, body }) => {
+    const context = currentContext();
+    if (!context || !["owner", "admin"].includes(context.role)) return error("Only the owner or administrator can adjust completed work", 403);
+    const [existing] = await db.get("orders", [params.id]);
+    if (!existing || existing.deletedAt || !contextIncludesRecord(existing, context) || context.branchId && existing.branchId && existing.branchId !== context.branchId) return error("Completed work record not found", 404);
+    const adjustments = Array.isArray(body?.items) ? body.items : [];
+    if (!adjustments.length) return error("Provide at least one completed service adjustment", 400);
+    const updatedItems = Array.isArray(existing.items) ? [...existing.items] : [];
+    const seen = /* @__PURE__ */ new Set();
+    for (const adjustment of adjustments) {
+      const index = Number(adjustment?.index);
+      const item = updatedItems[index];
+      if (!Number.isInteger(index) || seen.has(index) || !item || item.type !== "service") return error("A completed service adjustment is invalid", 400);
+      seen.add(index);
+      const [primary] = await db.get("staff", [String(adjustment.staffId || "")]);
+      if (!primary || primary.deletedAt || primary.employmentStatus === "laid-off") return error("Assigned staff member was not found or is unavailable", 404);
+      if (context.branchId && primary.branchId && primary.branchId !== context.branchId) return error("Assigned staff must belong to the active branch", 400);
+      const coStaffId = String(adjustment.coStaffId || "");
+      const helperStaffId = String(adjustment.helperStaffId || "");
+      const [coStaff] = coStaffId ? await db.get("staff", [coStaffId]) : [null];
+      const [helper] = helperStaffId ? await db.get("staff", [helperStaffId]) : [null];
+      if (coStaffId && (!coStaff || coStaff.deletedAt || coStaff.employmentStatus === "laid-off")) return error("Co-staff member was not found or is unavailable", 404);
+      if (helperStaffId && (!helper || helper.deletedAt || helper.employmentStatus === "laid-off")) return error("Assistant was not found or is unavailable", 404);
+      if (coStaffId && (coStaffId === primary.id || context.branchId && coStaff.branchId && coStaff.branchId !== context.branchId)) return error("Choose a different co-staff member from the active branch", 400);
+      if (helperStaffId && ([primary.id, coStaffId].includes(helperStaffId) || context.branchId && helper.branchId && helper.branchId !== context.branchId)) return error("Choose a different assistant from the active branch", 400);
+      const assistantPayment = Number(adjustment.assistantPayment || 0);
+      const commissionBase = Math.max(0, Number(adjustment.commissionBase ?? item.commissionBase ?? 0));
+      const primaryCommission = Number(adjustment.primaryCommission);
+      const coStaffCommission = coStaffId ? Number(adjustment.coStaffCommission) : 0;
+      if (!Number.isFinite(assistantPayment) || assistantPayment < 0 || !Number.isFinite(commissionBase) || !Number.isFinite(primaryCommission) || primaryCommission < 0 || !Number.isFinite(coStaffCommission) || coStaffCommission < 0 || primaryCommission + coStaffCommission > commissionBase || helperStaffId && assistantPayment <= 0) return error("Commission and assistant amounts are invalid for this service", 400);
+      updatedItems[index] = {
+        ...item,
+        staffId: primary.id,
+        staffName: primary.name,
+        coStaffId: coStaff?.id || null,
+        coStaffName: coStaff?.name || null,
+        helperStaffId: helper?.id || null,
+        helperStaffName: helper?.name || null,
+        assistantPayment,
+        helperDeduction: assistantPayment,
+        commissionBase,
+        commissionPct: Number(adjustment.commissionPct ?? item.commissionPct ?? 50),
+        primaryCommission,
+        commission: primaryCommission,
+        coStaffCommission
+      };
+    }
+    const updated = { ...existing, items: updatedItems, updatedAt: Date.now() };
+    await db.update("orders", [{ id: existing.id, record: updated }]);
+    await audit("updated completion", "order", updated, context.name);
+    return json({ item: updated });
   }],
   "GET /api/expenses": [async () => {
     const context = currentContext();
@@ -30745,6 +30923,109 @@ New temporary password: ${newPassword}`, account.id);
     const matches = items.filter((draft) => !draft.deletedAt && (!appointmentId || String(draft.appointmentId || "") === appointmentId));
     for (const draft of matches) await db.update("pos_drafts", [{ id: draft.id, record: { ...draft, deletedAt: Date.now() } }]);
     return json({ ok: true });
+  }],
+  "POST /api/mpesa/stkpush": [async ({ body }) => {
+    const context = currentContext();
+    if (!context || !["owner", "admin", "manager", "receptionist", "barber", "customer"].includes(context.role)) return error("Please log in to start a payment", 401);
+    const phone = String(body?.phone || "").replace(/\s+/g, "");
+    if (!/^(?:\+254|0)(?:7\d{8}|1\d{8})$/.test(phone)) return error("Enter a valid Kenyan M-Pesa phone number", 400);
+    const amountKES = Math.round(Number(body?.amountKES));
+    if (!Number.isSafeInteger(amountKES) || amountKES <= 0) return error("A positive payment amount is required", 400);
+    const consumerKey = process.env.MPESA_CONSUMER_KEY;
+    const consumerSecret = process.env.MPESA_CONSUMER_SECRET;
+    const shortcode = process.env.MPESA_SHORTCODE;
+    const passkey = process.env.MPESA_PASSKEY;
+    const callbackUrl = process.env.MPESA_CALLBACK_URL;
+    if (!consumerKey || !consumerSecret || !shortcode || !passkey || !callbackUrl) return error("M-Pesa is not configured. Add the Daraja credentials and public callback URL to the backend environment.", 503);
+    const transactionId = `mpesa-${(0, import_node_crypto3.randomBytes)(12).toString("hex")}`;
+    const transaction = {
+      id: transactionId,
+      tenantId: context.tenantId,
+      branchId: context.branchId || "",
+      initiatedByAccountId: context.accountId,
+      phone,
+      amountKES,
+      purpose: String(body?.purpose || "payment"),
+      referenceId: String(body?.referenceId || ""),
+      status: "pending",
+      mpesaReceiptNumber: null,
+      createdAt: Date.now(),
+      completedAt: null
+    };
+    await db.add("mpesa_transactions", [transaction]);
+    const baseUrl = process.env.MPESA_ENVIRONMENT === "production" ? "https://api.safaricom.co.ke" : "https://sandbox.safaricom.co.ke";
+    try {
+      const tokenResponse = await fetch(`${baseUrl}/oauth/v1/generate?grant_type=client_credentials`, {
+        headers: { Authorization: `Basic ${Buffer.from(`${consumerKey}:${consumerSecret}`).toString("base64")}` },
+        signal: AbortSignal.timeout(1e4)
+      });
+      const tokenBody = await tokenResponse.json();
+      if (!tokenResponse.ok || !tokenBody.access_token) throw new Error("Could not authenticate with Safaricom Daraja");
+      const timestamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[-:TZ.]/g, "").slice(0, 14);
+      const password = Buffer.from(`${shortcode}${passkey}${timestamp}`).toString("base64");
+      const providerPhone = phone.replace(/^0/, "254").replace(/^\+/, "");
+      const pushResponse = await fetch(`${baseUrl}/mpesa/stkpush/v1/processrequest`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${tokenBody.access_token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          BusinessShortCode: shortcode,
+          Password: password,
+          Timestamp: timestamp,
+          TransactionType: "CustomerPayBillOnline",
+          Amount: amountKES,
+          PartyA: providerPhone,
+          PartyB: shortcode,
+          PhoneNumber: providerPhone,
+          CallBackURL: callbackUrl,
+          AccountReference: `SG-${transactionId.slice(-8)}`,
+          TransactionDesc: transaction.purpose
+        }),
+        signal: AbortSignal.timeout(15e3)
+      });
+      const pushBody = await pushResponse.json();
+      if (!pushResponse.ok || !pushBody.CheckoutRequestID) throw new Error(pushBody.errorMessage || pushBody.ResponseDescription || "Safaricom rejected the STK push");
+      const [stored] = await db.get("mpesa_transactions", [transactionId]);
+      await db.update("mpesa_transactions", [{ id: transactionId, record: { ...stored, checkoutRequestId: pushBody.CheckoutRequestID, merchantRequestId: pushBody.MerchantRequestID || null, providerResponse: pushBody } }]);
+      await audit("created", "mpesa_transaction", { id: transactionId, amountKES, purpose: transaction.purpose, referenceId: transaction.referenceId }, context.name);
+      return json({ id: transactionId, status: "pending" });
+    } catch (cause) {
+      const [stored] = await db.get("mpesa_transactions", [transactionId]);
+      if (stored) await db.update("mpesa_transactions", [{ id: transactionId, record: { ...stored, status: "failed", failureReason: cause instanceof Error ? cause.message : "M-Pesa request failed", completedAt: Date.now() } }]);
+      return error(cause instanceof Error ? cause.message : "M-Pesa request failed", 502);
+    }
+  }],
+  "GET /api/mpesa/status/:id": [async ({ params }) => {
+    const context = currentContext();
+    if (!context) return error("Please log in.", 401);
+    const [transaction] = await db.get("mpesa_transactions", [params.id]);
+    if (!transaction || transaction.deletedAt) return error("Transaction not found", 404);
+    if (!["owner", "admin"].includes(context.role) && transaction.initiatedByAccountId !== context.accountId) return error("This payment belongs to another staff member", 403);
+    return json({ id: transaction.id, status: transaction.status, mpesaReceiptNumber: transaction.mpesaReceiptNumber || null, failureReason: transaction.failureReason || null, amountKES: transaction.amountKES, phone: transaction.phone });
+  }],
+  "POST /api/mpesa/callback": [async ({ body }) => {
+    const callback = body?.Body?.stkCallback;
+    if (!callback?.CheckoutRequestID) return json({ ok: true });
+    const callbackContext = { accountId: "system-mpesa-callback", tenantId: "", salonName: "", role: "admin", name: "M-Pesa callback" };
+    return withRequestContext(callbackContext, async () => {
+      const { items } = await db.list("mpesa_transactions", { limit: 1e4 });
+      const transaction = items.find((item) => !item.deletedAt && item.checkoutRequestId === callback.CheckoutRequestID);
+      if (!transaction || transaction.status !== "pending") return json({ ok: true });
+      const metadata = Object.fromEntries((callback.CallbackMetadata?.Item || []).map((item) => [item.Name, item.Value]));
+      const succeeded = Number(callback.ResultCode) === 0;
+      const receipt = String(metadata.MpesaReceiptNumber || "");
+      const amountMatches = Number(metadata.Amount) === Number(transaction.amountKES);
+      const phoneMatches = normalizeCustomerPhone(metadata.PhoneNumber) === normalizeCustomerPhone(transaction.phone);
+      const validPayment = succeeded && Boolean(receipt) && amountMatches && phoneMatches;
+      await db.update("mpesa_transactions", [{ id: transaction.id, record: {
+        ...transaction,
+        status: validPayment ? "completed" : "failed",
+        mpesaReceiptNumber: validPayment ? receipt : null,
+        failureReason: validPayment ? null : succeeded ? "Payment callback details did not match the request" : String(callback.ResultDesc || "M-Pesa payment failed"),
+        completedAt: Date.now(),
+        callbackResultCode: Number(callback.ResultCode)
+      } }]);
+      return json({ ok: true });
+    });
   }],
   "GET /api/appointments/staff-weekly": [async ({ query }) => {
     const context = currentContext();
@@ -31512,6 +31793,160 @@ New temporary password: ${newPassword}`, account.id);
     const { items } = await db.list("staff", { limit: 200 });
     return json({ items: items.filter((item) => !item.deletedAt && (context?.role === "admin" || !context?.tenantId || item.tenantId === context.tenantId) && (!context?.branchId || !item.branchId || item.branchId === context.branchId)) });
   }],
+  "POST /api/staff": [async ({ body }) => {
+    const context = currentContext();
+    if (!context || !["owner", "admin"].includes(context.role)) return error("Only the owner or administrator can add staff", 403);
+    const name = String(body?.name || "").trim();
+    const phone = String(body?.phone || "").trim();
+    const email = String(body?.accountEmail || "").trim().toLowerCase();
+    const branchId = String(body?.branchId || context.branchId || "").trim();
+    const pin = String(body?.pin || DEFAULT_STAFF_PIN);
+    if (!name || !phone) return error("Name and phone are required", 400);
+    if (!/^\d{4}$/.test(pin)) return error("Staff PIN must be exactly 4 digits", 400);
+    const { items: branches } = await db.list("branches", { limit: 5e3 });
+    const branch = branches.find((item) => item.id === branchId && item.status === "active" && (context.role === "admin" || item.salonId === context.tenantId));
+    if (!branch) return error("Choose a valid branch for this staff member", 400);
+    const { items: existingStaff } = await db.list("staff", { limit: 5e3 });
+    if (existingStaff.some((item) => !item.deletedAt && item.branchId === branchId && normalizeCustomerPhone(item.phone) === normalizeCustomerPhone(phone))) return error("A staff member with this phone number already exists at this branch", 409);
+    const staffId = `staff-${(0, import_node_crypto3.randomBytes)(8).toString("hex")}`;
+    const isReceptionist = String(body?.role || "").toLowerCase().includes("reception");
+    const staffMember = {
+      id: staffId,
+      tenantId: branch.salonId,
+      salonName: context.salonName,
+      name,
+      role: String(body?.role || "Barber"),
+      specialties: Array.isArray(body?.specialties) ? body.specialties : [],
+      branch: branch.name,
+      branchId: branch.id,
+      branchName: branch.name,
+      chair: String(body?.chair || ""),
+      phone,
+      accountEmail: email,
+      accountStatus: "active",
+      employmentStatus: "active",
+      commissionPct: 50,
+      status: "available",
+      createdAt: Date.now()
+    };
+    await db.add("staff", [staffMember]);
+    const accountId = `account-${(0, import_node_crypto3.randomBytes)(8).toString("hex")}`;
+    await db.add("accounts", [{
+      id: accountId,
+      tenantId: branch.salonId,
+      salonName: context.salonName,
+      branchId: branch.id,
+      name,
+      email,
+      phone,
+      role: isReceptionist ? "receptionist" : "barber",
+      status: "active",
+      pinHash: passwordHash(pin),
+      staffId,
+      createdAt: Date.now()
+    }]);
+    await audit("created", "staff", { id: staffId, name, role: staffMember.role, branchId: branch.id }, context.name);
+    return json({ id: staffId, accountId });
+  }],
+  "PUT /api/staff/:id": [async ({ params, body }) => {
+    const context = currentContext();
+    if (!context || !["owner", "admin"].includes(context.role)) return error("Only the owner or administrator can edit staff", 403);
+    const [existing] = await db.get("staff", [params.id]);
+    if (!existing || existing.deletedAt) return error("Staff not found", 404);
+    const allowed = ["name", "role", "specialties", "chair", "phone", "accountEmail", "accountStatus", "employmentStatus", "status"];
+    const patch = Object.fromEntries(allowed.filter((key) => key in (body || {})).map((key) => [key, body[key]]));
+    if ("name" in patch) patch.name = String(patch.name || "").trim();
+    if ("phone" in patch) patch.phone = String(patch.phone || "").trim();
+    if ("accountEmail" in patch) patch.accountEmail = String(patch.accountEmail || "").trim().toLowerCase();
+    if ("pin" in (body || {})) {
+      const pin = String(body.pin || "");
+      if (!/^\d{4}$/.test(pin)) return error("Staff PIN must be exactly 4 digits", 400);
+    }
+    if (patch.name === "" || patch.phone === "") return error("Name and phone are required", 400);
+    const updated = { ...existing, ...patch, commissionPct: 50, updatedAt: Date.now() };
+    if (patch.employmentStatus === "laid-off") updated.status = "off";
+    const phoneChanged = patch.phone !== void 0 && normalizeCustomerPhone(patch.phone) !== normalizeCustomerPhone(existing.phone);
+    if (phoneChanged) {
+      delete updated.paystackRecipientCode;
+      delete updated.paystackRecipientMode;
+    }
+    await db.update("staff", [{ id: params.id, record: updated }]);
+    const { items: accounts } = await db.list("accounts", { limit: 5e3 });
+    const account = accounts.find((item) => item.staffId === params.id && !item.deletedAt);
+    if (account) {
+      const accountPatch = { ...account, name: updated.name, email: updated.accountEmail || "", phone: updated.phone };
+      if (updated.role !== void 0) accountPatch.role = String(updated.role).toLowerCase().includes("reception") ? "receptionist" : "barber";
+      if (patch.employmentStatus === "laid-off") accountPatch.status = "disabled";
+      if (patch.employmentStatus === "active") accountPatch.status = "active";
+      if (body?.pin) {
+        accountPatch.pinHash = passwordHash(String(body.pin));
+        delete accountPatch.passwordHash;
+      }
+      await db.update("accounts", [{ id: account.id, record: accountPatch }]);
+    }
+    await audit("updated", "staff", updated, context.name);
+    return json({ ok: true });
+  }],
+  "DELETE /api/staff/:id/permanent": [async ({ params }) => {
+    const context = currentContext();
+    if (!context || context.role !== "owner") return error("Only the owner can permanently block and delete staff", 403);
+    const [member] = await db.get("staff", [params.id]);
+    if (!member || member.deletedAt) return error("Staff member not found", 404);
+    const { items: accounts } = await db.list("accounts", { limit: 5e3 });
+    const account = accounts.find((item) => item.staffId === params.id && !item.deletedAt);
+    const deletedAt = Date.now();
+    await db.update("staff", [{ id: member.id, record: { ...member, deletedAt, deletedBy: context.name, employmentStatus: "permanently-deleted", status: "off", accountStatus: "disabled" } }]);
+    if (account) await db.update("accounts", [{ id: account.id, record: { ...account, deletedAt, deletedBy: context.name, status: "disabled" } }]);
+    await audit("permanently blocked and deleted staff", "staff", { id: member.id, name: member.name, branchId: member.branchId, accountId: account?.id || null }, context.name);
+    return json({ ok: true, id: member.id });
+  }],
+  "POST /api/services": [async ({ body }) => {
+    const context = currentContext();
+    if (!context || !["owner", "admin", "receptionist"].includes(context.role)) return error("Only the owner, administrator or receptionist can add services", 403);
+    const name = String(body?.name || "").trim();
+    const price = Number(body?.price);
+    if (!name || !Number.isFinite(price) || price <= 0) return error("Name and a positive price are required", 400);
+    if (body?.imageUrl && (typeof body.imageUrl !== "string" || body.imageUrl.length > 8e5 || !/^data:image\/(jpeg|png|webp);base64,/.test(body.imageUrl))) return error("Service image must be a supported image smaller than 800 KB.", 400);
+    const staffCount = serviceStaffCount(body?.staffCount);
+    const item = {
+      id: `service-${(0, import_node_crypto3.randomBytes)(8).toString("hex")}`,
+      tenantId: context.tenantId,
+      name,
+      category: String(body?.category || "General"),
+      price,
+      currency: body?.currency === "USD" ? "USD" : "KES",
+      durationMin: Math.max(5, Number(body?.durationMin) || 30),
+      description: String(body?.description || ""),
+      imageUrl: body?.imageUrl || "",
+      staffCount,
+      commissionPct: commissionPct(body?.commissionPct, staffCount),
+      createdAt: Date.now()
+    };
+    await db.add("services", [item]);
+    await audit("created", "service", item, context.name);
+    return json({ id: item.id });
+  }],
+  "PUT /api/services/:id": [async ({ params, body }) => {
+    const context = currentContext();
+    if (!context || !["owner", "admin"].includes(context.role)) return error("Only the owner or administrator can edit services", 403);
+    const [existing] = await db.get("services", [params.id]);
+    if (!existing || existing.deletedAt || existing.tenantId && existing.tenantId !== context.tenantId && context.role !== "admin") return error("Service not found", 404);
+    const patch = {};
+    for (const field of ["name", "category", "price", "currency", "durationMin", "description", "imageUrl", "staffCount", "commissionPct"]) if (field in (body || {})) patch[field] = body[field];
+    if (patch.name !== void 0 && !String(patch.name).trim()) return error("Name is required", 400);
+    if (patch.price !== void 0 && (!Number.isFinite(Number(patch.price)) || Number(patch.price) <= 0)) return error("Price must be greater than zero", 400);
+    if (patch.imageUrl !== void 0 && patch.imageUrl !== "" && (typeof patch.imageUrl !== "string" || patch.imageUrl.length > 8e5 || !/^data:image\/(jpeg|png|webp);base64,/.test(patch.imageUrl))) return error("Service image must be a supported image smaller than 800 KB.", 400);
+    if (patch.name !== void 0) patch.name = String(patch.name).trim();
+    if (patch.price !== void 0) patch.price = Number(patch.price);
+    if (patch.durationMin !== void 0) patch.durationMin = Math.max(5, Number(patch.durationMin) || 30);
+    const staffCount = serviceStaffCount(patch.staffCount ?? existing.staffCount);
+    patch.staffCount = staffCount;
+    patch.commissionPct = commissionPct(patch.commissionPct ?? existing.commissionPct, staffCount);
+    const updated = { ...existing, ...patch, updatedAt: Date.now() };
+    await db.update("services", [{ id: params.id, record: updated }]);
+    await audit("updated", "service", updated, context.name);
+    return json({ ok: true });
+  }],
   "GET /api/memberships": [async () => {
     const context = currentContext();
     if (!context) return error("Please log in.", 401);
@@ -31547,14 +31982,235 @@ New temporary password: ${newPassword}`, account.id);
     await audit("created", "membership_plan", item, context.name);
     return json({ id, item });
   }],
-  "GET /api/services": [async () => {
-    const { items } = await db.list("services", { limit: 500 });
+  "GET /api/promotions": [async () => {
+    const context = currentContext();
+    if (!context) return error("Please log in.", 401);
+    const { items } = await db.list("promotions", { limit: 500 });
     return json({ items: items.filter((item) => !item.deletedAt) });
+  }],
+  "POST /api/promotions": [async ({ body }) => {
+    const context = currentContext();
+    if (!context || !["owner", "admin"].includes(context.role)) return error("Only the owner or administrator can create promotions", 403);
+    const title = String(body?.title || "").trim();
+    const code = String(body?.code || "").trim().toUpperCase();
+    const discountPct = Number(body?.discountPct || 0);
+    if (!title || !code) return error("Title and code are required", 400);
+    if (title.length > 120 || code.length > 32 || !/^[A-Z0-9_-]+$/.test(code)) return error("Promotion title or code is invalid", 400);
+    if (!Number.isFinite(discountPct) || discountPct <= 0 || discountPct > 100) return error("Discount must be greater than zero and at most 100 percent", 400);
+    const { items: existing } = await db.list("promotions", { limit: 1e3 });
+    if (existing.some((item2) => !item2.deletedAt && item2.code === code)) return error("A promotion with this code already exists", 409);
+    const requiresApproval = Boolean(body?.requiresApproval);
+    const item = {
+      id: `promotion-${(0, import_node_crypto3.randomBytes)(8).toString("hex")}`,
+      tenantId: context.tenantId,
+      branchId: context.branchId || "",
+      title,
+      description: String(body?.description || ""),
+      discountPct,
+      code,
+      startDate: String(body?.startDate || ""),
+      endDate: String(body?.endDate || ""),
+      requiresApproval,
+      approved: !requiresApproval,
+      active: true,
+      createdBy: context.name,
+      createdAt: Date.now()
+    };
+    await db.add("promotions", [item]);
+    await audit("created", "promotion", item, context.name);
+    return json({ id: item.id, item });
+  }],
+  "PUT /api/promotions/:id": [async ({ params, body }) => {
+    const context = currentContext();
+    if (!context || !["owner", "admin"].includes(context.role)) return error("Only the owner or administrator can update promotions", 403);
+    const [existing] = await db.get("promotions", [params.id]);
+    if (!existing || existing.deletedAt || context.role !== "admin" && existing.tenantId && existing.tenantId !== context.tenantId) return error("Promotion not found", 404);
+    if (existing.lastEmailedAt) return error("This promotion has already been emailed and cannot be edited", 409);
+    const patch = {};
+    for (const field of ["approved", "active", "title", "description", "discountPct", "startDate", "endDate"]) if (field in (body || {})) patch[field] = body[field];
+    if (patch.discountPct !== void 0 && (!Number.isFinite(Number(patch.discountPct)) || Number(patch.discountPct) <= 0 || Number(patch.discountPct) > 100)) return error("Discount must be greater than zero and at most 100 percent", 400);
+    if (patch.approved !== void 0) patch.approved = Boolean(patch.approved);
+    if (patch.active !== void 0) patch.active = Boolean(patch.active);
+    const updated = { ...existing, ...patch, updatedAt: Date.now() };
+    await db.update("promotions", [{ id: existing.id, record: updated }]);
+    await audit("updated", "promotion", updated, context.name);
+    return json({ ok: true });
+  }],
+  "POST /api/promotions/:id/email": [async ({ params, body }) => {
+    const context = currentContext();
+    if (!context || !["owner", "admin"].includes(context.role)) return error("Only the owner or administrator can email promotions", 403);
+    const [promotion] = await db.get("promotions", [params.id]);
+    if (!promotion || promotion.deletedAt || context.role !== "admin" && promotion.tenantId && promotion.tenantId !== context.tenantId) return error("Promotion not found", 404);
+    if (!promotion.active || !promotion.approved) return error("Approve and activate this promotion before emailing customers", 409);
+    if (promotion.lastEmailedAt) return error("This promotion has already been emailed", 409);
+    const { items: customers } = await db.list("customers", { limit: 5e3 });
+    const recipients = customers.filter((item) => !item.deletedAt && item.email && String(item.email).includes("@"));
+    if (!recipients.length) return error("No customers have an email address on their profile", 409);
+    const message = `${promotion.title}
+
+${promotion.description || "A special offer is available for you."}
+
+Discount: ${promotion.discountPct}%
+Code: ${promotion.code}${promotion.endDate ? `
+Offer ends: ${promotion.endDate}` : ""}`;
+    await Promise.all(recipients.map((customer) => notifyCustomer(customer.email, `${promotion.title} - BRAIDY SALON offer`, message, promotion.id)));
+    const updated = { ...promotion, lastEmailedAt: Date.now(), lastEmailedCount: recipients.length, emailSubject: String(body?.subject || `${promotion.title} - BRAIDY SALON offer`) };
+    await db.update("promotions", [{ id: promotion.id, record: updated }]);
+    await audit("emailed", "promotion", { id: promotion.id, recipientCount: recipients.length }, context.name);
+    return json({ sent: recipients.length, delivery: process.env.RESEND_API_KEY ? "sent" : "queued" });
+  }],
+  "GET /api/services": [async () => {
+    const context = currentContext();
+    const { items } = await db.list("services", { limit: 5e3 });
+    return json({ items: items.filter((item) => !item.deletedAt && (!context?.tenantId || !item.tenantId || item.tenantId === context.tenantId)) });
   }],
   "GET /api/customers": [async () => {
     const context = currentContext();
     const { items } = await db.list("customers", { limit: 1e3 });
     return json({ items: items.filter((item) => !item.deletedAt && (context?.role === "admin" || !context?.tenantId || item.tenantId === context.tenantId) && (!context?.branchId || !item.branchId || item.branchId === context.branchId)) });
+  }],
+  "POST /api/customers": [async ({ body }) => {
+    const context = currentContext();
+    if (!context || !["owner", "admin", "manager", "receptionist", "barber"].includes(context.role)) return error("Staff access is required to add customers", 403);
+    const name = String(body?.name || "").trim();
+    const phone = String(body?.phone || "").trim();
+    if (!name || !phone) return error("Name and phone are required", 400);
+    const email = String(body?.email || "").trim().toLowerCase();
+    const { items: existing } = await db.list("customers", { limit: 5e3 });
+    if (existing.some((item) => !item.deletedAt && item.tenantId === context.tenantId && normalizeCustomerPhone(item.phone) === normalizeCustomerPhone(phone))) return error("A customer with this phone number already exists", 409);
+    const customer = {
+      id: `customer-${(0, import_node_crypto3.randomBytes)(8).toString("hex")}`,
+      tenantId: context.tenantId,
+      branchId: context.branchId || "",
+      name,
+      phone,
+      email,
+      notes: String(body?.notes || ""),
+      loyaltyPoints: 0,
+      totalSpent: 0,
+      totalSpentUSD: 0,
+      visits: 0,
+      lastVisit: null,
+      createdAt: Date.now(),
+      membershipTier: "none",
+      membershipExpiry: null,
+      membershipPlanId: null
+    };
+    await db.add("customers", [customer]);
+    await audit("created", "customer", customer, context.name);
+    return json({ id: customer.id, item: customer });
+  }],
+  "PUT /api/customers/:id": [async ({ params, body }) => {
+    const context = currentContext();
+    if (!context || !["owner", "admin", "manager", "receptionist", "barber"].includes(context.role)) return error("Staff access is required to update customers", 403);
+    const [existing] = await db.get("customers", [params.id]);
+    if (!existing || existing.deletedAt) return error("Customer not found", 404);
+    const isOwner = ["owner", "admin"].includes(context.role);
+    const patch = {};
+    const fields = isOwner ? ["name", "phone", "email", "notes", "membershipTier", "membershipExpiry"] : ["membershipTier", "membershipExpiry"];
+    for (const field of fields) if (field in (body || {})) patch[field] = body[field];
+    const pin = isOwner ? String(body?.pin || "") : "";
+    if (pin && !/^\d{4}$/.test(pin)) return error("Client PIN must be exactly 4 digits", 400);
+    if (!isOwner && !Object.keys(patch).length) return error("Only an owner or administrator can edit customer details", 403);
+    if ("name" in patch) {
+      patch.name = String(patch.name || "").trim();
+      if (!patch.name) return error("Customer name is required", 400);
+    }
+    if ("phone" in patch) {
+      patch.phone = String(patch.phone || "").trim();
+      if (!patch.phone) return error("Customer phone is required", 400);
+    }
+    if ("email" in patch) patch.email = String(patch.email || "").trim().toLowerCase();
+    if ("notes" in patch) patch.notes = String(patch.notes || "");
+    if ("membershipTier" in patch) {
+      const tier = String(patch.membershipTier || "none");
+      if (tier === "none") {
+        patch.membershipTier = "none";
+        patch.membershipPlanId = null;
+        patch.membershipExpiry = null;
+      } else {
+        const { items: plans } = await db.list("membership_plans", { limit: 100 });
+        const plan = plans.find((item) => !item.deletedAt && item.name === tier);
+        if (!plan) return error("Choose a valid membership plan", 400);
+        patch.membershipTier = plan.name;
+        patch.membershipPlanId = plan.id;
+        patch.membershipExpiry = body?.membershipExpiry === void 0 ? Date.now() + Number(plan.durationDays || 30) * DAY : Number(body.membershipExpiry);
+        if (!Number.isFinite(patch.membershipExpiry) || patch.membershipExpiry <= Date.now()) return error("Choose a valid membership expiry date", 400);
+      }
+    }
+    const updated = { ...existing, ...patch, updatedAt: Date.now() };
+    await db.update("customers", [{ id: existing.id, record: updated }]);
+    if (isOwner) {
+      const { items: accounts } = await db.list("accounts", { limit: 5e3 });
+      const account = accounts.find((item) => item.role === "customer" && !item.deletedAt && (existing.email && String(item.email || "").toLowerCase() === String(existing.email).toLowerCase() || existing.phone && normalizeCustomerPhone(item.phone) === normalizeCustomerPhone(existing.phone)));
+      if (account) {
+        const accountPatch = { ...account, name: updated.name, phone: updated.phone, email: updated.email };
+        if (pin) accountPatch.pinHash = passwordHash(pin);
+        await db.update("accounts", [{ id: account.id, record: accountPatch }]);
+      }
+    }
+    await audit("updated", "customer", updated, context.name);
+    return json({ ok: true });
+  }],
+  "POST /api/customers/:id/pin": [async ({ params, body }) => {
+    const context = currentContext();
+    if (!context || !["owner", "admin"].includes(context.role)) return error("Only the owner or administrator can change client PINs", 403);
+    const pin = String(body?.pin || "");
+    if (!/^\d{4}$/.test(pin)) return error("Client PIN must be exactly 4 digits", 400);
+    const [customer] = await db.get("customers", [params.id]);
+    if (!customer || customer.deletedAt) return error("Customer not found", 404);
+    const { items: accounts } = await db.list("accounts", { limit: 5e3 });
+    const account = accounts.find((item) => item.role === "customer" && !item.deletedAt && (customer.email && String(item.email || "").toLowerCase() === String(customer.email).toLowerCase() || customer.phone && normalizeCustomerPhone(item.phone) === normalizeCustomerPhone(customer.phone)));
+    if (!account) return error("This customer does not have a client login account", 404);
+    await db.update("accounts", [{ id: account.id, record: { ...account, pinHash: passwordHash(pin), passwordHash: void 0, pinResetAt: Date.now() } }]);
+    await audit("updated", "account", { id: account.id, customerId: customer.id, action: "client_pin_changed" }, context.name);
+    return json({ ok: true });
+  }],
+  "DELETE /api/customers/:id/records": [async ({ params }) => {
+    const context = currentContext();
+    if (!context || !["owner", "admin"].includes(context.role)) return error("Only the owner or administrator can delete customer records", 403);
+    const [customer] = await db.get("customers", [params.id]);
+    if (!customer || customer.deletedAt) return error("Customer not found", 404);
+    const collections = ["customers", "appointments", "queue", "orders", "reviews", "membership_purchases", "pos_drafts", "notifications"];
+    const deletedAt = Date.now();
+    const deleted = {};
+    for (const collection of collections) {
+      const { items } = await db.list(collection, { limit: 5e3 });
+      const matches = items.filter((item) => collection === "customers" ? item.id === customer.id : item.customerId === customer.id || item.clientId === customer.id);
+      if (!matches.length) continue;
+      await db.update(collection, matches.map((item) => ({ id: item.id, record: { ...item, deletedAt, deletedBy: context.name } })));
+      deleted[collection] = matches.length;
+    }
+    await audit("deleted customer records", "customer", { id: customer.id, name: customer.name, deleted }, context.name);
+    return json({ deleted });
+  }],
+  "POST /api/memberships/purchase": [async ({ body }) => {
+    const context = currentContext();
+    if (!context || context.role !== "customer") return error("Customer login is required to purchase a membership", 403);
+    const customerId = String(body?.customerId || "");
+    const planId = String(body?.planId || "");
+    const receipt = String(body?.mpesaReceiptNumber || "").trim();
+    if (!customerId || !planId || !receipt) return error("Customer, plan, and a completed M-Pesa receipt are required", 400);
+    const [customer] = await db.get("customers", [customerId]);
+    const [account] = await db.get("accounts", [context.accountId]);
+    const { items: plans } = await db.list("membership_plans", { limit: 100 });
+    const plan = plans.find((item) => item.id === planId && !item.deletedAt);
+    if (!customer || customer.deletedAt || !account || !plan) return error("Customer or membership plan not found", 404);
+    const emailMatches = Boolean(account.email && customer.email && String(account.email).toLowerCase() === String(customer.email).toLowerCase());
+    const phoneMatches = Boolean(account.phone && customer.phone && normalizeCustomerPhone(account.phone) === normalizeCustomerPhone(customer.phone));
+    if (!emailMatches && !phoneMatches) return error("This customer profile does not belong to your account", 403);
+    const referenceId = `${customerId}:${planId}`;
+    const { items: transactions } = await db.list("mpesa_transactions", { limit: 5e3 });
+    const transaction = transactions.find((item) => !item.deletedAt && item.status === "completed" && item.purpose === "membership" && item.referenceId === referenceId && item.mpesaReceiptNumber === receipt && Number(item.amountKES) === Number(plan.priceKES));
+    if (!transaction) return error("No verified M-Pesa membership payment was found", 402);
+    const { items: previousPurchases } = await db.list("membership_purchases", { limit: 5e3 });
+    if (previousPurchases.some((item) => !item.deletedAt && item.mpesaTransactionId === transaction.id)) return error("This M-Pesa payment has already been used", 409);
+    const now = Date.now();
+    const expiresAt = now + Number(plan.durationDays || 30) * DAY;
+    const [purchaseId] = await db.add("membership_purchases", [{ customerId, customerName: customer.name, planId, planName: plan.name, amountKES: Number(plan.priceKES), mpesaReceiptNumber: receipt, mpesaTransactionId: transaction.id, purchasedAt: now, expiresAt }]);
+    await db.update("customers", [{ id: customer.id, record: { ...customer, membershipTier: plan.name, membershipPlanId: plan.id, membershipExpiry: expiresAt } }]);
+    await audit("purchased", "membership", { id: purchaseId, customerId, planName: plan.name, amountKES: Number(plan.priceKES) }, context.name);
+    return json({ purchaseId, membershipTier: plan.name, membershipExpiry: expiresAt });
   }],
   "GET /api/reviews": [async ({ query }) => {
     const context = currentContext();
@@ -31562,11 +32218,200 @@ New temporary password: ${newPassword}`, account.id);
     const { items } = await db.list("reviews", { limit: 1e3 });
     return json({ items: items.filter((item) => !item.deletedAt && (!staffId || String(item.staffId || "") === staffId) && (context?.role === "admin" || !context?.tenantId || item.tenantId === context.tenantId) && (!context?.branchId || !item.branchId || item.branchId === context.branchId)) });
   }],
+  "POST /api/reviews": [async ({ body }) => {
+    const context = currentContext();
+    if (!context || context.role !== "customer") return error("Customer login is required to submit an appointment review", 403);
+    const customerId = String(body?.customerId || "");
+    const appointmentId = String(body?.appointmentId || "");
+    const rating = Number(body?.rating);
+    if (!customerId || !appointmentId || !Number.isInteger(rating) || rating < 1 || rating > 5) return error("A completed appointment and rating from 1 to 5 are required", 400);
+    const [customer] = await db.get("customers", [customerId]);
+    const [account] = await db.get("accounts", [context.accountId]);
+    const [appointment] = await db.get("appointments", [appointmentId]);
+    if (!customer || !account || !appointment || appointment.deletedAt || appointment.status !== "completed" || String(appointment.customerId || "") !== customerId || !(account.email && String(account.email).toLowerCase() === String(customer.email || "").toLowerCase() || account.phone && normalizeCustomerPhone(account.phone) === normalizeCustomerPhone(customer.phone))) return error("Reviews are available only for your completed appointments", 403);
+    const { items: existing } = await db.list("reviews", { limit: 5e3 });
+    if (existing.some((item) => !item.deletedAt && item.appointmentId === appointmentId && item.customerId === customerId)) return error("This appointment already has a review", 409);
+    const review = {
+      id: `review-${(0, import_node_crypto3.randomBytes)(8).toString("hex")}`,
+      tenantId: context.tenantId,
+      branchId: appointment.branchId || context.branchId || "",
+      appointmentId,
+      customerId,
+      customerName: customer.name,
+      staffId: appointment.staffId || null,
+      staffName: appointment.staffName || "",
+      serviceName: appointment.serviceName || "",
+      rating,
+      comment: String(body?.comment || "").slice(0, 2e3),
+      survey: body?.survey || {},
+      createdAt: Date.now()
+    };
+    await db.add("reviews", [review]);
+    await audit("created", "review", { id: review.id, customerName: customer.name, serviceName: review.serviceName, rating }, context.name);
+    return json({ id: review.id });
+  }],
+  "POST /api/public/reviews": [async ({ body }) => {
+    const salonId = String(body?.salonId || "").trim();
+    const branchId = String(body?.branchId || "").trim();
+    const customerName = String(body?.customerName || "").trim();
+    const phone = String(body?.phone || "").trim();
+    const serviceName = String(body?.serviceName || "").trim();
+    const staffName = String(body?.staffName || "").trim();
+    const comment = String(body?.comment || "").trim();
+    const rating = Number(body?.rating);
+    if (!salonId || !customerName || !phone || !serviceName || !Number.isInteger(rating) || rating < 1 || rating > 5) return error("Salon, name, phone, service, and rating from 1 to 5 are required", 400);
+    if (customerName.length > 120 || phone.length > 40 || serviceName.length > 160 || staffName.length > 120 || comment.length > 2e3) return error("Review details are too long", 400);
+    const [salon] = await db.get("salons", [salonId]);
+    if (!salon || salon.status !== "active") return error("Salon not found", 404);
+    let branch = null;
+    if (branchId) {
+      [branch] = await db.get("branches", [branchId]);
+      if (!branch || branch.salonId !== salonId || branch.status !== "active") return error("Choose an active branch for this review", 400);
+    }
+    const review = {
+      id: `review-${(0, import_node_crypto3.randomBytes)(8).toString("hex")}`,
+      tenantId: salonId,
+      branchId: branch?.id || "",
+      appointmentId: null,
+      customerId: null,
+      customerName,
+      phone,
+      staffId: null,
+      staffName,
+      serviceName,
+      rating,
+      comment,
+      survey: body?.survey || {},
+      source: "public-qr",
+      createdAt: Date.now()
+    };
+    await db.add("reviews", [review]);
+    await audit("created", "public review", { id: review.id, customerName, staffName, serviceName, rating }, "customer");
+    return json({ id: review.id });
+  }],
   "GET /api/complaints": [async () => {
     const context = currentContext();
     if (!context || !["owner", "admin", "manager", "receptionist", "barber"].includes(context.role)) return error("Staff access is required", 403);
     const { items } = await db.list("complaints", { limit: 2e3 });
     return json({ items: items.filter((item) => !item.deletedAt).sort((a2, b2) => Number(b2.createdAt || 0) - Number(a2.createdAt || 0)) });
+  }],
+  "POST /api/complaints": [async ({ body }) => {
+    const context = currentContext();
+    if (!context || !["owner", "admin", "manager", "receptionist", "barber"].includes(context.role)) return error("Only staff can submit a complaint", 403);
+    const targetType = String(body?.targetType || "");
+    const targetName = String(body?.targetName || "").trim();
+    const category = String(body?.category || "").trim();
+    const description = String(body?.description || "").trim();
+    const incidentDate = String(body?.incidentDate || "").trim();
+    if (!["client", "staff"].includes(targetType) || !targetName || !category || !description) return error("Person, category and complaint details are required", 400);
+    if (targetName.length > 120 || category.length > 80 || description.length > 3e3) return error("Complaint details are too long", 400);
+    if (incidentDate && !nairobiDayRange(incidentDate)) return error("Incident date must be a valid calendar date", 400);
+    const now = Date.now();
+    const complaint = {
+      id: `complaint-${(0, import_node_crypto3.randomBytes)(8).toString("hex")}`,
+      tenantId: context.tenantId,
+      branchId: context.branchId || null,
+      targetType,
+      targetName,
+      category,
+      description,
+      incidentDate,
+      createdBy: context.name,
+      createdByRole: context.role,
+      staffId: context.staffId || null,
+      status: "open",
+      responses: [],
+      createdAt: now,
+      updatedAt: now
+    };
+    await db.add("complaints", [complaint]);
+    await audit("created", "complaint", complaint, context.name);
+    return json({ item: complaint }, 201);
+  }],
+  "PUT /api/complaints/:id": [async ({ params, body }) => {
+    const context = currentContext();
+    if (!context || !["owner", "admin"].includes(context.role)) return error("Only the owner or administrator can respond to complaints", 403);
+    const [existing] = await db.get("complaints", [params.id]);
+    if (!existing || existing.deletedAt) return error("Complaint not found", 404);
+    const allowedStatuses = ["open", "in_review", "resolved", "dismissed"];
+    const status = body?.status === void 0 ? existing.status : String(body.status);
+    const hasResponse = body?.response !== void 0;
+    const responseText = String(body?.response || "").trim();
+    if (!allowedStatuses.includes(status)) return error("Choose a valid complaint status", 400);
+    if (hasResponse && (!responseText || responseText.length > 2e3)) return error("Response must contain 1 to 2000 characters", 400);
+    const now = Date.now();
+    const responses = hasResponse ? [...Array.isArray(existing.responses) ? existing.responses : [], { id: `response-${(0, import_node_crypto3.randomBytes)(6).toString("hex")}`, authorName: context.name, authorRole: context.role, text: responseText, createdAt: now }] : existing.responses || [];
+    const updated = { ...existing, status, responses, updatedAt: now };
+    await db.update("complaints", [{ id: existing.id, record: updated }]);
+    await audit("updated", "complaint", updated, context.name);
+    return json({ item: updated });
+  }],
+  "GET /api/audit-logs": [async ({ query }) => {
+    const context = currentContext();
+    if (!context || !["owner", "admin"].includes(context.role)) return error("Only the owner or administrator can view audit logs", 403);
+    const { items } = await db.list("audit_logs", { limit: 5e3 });
+    const collection = String(query.collection || "");
+    return json({ items: items.filter((item) => !item.deletedAt && (!collection || item.collection === collection)).sort((first, second) => Number(second.createdAt || 0) - Number(first.createdAt || 0)) });
+  }],
+  "GET /api/messages": [async ({ query }) => {
+    const context = currentContext();
+    if (!context || !["owner", "admin", "manager", "receptionist", "barber"].includes(context.role)) return error("Staff access is required", 403);
+    const channel = String(query.channel || "team");
+    const { items } = await db.list("messages", { limit: 500 });
+    return json({ items: items.filter((item) => !item.deletedAt && item.channel === channel).sort((first, second) => Number(first.createdAt || 0) - Number(second.createdAt || 0)) });
+  }],
+  "POST /api/messages": [async () => error("Communication is email-only. Use email notifications or promotion campaigns.", 410)],
+  "POST /api/seed": [async () => error("Demo data seeding is disabled. Create a real salon through owner signup.", 410)],
+  "GET /api/background": [async () => {
+    const context = currentContext();
+    if (!context || !["owner", "admin"].includes(context.role)) return error("Only the owner or administrator can load the salon background", 403);
+    const path = "assets/salon-bg-v2.png";
+    const [existing] = await storage.read([path]);
+    if (!existing?.content) {
+      const generated = await ai.imageGen();
+      const [saved] = await storage.write([{ path, content: generated.image.data }]);
+      if (!saved) return error("Failed to generate background image", 500);
+    }
+    const [{ url }] = await storage.url([path]);
+    return json({ url });
+  }],
+  "GET /api/customer/dashboard": [async ({ query }) => {
+    const context = currentContext();
+    if (!context) return error("Please log in.", 401);
+    const search = String(query.query || query.email || query.phone || "").trim();
+    const normalizedSearch = search.toLowerCase().replace(/\s+/g, "");
+    if (!normalizedSearch) return error("A name, email or phone number is required", 400);
+    let account = null;
+    if (context.role === "customer") {
+      [account] = await db.get("accounts", [context.accountId]);
+      const ownIdentifiers = [account?.name, account?.email, account?.phone, account?.id].map((value) => String(value || "").toLowerCase().replace(/\s+/g, ""));
+      if (!ownIdentifiers.includes(normalizedSearch)) return error("Customer profile not found", 404);
+    } else if (!["owner", "admin", "manager", "receptionist"].includes(context.role)) {
+      return error("Customer dashboard access is not available to this account", 403);
+    }
+    const { items: customers } = await db.list("customers", { limit: 2e3 });
+    const activeCustomers = customers.filter((item) => !item.deletedAt);
+    let customer = context.role === "customer" ? activeCustomers.find((item) => account?.email && String(item.email || "").toLowerCase() === String(account.email).toLowerCase() || account?.phone && normalizeCustomerPhone(item.phone) === normalizeCustomerPhone(account.phone)) : activeCustomers.find((item) => [item.name, item.email, item.phone, item.id].some((value) => String(value || "").toLowerCase().replace(/\s+/g, "").includes(normalizedSearch)));
+    if (!customer && context.role === "customer" && account) {
+      const id = `customer-${(0, import_node_crypto3.randomBytes)(8).toString("hex")}`;
+      customer = { id, tenantId: context.tenantId, branchId: context.branchId || "", name: account.name, phone: account.phone || "", email: account.email || "", notes: "", loyaltyPoints: 0, totalSpent: 0, totalSpentUSD: 0, visits: 0, lastVisit: null, createdAt: Date.now(), membershipTier: "none", membershipExpiry: null };
+      await db.add("customers", [customer]);
+    }
+    if (!customer) return error("Customer profile not found", 404);
+    const [{ items: appointments }, { items: queue }, { items: reviews }, { items: purchases }] = await Promise.all([
+      db.list("appointments", { limit: 5e3 }),
+      db.list("queue", { limit: 5e3 }),
+      db.list("reviews", { limit: 5e3 }),
+      db.list("membership_purchases", { limit: 2e3 })
+    ]);
+    const customerItems = (items) => items.filter((item) => !item.deletedAt && String(item.customerId || "") === String(customer.id));
+    return json({
+      customer,
+      appointments: customerItems(appointments).sort((first, second) => String(second.date || "").localeCompare(String(first.date || ""))),
+      queue: customerItems(queue).sort((first, second) => Number(second.joinedAt || 0) - Number(first.joinedAt || 0)).slice(0, 10),
+      reviews: customerItems(reviews),
+      membershipPurchases: customerItems(purchases)
+    });
   }]
 });
 

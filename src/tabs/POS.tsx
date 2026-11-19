@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { Search, ShoppingCart, X } from 'lucide-react';
 import { Card, Button, Modal, Field, Input, Select, toast } from '../components/ui';
-import { CustomersApi, ServicesApi, StaffApi, OrdersApi, PosDraftsApi, AppointmentsApi, fmtMoney } from '../lib/api';
+import { CustomersApi, ServicesApi, StaffApi, OrdersApi, PosDraftsApi, AppointmentsApi, MembershipsApi, PromotionsApi, fmtMoney } from '../lib/api';
 import { MpesaPayModal } from '../components/MpesaPay';
-import type { Appointment, Customer, ServiceItem, Staff, Currency } from '../types';
+import type { Appointment, Customer, MembershipPlan, Promotion, ServiceItem, Staff, Currency } from '../types';
 
 interface CartLine { key: string; type: 'service'; refId: string; name: string; price: number; currency: Currency; qty: number; staffCount?: 1 | 2; commissionPct?: 30 | 33.35 | 40 | 50; staffId?: string; staffName?: string; coStaffId?: string; coStaffName?: string; thirdStaffId?: string; thirdStaffName?: string; helperStaffId?: string; helperStaffName?: string; assistantPayment?: number; primaryCommission?: number; coStaffCommission?: number; thirdStaffCommission?: number; }
 
@@ -15,6 +15,8 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
   const [serviceSearchOpen, setServiceSearchOpen] = useState(false);
   const [serviceSearch, setServiceSearch] = useState('');
   const [staff, setStaff] = useState<Staff[]>([]);
+  const [membershipPlans, setMembershipPlans] = useState<MembershipPlan[]>([]);
+  const [promotions, setPromotions] = useState<Promotion[]>([]);
   const [cart, setCart] = useState<CartLine[]>([]);
   const [customerId, setCustomerId] = useState('');
   const [discountPct, setDiscountPct] = useState(0);
@@ -26,6 +28,7 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
   const [receipt, setReceipt] = useState<any>(null);
   const [hasDraft, setHasDraft] = useState(false);
   const staffAutoSelectedClientRef = useRef(false);
+  const paymentReferenceRef = useRef('');
 
   useEffect(() => {
     let active = true;
@@ -44,7 +47,18 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
   }, [appointment?.id]);
 
   useEffect(() => {
-    Promise.all([CustomersApi.list(), ServicesApi.list(), StaffApi.list()]).then(([c, s, st]) => { setCustomers(c); setServices(s); setStaff(st); });
+    let active = true;
+    Promise.all([CustomersApi.list(), ServicesApi.list(), StaffApi.list(), PromotionsApi.list(), MembershipsApi.list()])
+      .then(([loadedCustomers, loadedServices, loadedStaff, loadedPromotions, loadedPlans]) => {
+        if (!active) return;
+        setCustomers(loadedCustomers);
+        setServices(loadedServices);
+        setStaff(loadedStaff);
+        setPromotions(loadedPromotions);
+        setMembershipPlans(loadedPlans);
+      })
+      .catch(() => { if (active) toast('Could not load POS catalog data.', 'error'); });
+    return () => { active = false; };
   }, []);
 
   useEffect(() => {
@@ -110,20 +124,39 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
     setCart(c => c.map(l => l.key === key ? { ...l, helperStaffId: helper?.id, helperStaffName: helper?.name, assistantPayment: 0 } : l));
   };
 
+  const customerOptions = currentStaffId ? servingClients : customers;
+  const selectedCustomer = customerOptions.find(c => c.id === customerId);
+  const nairobiToday = new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Nairobi', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+  const validPromo = promoCode.trim() ? promotions.find(promotion => promotion.active && promotion.approved
+    && promotion.code.toUpperCase() === promoCode.trim().toUpperCase()
+    && (!promotion.startDate || promotion.startDate <= nairobiToday)
+    && (!promotion.endDate || promotion.endDate >= nairobiToday)) : undefined;
+  const activeMembership = Boolean(selectedCustomer?.membershipTier && selectedCustomer.membershipTier !== 'none'
+    && (!selectedCustomer.membershipExpiry || Number(selectedCustomer.membershipExpiry) >= Date.now()));
+  const membershipDiscount = activeMembership
+    ? Number(membershipPlans.find(plan => plan.id === selectedCustomer?.membershipPlanId || plan.name === selectedCustomer?.membershipTier)?.discountPct || 0)
+    : 0;
+  const effectiveDiscountPct = Math.max(discountPct, Number(validPromo?.discountPct || 0), membershipDiscount);
   const currencies = Array.from(new Set(cart.map(l => l.currency)));
   const subtotalByCurrency: Record<string, number> = {};
   for (const l of cart) subtotalByCurrency[l.currency] = (subtotalByCurrency[l.currency] || 0) + l.price * l.qty;
   const totalByCurrency: Record<string, number> = {};
-  for (const cur of currencies) totalByCurrency[cur] = Math.round((subtotalByCurrency[cur] || 0) * (1 - discountPct / 100));
+  for (const cur of currencies) totalByCurrency[cur] = Math.round((subtotalByCurrency[cur] || 0) * (1 - effectiveDiscountPct / 100));
+  const pointsToRedeem = Math.max(0, Math.min(Math.floor(Number(redeemPoints) || 0), Number(selectedCustomer?.loyaltyPoints || 0), Number(totalByCurrency.KES || 0)));
+  if (totalByCurrency.KES !== undefined) totalByCurrency.KES = Math.max(0, totalByCurrency.KES - pointsToRedeem);
   const serviceTotal = cart.filter(line => line.type === 'service').reduce((sum, line) => sum + line.price * line.qty, 0);
-  const serviceTotalAfterDiscount = Math.round(serviceTotal * (1 - discountPct / 100));
+  const serviceTotalAfterDiscount = Math.round(serviceTotal * (1 - effectiveDiscountPct / 100));
   const assistantTotal = cart
     .filter(line => line.type === 'service' && line.helperStaffId)
     .reduce((sum, line) => sum + Number(line.assistantPayment || 0), 0);
-  const expectedIncome = Math.max(0, serviceTotalAfterDiscount - assistantTotal) * 0.5;
+  const expectedIncome = cart.reduce((sum, line) => {
+    const lineRevenue = Math.round(line.price * line.qty * (1 - effectiveDiscountPct / 100));
+    const commissionBase = Math.max(0, lineRevenue - Number(line.assistantPayment || 0));
+    const splitEntered = Boolean(line.coStaffId || line.thirdStaffId);
+    const primary = line.primaryCommission ?? (splitEntered ? 0 : commissionBase * Number(line.commissionPct || 50) / 100);
+    return sum + Number(primary || 0) + Number(line.coStaffCommission || 0) + Number(line.thirdStaffCommission || 0) + Number(line.assistantPayment || 0);
+  }, 0);
 
-  const customerOptions = currentStaffId ? servingClients : customers;
-  const selectedCustomer = customerOptions.find(c => c.id === customerId);
   const applyDraft = (draft: Record<string, any>) => {
     setCart(draft.cart as CartLine[]); setCustomerId(String(draft.customerId || '')); setDiscountPct(Number(draft.discountPct || 0)); setPromoCode(String(draft.promoCode || '')); setRedeemPoints(Number(draft.redeemPoints || 0)); setPaymentMethod(String(draft.paymentMethod || 'M-Pesa'));
   };
@@ -164,9 +197,10 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
             staffCount: l.staffCount || 1, commissionPct: l.commissionPct || 50, staffId: l.staffId || null, staffName: l.staffName || null, coStaffId: l.staffCount === 2 ? l.coStaffId || null : null, coStaffName: l.staffCount === 2 ? l.coStaffName || null : null, thirdStaffId: l.thirdStaffId || null, thirdStaffName: l.thirdStaffName || null, helperStaffId: l.helperStaffId || null, helperStaffName: l.helperStaffName || null, assistantPayment: Number(l.assistantPayment || 0), primaryCommission: l.primaryCommission, coStaffCommission: l.coStaffCommission, thirdStaffCommission: l.thirdStaffCommission,
           })),
         discountPct, paymentMethod, promoCode: promoCode.trim() || undefined, redeemPoints: redeemPoints || undefined, mpesaReceiptNumber, appointmentId: appointment?.id,
+        mpesaReferenceId: paymentReferenceRef.current || undefined,
       });
       setReceipt({ ...data, customerName: selectedCustomer?.name || 'Walk-in Customer', items: cart, paymentMethod });
-      setCart([]); setDiscountPct(0); setCustomerId(''); setPromoCode(''); setRedeemPoints(0); setShowPay(false);
+      setCart([]); setDiscountPct(0); setCustomerId(''); setPromoCode(''); setRedeemPoints(0); setShowPay(false); paymentReferenceRef.current = '';
       PosDraftsApi.clear(appointment?.id).catch(() => undefined); setHasDraft(false);
       onSaleComplete();
     } catch (err: any) {
@@ -181,13 +215,29 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
 
   const checkout = () => {
     if (cart.length === 0) { toast('Cart is empty.', 'error'); return; }
+    if (promoCode.trim() && !validPromo) { toast('That promo code is invalid or expired.', 'error'); return; }
     if (currentStaffId && !customerId) { toast('Please select a client you are serving.', 'error'); return; }
     const missingStaff = cart.find(l => !l.staffId);
     if (missingStaff) { toast('Assign a staff member to every service before checkout.', 'error'); return; }
+    const missingCoStaff = cart.find(l => l.staffCount === 2 && !l.coStaffId);
+    if (missingCoStaff) { toast(`Assign the co-staff member for ${missingCoStaff.name}.`, 'error'); return; }
+    const missingThirdStaff = cart.find(l => l.thirdStaffId !== undefined && !l.thirdStaffId);
+    if (missingThirdStaff) { toast(`Assign the third staff member for ${missingThirdStaff.name}.`, 'error'); return; }
     const missingAssistantFee = cart.find(l => l.helperStaffId && Number(l.assistantPayment || 0) <= 0);
     if (missingAssistantFee) { toast(`Enter the assistant fee for ${missingAssistantFee.name} before checkout.`, 'error'); return; }
+    const invalidSplit = cart.find(line => {
+      const commissionBase = Math.max(0, Math.round(line.price * line.qty * (1 - discountPct / 100)) - Number(line.assistantPayment || 0));
+      const hasCoStaff = Boolean(line.coStaffId);
+      const hasThirdStaff = Boolean(line.thirdStaffId);
+      if (!hasCoStaff && !hasThirdStaff) return false;
+      if (line.primaryCommission === undefined || (hasCoStaff && line.coStaffCommission === undefined) || (hasThirdStaff && line.thirdStaffCommission === undefined)) return true;
+      const splitTotal = Number(line.primaryCommission) + (hasCoStaff ? Number(line.coStaffCommission) : 0) + (hasThirdStaff ? Number(line.thirdStaffCommission) : 0);
+      return !Number.isFinite(splitTotal) || splitTotal < 0 || splitTotal > commissionBase;
+    });
+    if (invalidSplit) { toast(`Enter each staff member's earnings for ${invalidSplit.name}, keeping the total within the service balance.`, 'error'); return; }
     const kesDue = totalByCurrency.KES || 0;
     if (paymentMethod === 'M-Pesa' && kesDue > 0) {
+      paymentReferenceRef.current = `pos-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
       setShowPay(true);
     } else {
       doCheckout();
@@ -341,7 +391,7 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
               <div className="flex justify-between"><span>Service fee total</span><span>{fmtMoney(serviceTotal, 'KES')}</span></div>
               <div className="flex justify-between"><span>Service total after discount</span><span>{fmtMoney(serviceTotalAfterDiscount, 'KES')}</span></div>
               <div className="flex justify-between"><span>Assistant compensation</span><span>-{fmtMoney(assistantTotal, 'KES')}</span></div>
-              <div className="flex justify-between font-medium"><span>Expected employee income (50%)</span><span>{fmtMoney(expectedIncome, 'KES')}</span></div>
+              <div className="flex justify-between font-medium"><span>Expected staff earnings</span><span>{fmtMoney(expectedIncome, 'KES')}</span></div>
             </>}
             {currencies.length === 0 ? (
               <div className="flex justify-between font-semibold text-base"><span>Total</span><span>{fmtMoney(0, 'KES')}</span></div>
@@ -358,6 +408,7 @@ function POS({ onSaleComplete, appointment, currentStaffId }: { onSaleComplete: 
         <MpesaPayModal
           amountKES={totalByCurrency.KES || 0}
           purpose="pos_sale"
+          referenceId={paymentReferenceRef.current}
           initialPhone={selectedCustomer?.phone}
           onClose={() => setShowPay(false)}
           onSuccess={(receipt) => doCheckout(receipt)}
