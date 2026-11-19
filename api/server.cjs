@@ -29780,13 +29780,6 @@ function staffCommission(item, staffId) {
   if (String(item.thirdStaffId || "") === String(staffId)) return Number(item.thirdStaffCommission ?? 0) || 0;
   return 0;
 }
-function staffAppointmentMinutes(appointment, staffId) {
-  const items = Array.isArray(appointment?.items) ? appointment.items : [];
-  const assigned = items.filter((item) => String(item.staffId || "") === String(staffId || ""));
-  if (assigned.length) return assigned.reduce((sum, item) => sum + Math.max(0, Number(item.durationMin || 0)), 0);
-  const hasItemAssignments = items.some((item) => item.staffId);
-  return !hasItemAssignments && String(appointment?.staffId || "") === String(staffId || "") ? Math.max(0, Number(appointment?.durationMin || 0)) : 0;
-}
 function paystackConfirmedPayoutItems(payoutItems, payrollItems) {
   const confirmedKeys = new Set(payrollItems.filter((item) => item.provider === "paystack" && item.status === "success").flatMap((item) => Array.isArray(item.itemKeys) ? item.itemKeys.map(String) : []));
   return payoutItems.filter((item) => !item.deletedAt && confirmedKeys.has(String(item.itemKey || "")));
@@ -29821,10 +29814,10 @@ function currentSaturdayThroughFridayRange(date = /* @__PURE__ */ new Date()) {
   const from = Date.UTC(currentSaturday.getUTCFullYear(), currentSaturday.getUTCMonth(), currentSaturday.getUTCDate()) - 3 * 60 * 60 * 1e3;
   return { from, to: from + 7 * 24 * 60 * 60 * 1e3 };
 }
-function calculateUnpaidStaffEarnings(orders, payoutItems, appointments2, from, to, payrollItems = []) {
+function calculateUnpaidStaffEarnings(orders, payoutItems, appointments, from, to, payrollItems = []) {
   const activePayouts = payrollItems.length ? paystackConfirmedPayoutItems(payoutItems, payrollItems) : payoutItems;
   const paidKeys = new Set(activePayouts.filter((item) => !item.deletedAt).map((item) => String(item.itemKey || "")));
-  const appointmentsById = new Map(appointments2.map((appointment) => [String(appointment.id), appointment]));
+  const appointmentsById = new Map(appointments.map((appointment) => [String(appointment.id), appointment]));
   const lines = [];
   const addLine = (order, item, itemKey, staffId, role, amount, revenue, commissionBase, helperDeduction, productCost) => {
     if (!staffId || paidKeys.has(itemKey)) return;
@@ -29878,23 +29871,6 @@ var ATTENDANCE_RADIUS_METERS = 300;
 var KAMAKIS_ATTENDANCE_LOCATION = { latitude: -1.1679375, longitude: 36.9682031 };
 var KAMAKIS_ATTENDANCE_RADIUS_METERS = 200;
 var ATTENDANCE_ROLES = ["owner", "admin", "manager", "receptionist", "barber"];
-function contextIncludesPayrollRecord(record, context) {
-  return context.role !== "admin" || record.tenantId === context.tenantId;
-}
-function branchScopedPayrollOrders(orders, appointments2, staffById, context) {
-  const appointmentsById = new Map(appointments2.filter((appointment) => !appointment.deletedAt && contextIncludesPayrollRecord(appointment, context)).map((appointment) => [String(appointment.id), appointment]));
-  return orders.filter((order) => {
-    if (!contextIncludesPayrollRecord(order, context)) return false;
-    if (!context.branchId) return true;
-    const appointment = appointmentsById.get(String(order.appointmentId || ""));
-    const orderBranch = order.branchId || appointment?.branchId;
-    if (orderBranch) return orderBranch === context.branchId;
-    return (Array.isArray(order.items) ? order.items : []).some((item) => [item.staffId, item.coStaffId, item.thirdStaffId, item.helperStaffId].some((staffId) => staffById.get(String(staffId || ""))?.branchId === context.branchId));
-  });
-}
-function branchScopedPayrollPayoutItems(payoutItems, context) {
-  return payoutItems.filter((item) => contextIncludesPayrollRecord(item, context) && (!context.branchId || !item.branchId || item.branchId === context.branchId));
-}
 function nairobiDayRange(date) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
   const [year, month, day] = date.split("-").map(Number);
@@ -29984,6 +29960,16 @@ function requireOwner() {
 }
 function requireServiceCreator() {
   return ["owner", "admin", "receptionist"].includes(currentContext()?.role || "");
+}
+function createTicketNumber(date) {
+  const datePart = date.replace(/[^0-9]/g, "").slice(-4);
+  const randomPart = String(Math.floor(1e3 + Math.random() * 9e3));
+  return `SG-${datePart}-${randomPart}`;
+}
+function appointmentCardNumber(value) {
+  const cardNumber = String(value || "").trim();
+  if (cardNumber && !/^\d{1,30}$/.test(cardNumber)) throw new Error("Card number must contain digits only");
+  return cardNumber;
 }
 function normalizeCustomerPhone(value) {
   const digits = String(value || "").replace(/\D/g, "");
@@ -30392,8 +30378,8 @@ New temporary password: ${newPassword}`, account.id);
     const policy = attendancePolicy(branch?.name);
     let clients = [];
     if (context.staffId && item?.checkInAt && !item.checkOutAt) {
-      const { items: appointments2 } = await db.list("appointments", { limit: 3e3 });
-      clients = appointments2.filter((appointment) => !appointment.deletedAt && appointment.date === date && !["cancelled", "no-show"].includes(appointment.status) && [appointment.staffId, ...Array.isArray(appointment.items) ? appointment.items.map((service) => service.staffId) : []].some((staffId) => String(staffId || "") === String(context.staffId))).map((appointment) => ({ id: appointment.id, customerName: appointment.customerName, serviceName: appointment.serviceName, time: appointment.time }));
+      const { items: appointments } = await db.list("appointments", { limit: 3e3 });
+      clients = appointments.filter((appointment) => !appointment.deletedAt && appointment.date === date && !["cancelled", "no-show"].includes(appointment.status) && [appointment.staffId, ...Array.isArray(appointment.items) ? appointment.items.map((service) => service.staffId) : []].some((staffId) => String(staffId || "") === String(context.staffId))).map((appointment) => ({ id: appointment.id, customerName: appointment.customerName, serviceName: appointment.serviceName, time: appointment.time }));
     }
     return json({ item: item || null, date, clients, attendanceLocation: { name: policy.name, radiusMeters: policy.radiusMeters } });
   }],
@@ -30460,9 +30446,9 @@ New temporary password: ${newPassword}`, account.id);
     const visible = items.filter((item) => item.date === date && (context.role !== "receptionist" || item.role !== "owner") && (!context.branchId || item.branchId === context.branchId));
     visible.sort((first, second) => Number(first.checkInAt || 0) - Number(second.checkInAt || 0));
     const activeAttendanceByStaffId = new Map(visible.filter((item) => item.staffId && item.checkInAt && !item.checkOutAt).map((item) => [String(item.staffId), item]));
-    const { items: appointments2 } = await db.list("appointments", { limit: 3e3 });
+    const { items: appointments } = await db.list("appointments", { limit: 3e3 });
     const clientAssignments = /* @__PURE__ */ new Map();
-    for (const appointment of appointments2) {
+    for (const appointment of appointments) {
       if (appointment.deletedAt || appointment.date !== date || ["cancelled", "no-show"].includes(appointment.status) || context.branchId && appointment.branchId && appointment.branchId !== context.branchId) continue;
       const staffIds = new Set([appointment.staffId, ...Array.isArray(appointment.items) ? appointment.items.map((service) => service.staffId) : []].filter(Boolean).map(String));
       for (const staffId of staffIds) {
@@ -30481,19 +30467,19 @@ New temporary password: ${newPassword}`, account.id);
     const { from: lastWeekFrom, to: lastWeekTo } = mostRecentSaturdayThroughFridayRange();
     const now = Date.now();
     const todayFrom = (/* @__PURE__ */ new Date(`${nairobiDateString()}T00:00:00+03:00`)).getTime();
-    const [{ items: orders }, { items: payoutItems }, { items: appointments2 }, { items: payrollItems }] = await Promise.all([
+    const [{ items: orders }, { items: payoutItems }, { items: appointments }, { items: payrollItems }] = await Promise.all([
       db.list("orders", { limit: 5e3 }),
       db.list("payout_items", { limit: 1e4 }),
       db.list("appointments", { limit: 5e3 }),
       db.list("payroll_items", { limit: 5e3 })
     ]);
-    const weekEarnings = calculateUnpaidStaffEarnings(orders, payoutItems, appointments2, weekFrom, weekTo, payrollItems).filter((line) => line.currency === "KES" && line.staffId === String(context.staffId));
-    const lastWeekEarnings = calculateUnpaidStaffEarnings(orders, payoutItems, appointments2, lastWeekFrom, lastWeekTo, payrollItems).filter((line) => line.currency === "KES" && line.staffId === String(context.staffId));
-    const todayEarnings = calculateUnpaidStaffEarnings(orders, payoutItems, appointments2, todayFrom, now + 1, payrollItems).filter((line) => line.currency === "KES" && line.staffId === String(context.staffId));
+    const weekEarnings = calculateUnpaidStaffEarnings(orders, payoutItems, appointments, weekFrom, weekTo, payrollItems).filter((line) => line.currency === "KES" && line.staffId === String(context.staffId));
+    const lastWeekEarnings = calculateUnpaidStaffEarnings(orders, payoutItems, appointments, lastWeekFrom, lastWeekTo, payrollItems).filter((line) => line.currency === "KES" && line.staffId === String(context.staffId));
+    const todayEarnings = calculateUnpaidStaffEarnings(orders, payoutItems, appointments, todayFrom, now + 1, payrollItems).filter((line) => line.currency === "KES" && line.staffId === String(context.staffId));
     const ownCurrentPeriodEarnings = weekEarnings;
     const orderCreatedAtById = new Map(orders.map((order) => [String(order.id), Number(order.createdAt || 0)]));
     const ordersById = new Map(orders.map((order) => [String(order.id), order]));
-    const appointmentsById = new Map(appointments2.filter((appointment) => !appointment.deletedAt).map((appointment) => [String(appointment.id), appointment]));
+    const appointmentsById = new Map(appointments.filter((appointment) => !appointment.deletedAt).map((appointment) => [String(appointment.id), appointment]));
     const paidHistory = payoutItems.filter((item) => !item.deletedAt && item.staffId === context.staffId).map((item) => ({ serviceName: item.serviceName || item.orderId || "Paid earning", createdAt: Number(item.orderCreatedAt || orderCreatedAtById.get(String(item.orderId || "")) || item.createdAt || 0), paidAt: Number(item.createdAt || 0), role: item.role === "assistant" ? "assistant" : "commission", amount: Number(item.commission || 0) }));
     let todayCommission = 0;
     let todayAssistant = 0;
@@ -30791,13 +30777,13 @@ New temporary password: ${newPassword}`, account.id);
       }
     }
     if (!customer) return error("Customer profile not found", 404);
-    const { items: appointments2 } = await db.list("appointments", { limit: 2e3 });
+    const { items: appointments } = await db.list("appointments", { limit: 2e3 });
     const { items: queue } = await db.list("queue", { limit: 2e3 });
     const { items: reviews } = await db.list("reviews", { limit: 2e3 });
     const { items: purchases } = await db.list("membership_purchases", { limit: 2e3 });
     return json({
       customer,
-      appointments: appointments2.filter((item) => item.customerId === customer.id && !item.deletedAt).sort((a2, b2) => String(b2.date).localeCompare(String(a2.date))),
+      appointments: appointments.filter((item) => item.customerId === customer.id && !item.deletedAt).sort((a2, b2) => String(b2.date).localeCompare(String(a2.date))),
       queue: queue.filter((item) => item.customerId === customer.id && !item.deletedAt).sort((a2, b2) => b2.joinedAt - a2.joinedAt).slice(0, 10),
       reviews: reviews.filter((item) => item.customerId === customer.id && !item.deletedAt),
       membershipPurchases: purchases.filter((item) => item.customerId === customer.id && !item.deletedAt)
@@ -30819,316 +30805,129 @@ New temporary password: ${newPassword}`, account.id);
     const withPaymentStatus = visible.map((appointment) => ({ ...appointment, paymentCompleted: paidAppointmentIds.has(String(appointment.id)) }));
     return json({ items: date ? withPaymentStatus.filter((a2) => a2.date === date) : withPaymentStatus });
   }],
-  "GET /api/reports/staff-performance": [async () => {
+  "POST /api/appointments": [async ({ body }) => {
     const context = currentContext();
-    if (!context || !["owner", "manager", "admin"].includes(context.role)) return error("Only salon management can view staff performance", 403);
-    const [year, month, day] = nairobiDateString().split("-").map(Number);
-    const currentSunday = new Date(Date.UTC(year, month - 1, day));
-    currentSunday.setUTCDate(currentSunday.getUTCDate() - currentSunday.getUTCDay());
-    const previousSunday = new Date(currentSunday);
-    previousSunday.setUTCDate(previousSunday.getUTCDate() - 7);
-    const dateKey = (date) => date.toISOString().slice(0, 10);
-    const fromDate = dateKey(previousSunday);
-    const toDate = dateKey(currentSunday);
-    const from = Date.UTC(previousSunday.getUTCFullYear(), previousSunday.getUTCMonth(), previousSunday.getUTCDate()) - 3 * 60 * 60 * 1e3;
-    const to = Date.UTC(currentSunday.getUTCFullYear(), currentSunday.getUTCMonth(), currentSunday.getUTCDate()) - 3 * 60 * 60 * 1e3;
-    const [{ items: staffRows }, { items: orders }, { items: payoutItems }, { items: appointments2 }, { items: attendance }, { items: queue }, { items: reviews }] = await Promise.all([
-      db.list("staff", { limit: 2e3 }),
-      db.list("orders", { limit: 5e3 }),
-      db.list("payout_items", { limit: 1e4 }),
-      db.list("appointments", { limit: 5e3 }),
-      db.list("attendance", { limit: 5e3 }),
-      db.list("queue", { limit: 5e3 }),
-      db.list("reviews", { limit: 5e3 })
-    ]);
-    const visibleStaff = staffRows.filter((member) => !member.deletedAt && (!context.branchId || member.branchId === context.tenantId));
-    const staffById = new Map(visibleStaff.map((member) => [String(member.id), member]));
-    const reportById = /* @__PURE__ */ new Map();
-    const ensureReport = (staffId, fallback = {}) => {
-      const id = String(staffId || "");
-      if (!id) return null;
-      if (context.branchId && !staffById.has(id) && String(fallback.branchId || "") !== context.branchId) return null;
-      let report = reportById.get(id);
-      if (!report) {
-        const member = staffById.get(id) || fallback;
-        report = {
-          id,
-          name: member.name || fallback.name || "Former staff member",
-          role: member.role || fallback.role || "Staff",
-          branchName: member.branchName || member.branch || fallback.branchName || "",
-          employmentStatus: member.employmentStatus || fallback.employmentStatus || "unknown",
-          attendance: { days: 0, checkIns: 0, completedShifts: 0, incompleteShifts: 0, minutes: 0, shifts: [] },
-          appointments: { total: 0, completed: 0, cancelled: 0, noShow: 0, open: 0, minutes: 0, items: [] },
-          queue: { handled: 0, served: 0 },
-          services: { count: 0, units: 0, revenue: {}, productCost: {}, commissionBase: {}, commission: {}, assistant: {}, paid: {}, unpaid: {}, lines: [] },
-          reviews: { count: 0, averageRating: 0, distribution: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 }, items: [] },
-          _attendanceDays: /* @__PURE__ */ new Set()
-        };
-        reportById.set(id, report);
-      }
-      return report;
+    if (!context || !["owner", "admin", "manager", "receptionist", "barber"].includes(context.role)) return error("You cannot create appointments", 403);
+    const b2 = body || {};
+    const customerName = String(b2.customerName || "").trim();
+    const date = String(b2.date || "").trim();
+    const time = String(b2.time || "").trim();
+    const serviceName = String(b2.serviceName || "").trim();
+    if (!customerName || !date || !time || !serviceName) return error("Customer, date, time and service are required", 400);
+    const branchId = context.branchId || "";
+    const [branch] = branchId ? await db.get("branches", [branchId]) : [null];
+    const id = `appointment-${(0, import_node_crypto2.randomBytes)(8).toString("hex")}`;
+    const ticketNumber = createTicketNumber(date);
+    const cardNumber = appointmentCardNumber(b2.cardNumber);
+    const appointment = {
+      id,
+      tenantId: context.tenantId,
+      branchId,
+      branchName: branch?.name || "",
+      customerId: b2.customerId || null,
+      customerName,
+      customerPhone: String(b2.customerPhone || "").trim(),
+      serviceId: b2.serviceId || null,
+      serviceName,
+      staffId: b2.staffId || null,
+      staffName: b2.staffName || null,
+      date,
+      time,
+      durationMin: Number(b2.durationMin || 30),
+      price: Number(b2.price || 0),
+      currency: b2.currency || "KES",
+      cardNumber,
+      ticketNumber,
+      status: "pending",
+      createdAt: Date.now()
     };
-    visibleStaff.forEach((member) => ensureReport(member.id, member));
-    const inBranch = (record, appointment, assignedStaffId) => {
-      const staffId = String(assignedStaffId || record.staffId || appointment?.staffId || "");
-      const recordBranchId = record.branchId || appointment?.branchId || staffById.get(staffId)?.branchId || null;
-      return !context.branchId || recordBranchId === context.branchId;
-    };
-    const appointmentRows = appointments2.filter((item) => contextIncludesPayrollRecord(item, context));
-    for (const record of attendance) {
-      if (record.deletedAt || !record.staffId || record.date < fromDate || record.date >= toDate || !inBranch(record)) continue;
-      const report = ensureReport(record.staffId, record);
-      if (!report) continue;
-      report._attendanceDays.add(record.date);
-      report.attendance.checkIns += 1;
-      const checkInAt = Number(record.checkInAt || 0);
-      const checkOutAt = Number(record.checkOutAt || 0);
-      const minutes = checkOutAt > checkInAt ? Math.round((checkOutAt - checkInAt) / 6e4) : 0;
-      report.attendance.minutes += minutes;
-      if (checkOutAt > checkInAt) report.attendance.completedShifts += 1;
-      else report.attendance.incompleteShifts += 1;
-      report.attendance.shifts.push({ date: record.date, checkInAt, checkOutAt: checkOutAt || null, minutes });
+    await db.add("appointments", [appointment]);
+    await audit("created", "appointment", { id, customerName, date, time, serviceName, ticketNumber }, context.name);
+    return json({ id, ticketNumber });
+  }],
+  "PUT /api/appointments/:id": [async ({ params, body }) => {
+    const context = currentContext();
+    if (!context) return error("Please log in.", 401);
+    const [existing] = await db.get("appointments", [params.id]);
+    if (!existing) return error("Appointment not found", 404);
+    const patch = body || {};
+    const allowedManager = ["owner", "admin", "manager", "receptionist"].includes(context.role);
+    const allowedBarberStatus = context.role === "barber" && patch.status !== void 0;
+    if (!allowedManager && !allowedBarberStatus) return error("Receptionists cannot edit appointments", 403);
+    const updated = { ...existing };
+    if (allowedManager) {
+      for (const key of ["customerName", "customerPhone", "serviceId", "serviceName", "staffId", "staffName", "date", "time", "durationMin", "price", "currency", "cardNumber", "status"]) {
+        if (patch[key] !== void 0) updated[key] = patch[key];
+      }
+    } else if (patch.status !== void 0) {
+      updated.status = patch.status;
     }
-    const weekAppointments = appointmentRows.filter((item) => {
-      if (item.date < fromDate || item.date >= toDate) return false;
-      const assignedStaffIds = [item.staffId, ...Array.isArray(item.items) ? item.items.map((service) => service.staffId) : []].filter(Boolean);
-      return !context.branchId || inBranch(item) || assignedStaffIds.some((staffId) => inBranch(item, void 0, staffId));
-    });
-    for (const record of weekAppointments) {
-      const staffIds = new Set([record.staffId, ...Array.isArray(record.items) ? record.items.map((item) => item.staffId) : []].filter(Boolean).map(String));
-      for (const staffId of staffIds) {
-        if (!inBranch(record, void 0, staffId)) continue;
-        const report = ensureReport(staffId, { name: record.staffName || record.items?.find((item) => String(item.staffId || "") === staffId)?.staffName, branchId: record.branchId });
-        if (!report) continue;
-        const status = String(record.status || "pending");
-        report.appointments.total += 1;
-        report.appointments.minutes += staffAppointmentMinutes(record, staffId);
-        if (status === "completed") report.appointments.completed += 1;
-        else if (status === "cancelled") report.appointments.cancelled += 1;
-        else if (status === "no-show") report.appointments.noShow += 1;
-        else report.appointments.open += 1;
-        report.appointments.items.push({ id: record.id, date: record.date, time: record.time || "", customerName: record.customerName || "Customer", serviceName: record.serviceName || "Service", status, durationMin: staffAppointmentMinutes(record, staffId) });
+    await db.update("appointments", [{ id: params.id, record: updated }]);
+    await audit("updated", "appointment", { id: params.id, status: updated.status }, context.name);
+    return json({ ok: true, item: updated });
+  }],
+  "DELETE /api/appointments/:id": [async ({ params }) => {
+    const context = currentContext();
+    if (!context || !["owner", "admin", "receptionist"].includes(context.role)) return error("Only owners, administrators and receptionists can delete appointments", 403);
+    if (params.id === "cancelled") {
+      const { items } = await db.list("appointments", { limit: 5e3 });
+      const records = items.filter((item) => item.status === "cancelled" && !item.deletedAt);
+      for (const record of records) await db.update("appointments", [{ id: record.id, record: { ...record, deletedAt: Date.now(), deletedBy: context.name } }]);
+      return json({ ok: true, deleted: records.length });
+    }
+    const [existing] = await db.get("appointments", [params.id]);
+    if (!existing) return error("Appointment not found", 404);
+    await db.update("appointments", [{ id: params.id, record: { ...existing, deletedAt: Date.now(), deletedBy: context.name } }]);
+    await audit("deleted", "appointment", { id: params.id, customerName: existing.customerName }, context.name);
+    return json({ ok: true });
+  }],
+  "DELETE /api/appointments/cancelled": [async () => {
+    const context = currentContext();
+    if (!context || !["owner", "admin", "receptionist"].includes(context.role)) return error("Only owners, administrators and receptionists can delete cancelled appointments", 403);
+    const { items } = await db.list("appointments", { limit: 5e3 });
+    const records = items.filter((item) => item.status === "cancelled" && !item.deletedAt);
+    for (const record of records) await db.update("appointments", [{ id: record.id, record: { ...record, deletedAt: Date.now(), deletedBy: context.name } }]);
+    return json({ ok: true, deleted: records.length });
+  }],
+  "POST /api/appointments/:id/reopen": [async ({ params }) => {
+    const context = currentContext();
+    if (!context || !["owner", "admin"].includes(context.role)) return error("Only owners and administrators can reopen completed appointments", 403);
+    const [existing] = await db.get("appointments", [params.id]);
+    if (!existing) return error("Appointment not found", 404);
+    const { items: orders } = await db.list("orders", { limit: 5e3 });
+    const linked = orders.filter((order) => !order.deletedAt && String(order.appointmentId || "") === String(params.id));
+    for (const order of linked) await db.update("orders", [{ id: order.id, record: { ...order, deletedAt: Date.now(), deletedBy: context.name } }]);
+    await db.update("appointments", [{ id: params.id, record: { ...existing, status: "in-service" } }]);
+    return json({ ok: true });
+  }],
+  "GET /api/appointments/:id/completion": [async ({ params }) => {
+    const context = currentContext();
+    if (!context) return error("Please log in.", 401);
+    const [appointment] = await db.get("appointments", [params.id]);
+    if (!appointment) return error("Appointment not found", 404);
+    if (!["owner", "admin"].includes(context.role)) {
+      if (context.role === "barber") {
+        const assigned = String(appointment.staffId || "") === String(context.staffId || "") || Array.isArray(appointment.items) && appointment.items.some((item) => String(item.staffId || "") === String(context.staffId || ""));
+        if (!assigned) return error("You cannot view this completed deal", 403);
+      } else {
+        return error("Receptionists cannot view deal summaries", 403);
       }
     }
-    const weekOrders = orders.filter((order) => {
-      const createdAt = Number(order.createdAt || 0);
-      const appointment = appointmentById.get(String(order.appointmentId || ""));
-      if (order.deletedAt || createdAt < from || createdAt >= to) return false;
-      const orderStaffIds = (Array.isArray(order.items) ? order.items.flatMap((item) => [item.staffId, item.coStaffId, item.thirdStaffId, item.helperStaffId]) : []).concat(appointment?.staffId || [], ...Array.isArray(appointment?.items) ? appointment.items.map((item) => item.staffId) : []).filter(Boolean);
-      return !context.branchId || inBranch(order, appointment) || orderStaffIds.some((staffId) => inBranch(order, appointment, staffId));
-    });
-    const allEarningLines = calculateUnpaidStaffEarnings(weekOrders, [], appointmentRows, from, to);
-    const paidKeys = new Set(payoutItems.filter((item) => !item.deletedAt).map((item) => String(item.itemKey || "")));
-    const linesByOrder = /* @__PURE__ */ new Map();
-    for (const line of allEarningLines) {
-      const lines = linesByOrder.get(line.orderId) || [];
-      lines.push(line);
-      linesByOrder.set(line.orderId, lines);
-    }
-    for (const order of weekOrders) {
-      for (const [itemIndex, item] of (Array.isArray(order.items) ? order.items : []).entries()) {
-        if (item.type !== "service") continue;
-        const baseKey = `${order.id}:${itemIndex}`;
-        const earningLines = (linesByOrder.get(String(order.id)) || []).filter((line) => line.itemKey === baseKey || line.itemKey.startsWith(`${baseKey}:`));
-        const linesByStaff = /* @__PURE__ */ new Map();
-        earningLines.forEach((line) => {
-          const lines = linesByStaff.get(line.staffId) || [];
-          lines.push(line);
-          linesByStaff.set(line.staffId, lines);
-        });
-        const appointment = appointmentById.get(String(order.appointmentId || ""));
-        const currency = String(item.currency || "KES");
-        const revenue = Number(item.lineTotalAfterDiscount ?? Number(item.price || 0) * Number(item.qty || 1)) || 0;
-        const productCost = Math.max(0, Number(item.productCost || 0));
-        const commissionBase = Math.max(0, Number(item.commissionBase ?? revenue - productCost - Number(item.assistantPayment ?? item.helperDeduction ?? 0)) || 0);
-        for (const [staffId, staffLines] of linesByStaff) {
-          if (!inBranch(order, appointment, staffId)) continue;
-          const report = ensureReport(staffId, { name: staffLines[0]?.staffName, branchId: order.branchId || appointment?.branchId || staffById.get(staffId)?.branchId, branchName: appointment?.branchName || order.branchName });
-          if (!report) continue;
-          const commissionLines = staffLines.filter((line) => line.role !== "assistant");
-          const assistantLines = staffLines.filter((line) => line.role === "assistant");
-          const commission = commissionLines.reduce((sum, line) => sum + Number(line.amount || 0), 0);
-          const assistant = assistantLines.reduce((sum, line) => sum + Number(line.amount || 0), 0);
-          const paid = staffLines.filter((line) => paidKeys.has(String(line.itemKey))).reduce((sum, line) => sum + Number(line.amount || 0), 0);
-          const unpaid = staffLines.filter((line) => !paidKeys.has(String(line.itemKey))).reduce((sum, line) => sum + Number(line.amount || 0), 0);
-          const attributedRevenue = commissionLines.length ? revenue : 0;
-          report.services.count += 1;
-          report.services.units += Number(item.qty || 1);
-          const addCurrency = (field, amount) => {
-            report.services[field][currency] = (report.services[field][currency] || 0) + amount;
-          };
-          addCurrency("revenue", attributedRevenue);
-          addCurrency("productCost", commissionLines.length ? productCost : 0);
-          addCurrency("commissionBase", commissionLines.length ? commissionBase : 0);
-          addCurrency("commission", commission);
-          addCurrency("assistant", assistant);
-          addCurrency("paid", paid);
-          addCurrency("unpaid", unpaid);
-          report.services.lines.push({ lineId: baseKey, orderId: String(order.id), createdAt: Number(order.createdAt || 0), customerName: order.customerName || appointment?.customerName || "Walk-in Customer", serviceName: item.name || "Service", quantity: Number(item.qty || 1), currency, attributedRevenue, productCost: commissionLines.length ? productCost : 0, commission, assistant, paid, unpaid, roles: Array.from(new Set(staffLines.map((line) => line.role === "assistant" ? "assistant" : line.itemKey.endsWith(":co-staff") ? "co-staff" : line.itemKey.endsWith(":third-staff") ? "third-staff" : "primary"))) });
-        }
-      }
-    }
-    for (const item of queue) {
-      const joinedAt = Number(item.joinedAt || 0);
-      if (item.deletedAt || !item.staffId || joinedAt < from || joinedAt >= to || !inBranch(item)) continue;
-      const report = ensureReport(item.staffId, { name: item.staffName, branchId: item.branchId || staffById.get(String(item.staffId))?.branchId, branchName: item.branchName });
-      if (!report) continue;
-      if (item.calledAt || item.status === "in-service" || item.status === "completed") report.queue.handled += 1;
-      if (item.status === "completed") report.queue.served += 1;
-    }
-    for (const review of reviews) {
-      const createdAt = Number(review.createdAt || 0);
-      const appointment = appointmentById.get(String(review.appointmentId || ""));
-      if (review.deletedAt || !review.staffId || createdAt < from || createdAt >= to || !inBranch(review, appointment)) continue;
-      const report = ensureReport(review.staffId, { name: review.staffName, branchId: review.branchId || appointment?.branchId || staffById.get(String(review.staffId))?.branchId, branchName: appointment?.branchName });
-      if (!report) continue;
-      const rating = Number(review.rating);
-      if (!Number.isFinite(rating) || rating < 1 || rating > 5) continue;
-      report.reviews.count += 1;
-      report.reviews.averageRating += rating;
-      report.reviews.distribution[Math.round(rating)] += 1;
-      report.reviews.items.push({ id: review.id, rating, comment: review.comment || "", customerName: review.customerName || "Customer", serviceName: review.serviceName || "Service", createdAt });
-    }
-    const staff = Array.from(reportById.values()).map((report) => {
-      report.attendance.days = report._attendanceDays.size;
-      delete report._attendanceDays;
-      if (report.reviews.count) report.reviews.averageRating /= report.reviews.count;
-      report.attendance.shifts.sort((first, second) => first.date.localeCompare(second.date) || first.checkInAt - second.checkInAt);
-      report.appointments.items.sort((first, second) => `${first.date} ${first.time}`.localeCompare(`${second.date} ${second.time}`));
-      report.services.lines.sort((first, second) => second.createdAt - first.createdAt);
-      report.reviews.items.sort((first, second) => second.createdAt - first.createdAt);
-      return report;
-    }).sort((first, second) => first.name.localeCompare(second.name));
-    return json({ period: { from, to, fromDate, toDate: dateKey(new Date(currentSunday.getTime() - DAY)) }, staff });
+    const { items: orders } = await db.list("orders", { limit: 5e3 });
+    const order = orders.find((item) => !item.deletedAt && String(item.appointmentId || "") === String(params.id));
+    if (!order) return error("Completed deal not found", 404);
+    return json({ item: order });
   }],
-  "GET /api/appointments/staff-weekly": [async ({ query }) => {
+  "PUT /api/orders/:id/completion": [async ({ params, body }) => {
     const context = currentContext();
-    if (!context || !["owner", "admin"].includes(context.role)) return error("Only the owner or administrator can view staff commission distributions", 403);
-    const search = String(query.name || "").trim().toLowerCase();
-    const requestedStaffId = String(query.staffId || "").trim();
-    if (!search && !requestedStaffId) return error("Enter a staff name to search", 400);
-    const selectedDate = String(query.date || "").trim();
-    const selectedDay = selectedDate ? nairobiDayRange(selectedDate) : null;
-    if (selectedDate && !selectedDay) return error("Choose a valid earnings date", 400);
-    const period = selectedDay ? "day" : query.range || "today";
-    const now = Date.now();
-    let cutoff = 0;
-    let rangeEnd = null;
-    if (selectedDay) {
-      cutoff = selectedDay.from;
-      rangeEnd = selectedDay.to;
-    } else if (period === "today") {
-      const d2 = /* @__PURE__ */ new Date();
-      d2.setHours(0, 0, 0, 0);
-      cutoff = d2.getTime();
-    } else if (period === "week") cutoff = currentSaturdayThroughFridayRange().from;
-    else if (period === "month") cutoff = now - 30 * DAY;
-    else cutoff = 0;
-    const [{ items: staffRows }, { items: orders }, { items: appointmentRows }, { items: payoutItems }, { items: payrollItems }] = await Promise.all([
-      db.list("staff", { limit: 2e3 }),
-      db.list("orders", { limit: 5e3 }),
-      db.list("appointments", { limit: 5e3 }),
-      db.list("payout_items", { limit: 1e4 }),
-      db.list("payroll_items", { limit: 5e3 })
-    ]);
-    const members = staffRows.filter((member) => !member.deletedAt && member.employmentStatus !== "laid-off" && contextIncludesPayrollRecord(member, context) && (!context.branchId || member.branchId === context.tenantId) && requestedIds.includes(String(member.id)));
-    if (!members.length) return error("No active staff records are available for this payroll batch.", 400);
-    if (members.length !== requestedIds.length) return error("One or more selected staff members are not available in this salon or branch.", 400);
-    const staffById = new Map(members.map((member) => [String(member.id), member]));
-    const earningsByStaffId = /* @__PURE__ */ new Map();
-    const lockedItemKeys = /* @__PURE__ */ new Set();
-    const tenantAppointments = appointments.filter((item) => contextIncludesPayrollRecord(item, context));
-    const scopedBranchOrders = branchScopedPayrollOrders(orders, tenantAppointments, staffById, context);
-    const branchPayoutItems = branchScopedPayrollPayoutItems(payoutItems, context);
-    const { from, to } = mostRecentSaturdayThroughFridayRange();
-    const earnings = calculateUnpaidStaffEarnings(scopedBranchOrders, branchPayoutItems, tenantAppointments, from, to, payrollItems).filter((line) => staffById.has(line.staffId) && line.currency === "KES");
-    for (const earning of unpaidEarnings) {
-      const total = totals.get(earning.staffId) || { commission: 0, assistant: 0, count: 0, revenue: 0, helperDeductions: 0 };
-      total.count += 1;
-      total.revenue += earning.revenue;
-      total.helperDeductions += earning.helperDeduction;
-      if (earning.role === "assistant") total.assistant += earning.amount;
-      else total.commission += earning.amount;
-      totals.set(earning.staffId, total);
-    }
-    return json({
-      items: payrollStaff.map((member) => ({
-        ...member,
-        commissionEarnedWeek: totals.get(member.id)?.commission || 0,
-        assistantEarnedWeek: totals.get(member.id)?.assistant || 0,
-        unpaidEarningCount: totals.get(member.id)?.count || 0,
-        unpaidServiceRevenueKES: totals.get(member.id)?.revenue || 0,
-        unpaidAssistantFeesKES: totals.get(member.id)?.helperDeductions || 0
-      })),
-      period: { from: period.from, to: period.to - 1 }
-    });
-  }],
-  "POST /api/earnings/delete": [async ({ body }) => {
-    const context = currentContext();
-    if (!context || !["owner", "admin"].includes(context.role)) return error("Only the owner or administrator can delete staff earnings", 403);
-    const from = Number(body?.from);
-    const to = Number(body?.to);
-    if (!Number.isFinite(from) || !Number.isFinite(to) || from < 0 || to <= from) return error("Choose a valid earnings date range", 400);
-    const [{ items: orders }, { items: payoutItems }] = await Promise.all([
-      db.list("orders", { limit: 5e3 }),
-      db.list("payout_items", { limit: 1e4 })
-    ]);
-    const orderDates = new Map(orders.filter((order) => !order.deletedAt && Number(order.createdAt) >= from && Number(order.createdAt) < to).map((order) => [String(order.id), Number(order.createdAt)]));
-    const now = Date.now();
-    const matching = payoutItems.filter((item) => !item.deletedAt && orderDates.has(String(item.orderId)));
-    if (!matching.length) return error("No paid staff earnings were found in that date range", 404);
-    await db.update("payout_items", matching.map((item) => ({ id: item.id, record: { ...item, deletedAt: now, deletedBy: context.name, deletionReason: "Owner cleared paid staff earnings" } })));
-    const totalKES = matching.filter((item) => item.currency === "KES").reduce((sum, item) => sum + Number(item.commission || 0), 0);
-    await audit("deleted paid staff earnings", "payout_items", { from, to, itemCount: matching.length, totalKES }, context.name);
-    return json({ deleted: matching.length, totalKES, from, to });
-  }],
-  "POST /api/payouts": [async () => {
-    requireOwner();
-    return error("Internal paid markers are disabled. Earnings are marked paid only after a verified payment transfer.", 410);
-  }],
-  "POST /api/payroll/send": [async ({ body }) => {
-    const context = currentContext();
-    if (!context || !["owner", "admin"].includes(context.role)) return error("Only the owner or administrator can send payroll", 403);
-    const recipients = Array.isArray(body?.recipients) ? body.recipients : [];
-    if (!recipients.length) return error("Add at least one employee to payroll", 400);
-    const initiator = process.env.MPESA_B2C_INITIATOR_NAME;
-    const securityCredential = process.env.MPESA_B2C_SECURITY_CREDENTIAL;
-    const shortcode = process.env.MPESA_B2C_SHORTCODE;
-    const timeoutUrl = process.env.MPESA_B2C_QUEUE_TIMEOUT_URL;
-    const resultUrl = process.env.MPESA_B2C_RESULT_URL;
-    if (!initiator || !securityCredential || !shortcode || !timeoutUrl || !resultUrl) return error("M-Pesa B2C payroll is not configured. Add the B2C credentials and callback URLs to the backend environment.", 503);
-    const cleanRecipients = recipients.map((recipient) => ({ staffId: String(recipient.staffId || ""), amountKES: Math.round(Number(recipient.amountKES) || 0), phone: String(recipient.phone || "").replace(/\s+/g, "").replace(/^\+/, "").replace(/^0/, "254") })).filter((recipient) => recipient.staffId && recipient.amountKES > 0 && /^254[71]\d{8}$/.test(recipient.phone));
-    if (cleanRecipients.length !== recipients.length) return error("Every payroll recipient needs a valid Kenyan phone number and amount.", 400);
-    const now = Date.now();
-    const [batchId] = await db.add("payroll_batches", [{ status: "submitting", totalKES: cleanRecipients.reduce((sum, recipient) => sum + recipient.amountKES, 0), employeeCount: cleanRecipients.length, createdAt: now }]);
-    const baseUrl = process.env.MPESA_ENVIRONMENT === "production" ? "https://api.safaricom.co.ke" : "https://sandbox.safaricom.co.ke";
-    try {
-      const tokenResponse = await fetch(`${baseUrl}/oauth/v1/generate?grant_type=client_credentials`, { headers: { Authorization: `Basic ${Buffer.from(`${process.env.MPESA_CONSUMER_KEY}:${process.env.MPESA_CONSUMER_SECRET}`).toString("base64")}` } });
-      const tokenBody = await tokenResponse.json();
-      if (!tokenResponse.ok || !tokenBody.access_token) throw new Error(tokenBody.errorMessage || "Could not authenticate with Safaricom");
-      const results = [];
-      for (const recipient of cleanRecipients) {
-        const response = await fetch(`${baseUrl}/mpesa/b2c/v1/paymentrequest`, { method: "POST", headers: { Authorization: `Bearer ${tokenBody.access_token}`, "Content-Type": "application/json" }, body: JSON.stringify({ InitiatorName: initiator, SecurityCredential: securityCredential, CommandID: process.env.MPESA_B2C_COMMAND_ID || "BusinessPayment", Amount: recipient.amountKES, PartyA: shortcode, PartyB: recipient.phone, Remarks: `BRAIDY SALON payroll ${batchId}`, QueueTimeOutURL: timeoutUrl, ResultURL: resultUrl, Occasion: "Payroll" }) });
-        const bodyResult = await response.json().catch(() => ({}));
-        const [itemId] = await db.add("payroll_items", [{ batchId, ...recipient, status: response.ok ? "submitted" : "failed", conversationId: bodyResult.ConversationID || null, response: bodyResult, createdAt: now }]);
-        results.push({ id: itemId, staffId: recipient.staffId, status: response.ok ? "submitted" : "failed", response: bodyResult });
-      }
-      const failedCount = results.filter((result) => result.status === "failed").length;
-      await db.update("payroll_batches", [{ id: batchId, record: { id: batchId, status: failedCount ? "partial" : "submitted", totalKES: cleanRecipients.reduce((sum, recipient) => sum + recipient.amountKES, 0), employeeCount: cleanRecipients.length, sentCount: results.length - failedCount, failedCount, createdAt: now } }]);
-      await audit("submitted", "payroll_batch", { id: batchId, employeeCount: cleanRecipients.length, failedCount }, "owner");
-      return json({ id: batchId, totalKES: cleanRecipients.reduce((sum, recipient) => sum + recipient.amountKES, 0), employeeCount: cleanRecipients.length, sentCount: results.length - failedCount, failedCount, status: failedCount ? "failed" : "submitted" });
-    } catch (cause) {
-      await db.update("payroll_batches", [{ id: batchId, record: { id: batchId, status: "failed", totalKES: cleanRecipients.reduce((sum, recipient) => sum + recipient.amountKES, 0), employeeCount: cleanRecipients.length, failedCount: cleanRecipients.length, createdAt: now, error: cause instanceof Error ? cause.message : "Payroll failed" } }]);
-      return error(cause instanceof Error ? cause.message : "Payroll transfer failed", 502);
-    }
-  }],
-  "POST /api/payroll/result": [async ({ body }) => {
-    await db.add("payroll_callbacks", [{ type: "result", body, createdAt: Date.now() }]);
-    return json({ ResultCode: 0, ResultDesc: "Accepted" });
-  }],
-  "POST /api/payroll/timeout": [async ({ body }) => {
-    await db.add("payroll_callbacks", [{ type: "timeout", body, createdAt: Date.now() }]);
-    return json({ ResultCode: 0, ResultDesc: "Accepted" });
+    if (!context || !["owner", "admin"].includes(context.role)) return error("Only owners and administrators can adjust completed work", 403);
+    const [existing] = await db.get("orders", [params.id]);
+    if (!existing) return error("Order not found", 404);
+    const patch = body || {};
+    const updated = { ...existing, items: Array.isArray(patch.items) ? patch.items : existing.items, updatedAt: Date.now() };
+    await db.update("orders", [{ id: params.id, record: updated }]);
+    await audit("adjusted completion", "order", { id: params.id }, context.name);
+    return json({ ok: true, item: updated });
   }]
 });
 

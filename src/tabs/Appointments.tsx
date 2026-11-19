@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Plus, Calendar, Clock, Pencil, Search, Trash2 } from 'lucide-react';
 import { Card, Button, Badge, Modal, Field, Input, Select, EmptyState, LoadingState, toast } from '../components/ui';
-import { AppointmentsApi, CustomersApi, PublicApi, StaffApi, ServicesApi, OrdersApi, fmtKES, fmtMoney } from '../lib/api';
+import { AppointmentsApi, CustomersApi, StaffApi, ServicesApi, OrdersApi, fmtKES, fmtMoney } from '../lib/api';
 import POS from './POS';
 import type { Appointment, Customer, Staff, ServiceItem, AppointmentStatus, Role, WeeklyStaffWorkReport } from '../types';
 
@@ -63,26 +63,11 @@ function Appointments({ role }: { role: Role }) {
   const [weeklyStaffReport, setWeeklyStaffReport] = useState<WeeklyStaffWorkReport | null>(null);
   const [weeklyStaffLoading, setWeeklyStaffLoading] = useState(false);
   const [weeklyStaffError, setWeeklyStaffError] = useState('');
-  const [isKamakisReceptionist, setIsKamakisReceptionist] = useState(false);
 
   useEffect(() => {
     Promise.all([StaffApi.list(), ServicesApi.list()]).then(([s, sv]) => { setStaff(s); setServices(sv); });
     CustomersApi.list().then(setCustomers).catch(() => {});
   }, []);
-
-  useEffect(() => {
-    setIsKamakisReceptionist(false);
-    if (role !== 'receptionist') return;
-    let account: { salonId?: string; branchId?: string; name?: string } | null = null;
-    try { account = JSON.parse(window.localStorage.getItem('safigroom_account') || 'null'); } catch { account = null; }
-    if (account?.name?.trim().toLowerCase() === 'nellius') return;
-    if (!account?.salonId || !account.branchId) return;
-    let active = true;
-    PublicApi.branches(account.salonId).then(branches => {
-      if (active) setIsKamakisReceptionist(branches.some(branch => branch.id === account?.branchId && branch.name.trim().toLowerCase().includes('kamakis')));
-    }).catch(() => {});
-    return () => { active = false; };
-  }, [role]);
 
   useEffect(() => {
     setLoading(true);
@@ -319,13 +304,12 @@ function Appointments({ role }: { role: Role }) {
   });
   let account: { staffId?: string; name?: string } | null = null;
   try { account = JSON.parse(window.localStorage.getItem('safigroom_account') || 'null'); } catch { account = null; }
-  const hasReceptionistAppointmentPrivileges = role === 'receptionist' && (account?.name?.trim().toLowerCase() === 'nellius' || isKamakisReceptionist);
   const assignableStaff = staff.filter(canAssignStaff);
   const canBookAppointments = ['owner', 'admin', 'manager', 'receptionist', 'barber'].includes(role);
-  const canEditAppointments = ['owner', 'admin', 'manager'].includes(role) || hasReceptionistAppointmentPrivileges;
-  const canEditClosedAppointments = ['owner', 'admin'].includes(role) || hasReceptionistAppointmentPrivileges;
-  const canDeleteAppointments = ['owner', 'admin'].includes(role) || hasReceptionistAppointmentPrivileges;
-  const canViewCompletionSummary = ['owner', 'admin'].includes(role) || hasReceptionistAppointmentPrivileges;
+  const canEditAppointments = ['owner', 'admin', 'manager', 'receptionist'].includes(role);
+  const canEditClosedAppointments = ['owner', 'admin', 'receptionist'].includes(role);
+  const canDeleteAppointments = ['owner', 'admin', 'receptionist'].includes(role);
+  const canViewCompletionSummary = ['owner', 'admin'].includes(role);
   const canManageAppointmentStatus = ['owner', 'admin', 'manager'].includes(role) || (role === 'barber' && Boolean(account?.staffId));
   const returningCustomer = customers.find(customer => normalizePhone(customer.phone) === normalizePhone(form.customerPhone));
   const openNewAppointment = () => {
@@ -343,7 +327,7 @@ function Appointments({ role }: { role: Role }) {
         <div className="flex items-center gap-2">
           <Field label="Date" htmlFor="date-picker"><Input id="date-picker" type="date" value={date} onChange={e => setDate(e.target.value)} aria-label="Select date" /></Field>
           {role === 'barber' && date && <Button variant="secondary" size="sm" onClick={() => setDate('')}>All dates</Button>}
-          {(role === 'owner' || role === 'admin') && appts.some(appointment => appointment.status === 'cancelled') && <Button variant="danger" onClick={deleteCancelled} disabled={saving}><Trash2 size={16} aria-hidden="true" />Delete canceled</Button>}
+          {(role === 'owner' || role === 'admin' || role === 'receptionist') && appts.some(appointment => appointment.status === 'cancelled') && <Button variant="danger" onClick={deleteCancelled} disabled={saving}><Trash2 size={16} aria-hidden="true" />Delete canceled</Button>}
           {canBookAppointments && <Button onClick={openNewAppointment}><Plus size={16} aria-hidden="true" />New Appointment</Button>}
         </div>
       </div>
@@ -456,7 +440,7 @@ function Appointments({ role }: { role: Role }) {
             <p className="text-sm text-[#6E6E73]">Editing {editing.customerName}'s appointment.</p>
             <Field label="Service" htmlFor="edit-appt-service"><Select id="edit-appt-service" value={editForm.serviceId} onChange={e => setEditForm(current => ({ ...current, serviceId: e.target.value }))}>{services.map(service => <option key={service.id} value={service.id}>{service.name} — {fmtKES(service.price)} ({service.durationMin} min)</option>)}</Select></Field>
             <Field label="Employee" htmlFor="edit-appt-staff"><Select id="edit-appt-staff" value={editForm.staffId} onChange={e => setEditForm(current => ({ ...current, staffId: e.target.value }))}><option value="">Assign later</option>{assignableStaff.map(member => <option key={member.id} value={member.id}>{member.name} — {member.role}</option>)}</Select></Field>
-            <Field label="Card number" htmlFor="edit-appt-card-number"><Input id="edit-appt-card-number" inputMode="numeric" pattern="[0-9]*" value={editForm.cardNumber} disabled={Boolean(editing.cardNumber) || (!['owner', 'admin'].includes(role) && !hasReceptionistAppointmentPrivileges)} onChange={e => setEditForm(current => ({ ...current, cardNumber: e.target.value.replace(/\D/g, '') }))} placeholder="Enter once; unique for this day" /></Field>
+            <Field label="Card number" htmlFor="edit-appt-card-number"><Input id="edit-appt-card-number" inputMode="numeric" pattern="[0-9]*" value={editForm.cardNumber} disabled={Boolean(editing.cardNumber)} onChange={e => setEditForm(current => ({ ...current, cardNumber: e.target.value.replace(/\D/g, '') }))} placeholder="Enter once; unique for this day" /></Field>
             <div className="grid sm:grid-cols-2 gap-4"><Field label="Date" htmlFor="edit-appt-date"><Input id="edit-appt-date" type="date" value={editForm.date} onChange={e => setEditForm(current => ({ ...current, date: e.target.value }))} /></Field><Field label="Time" htmlFor="edit-appt-time"><Input id="edit-appt-time" type="time" value={editForm.time} onChange={e => setEditForm(current => ({ ...current, time: e.target.value }))} /></Field></div>
           </div>
         </Modal>
