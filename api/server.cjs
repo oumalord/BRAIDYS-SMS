@@ -30902,6 +30902,118 @@ New temporary password: ${newPassword}`, account.id);
       return json({ answer: inactive.length ? `${inactive.length} customers have not visited in over 60 days.` : "No inactive customers were found.", grounded: true });
     }
     return json({ answer: "I can answer from recorded revenue, top staff, low stock, and inactive customer data.", grounded: false });
+  }],
+  "GET /api/reports/staff-performance": [async () => {
+    const context = currentContext();
+    if (!context || !["owner", "manager", "admin"].includes(context.role)) return error("Access denied", 403);
+    const { items: staff } = await db.list("staff", { limit: 5e3 });
+    const { items: orders } = await db.list("orders", { limit: 1e4 });
+    const { items: appointments } = await db.list("appointments", { limit: 1e4 });
+    const { items: payouts } = await db.list("payout_items", { limit: 1e4 });
+    const now = Date.now();
+    const weekRange = currentSaturdayThroughFridayRange();
+    const lastWeekRange = currentSaturdayThroughFridayRange(new Date(now - 7 * DAY));
+    const monthRange = currentSundayThroughNowRange();
+    const lastMonthRange = currentSundayThroughNowRange(new Date(now - 30 * DAY));
+    const staffIds = staff.map((member) => String(member.id));
+    const orderIds = new Set(orders.filter((order) => !order.deletedAt).map((order) => String(order.id)));
+    const appointmentIds = new Set(appointments.filter((appointment) => !appointment.deletedAt).map((appointment) => String(appointment.id)));
+    const payoutOrderIds = new Set(payouts.filter((payout) => !payout.deletedAt).map((payout) => String(payout.orderId)));
+    const calculateStaffEarnings = (scopedOrders, scopedPayouts, from, to) => {
+      const earnings = [];
+      for (const order of scopedOrders) {
+        for (const item of order.items || []) {
+          if (item.type !== "service") continue;
+          const staffIds2 = [item.staffId, item.coStaffId, item.thirdStaffId].filter(Boolean);
+          for (const staffId of staffIds2) {
+            const amount = staffCommission(item, staffId);
+            if (!amount) continue;
+            const existing = earnings.find((earning) => earning.staffId === staffId);
+            if (existing) {
+              existing.amount += amount;
+              existing.orderCount += 1;
+            } else {
+              earnings.push({ staffId, amount, orderCount: 1 });
+            }
+          }
+        }
+      }
+      for (const payout of scopedPayouts) {
+        const staffId = payout.staffId;
+        const existing = earnings.find((earning) => earning.staffId === staffId);
+        if (existing) {
+          existing.amount += Number(payout.commission || 0);
+          existing.orderCount += 1;
+        } else {
+          earnings.push({ staffId, amount: Number(payout.commission || 0), orderCount: 1 });
+        }
+      }
+      return earnings;
+    };
+    const staffEarningsCurrentWeek = calculateStaffEarnings(orders.filter((order) => {
+      const createdAt = Number(order.createdAt);
+      return !order.deletedAt && createdAt >= weekRange.from && createdAt < weekRange.to;
+    }), payouts.filter((payout) => {
+      const createdAt = Number(payout.createdAt);
+      return !payout.deletedAt && createdAt >= weekRange.from && createdAt < weekRange.to;
+    }), weekRange.from, weekRange.to);
+    const staffEarningsLastWeek = calculateStaffEarnings(orders.filter((order) => {
+      const createdAt = Number(order.createdAt);
+      return !order.deletedAt && createdAt >= lastWeekRange.from && createdAt < lastWeekRange.to;
+    }), payouts.filter((payout) => {
+      const createdAt = Number(payout.createdAt);
+      return !payout.deletedAt && createdAt >= lastWeekRange.from && createdAt < lastWeekRange.to;
+    }), lastWeekRange.from, lastWeekRange.to);
+    const staffEarningsCurrentMonth = calculateStaffEarnings(orders.filter((order) => {
+      const createdAt = Number(order.createdAt);
+      return !order.deletedAt && createdAt >= monthRange.from && createdAt < monthRange.to;
+    }), payouts.filter((payout) => {
+      const createdAt = Number(payout.createdAt);
+      return !payout.deletedAt && createdAt >= monthRange.from && createdAt < monthRange.to;
+    }), monthRange.from, monthRange.to);
+    const staffEarningsLastMonth = calculateStaffEarnings(orders.filter((order) => {
+      const createdAt = Number(order.createdAt);
+      return !order.deletedAt && createdAt >= lastMonthRange.from && createdAt < lastMonthRange.to;
+    }), payouts.filter((payout) => {
+      const createdAt = Number(payout.createdAt);
+      return !payout.deletedAt && createdAt >= lastMonthRange.from && createdAt < lastMonthRange.to;
+    }), lastMonthRange.from, lastMonthRange.to);
+    const topStaffCurrentWeek = staffEarningsCurrentWeek.sort((a2, b2) => b2.amount - a2.amount).slice(0, 10);
+    const topStaffLastWeek = staffEarningsLastWeek.sort((a2, b2) => b2.amount - a2.amount).slice(0, 10);
+    const topStaffCurrentMonth = staffEarningsCurrentMonth.sort((a2, b2) => b2.amount - a2.amount).slice(0, 10);
+    const topStaffLastMonth = staffEarningsLastMonth.sort((a2, b2) => b2.amount - a2.amount).slice(0, 10);
+    return json({
+      currentWeek: { range: weekRange, earnings: staffEarningsCurrentWeek, topStaff: topStaffCurrentWeek },
+      lastWeek: { range: lastWeekRange, earnings: staffEarningsLastWeek, topStaff: topStaffLastWeek },
+      currentMonth: { range: monthRange, earnings: staffEarningsCurrentMonth, topStaff: topStaffCurrentMonth },
+      lastMonth: { range: lastMonthRange, earnings: staffEarningsLastMonth, topStaff: topStaffLastMonth }
+    });
+  }],
+  "GET /api/staff": [async () => {
+    const context = currentContext();
+    const { items } = await db.list("staff", { limit: 200 });
+    return json({ items: items.filter((item) => !item.deletedAt && (context?.role === "admin" || !context?.tenantId || item.tenantId === context.tenantId) && (!context?.branchId || !item.branchId || item.branchId === context.branchId)) });
+  }],
+  "GET /api/services": [async () => {
+    const { items } = await db.list("services", { limit: 500 });
+    return json({ items: items.filter((item) => !item.deletedAt) });
+  }],
+  "GET /api/customers": [async () => {
+    const context = currentContext();
+    const { items } = await db.list("customers", { limit: 1e3 });
+    return json({ items: items.filter((item) => !item.deletedAt && (context?.role === "admin" || !context?.tenantId || item.tenantId === context.tenantId) && (!context?.branchId || !item.branchId || item.branchId === context.branchId)) });
+  }],
+  "GET /api/reviews": [async ({ query }) => {
+    const context = currentContext();
+    const staffId = String(query.staffId || "").trim();
+    const { items } = await db.list("reviews", { limit: 1e3 });
+    return json({ items: items.filter((item) => !item.deletedAt && (!staffId || String(item.staffId || "") === staffId) && (context?.role === "admin" || !context?.tenantId || item.tenantId === context.tenantId) && (!context?.branchId || !item.branchId || item.branchId === context.branchId)) });
+  }],
+  "GET /api/complaints": [async () => {
+    const context = currentContext();
+    if (!context || !["owner", "admin", "manager", "receptionist", "barber"].includes(context.role)) return error("Staff access is required", 403);
+    const { items } = await db.list("complaints", { limit: 2e3 });
+    return json({ items: items.filter((item) => !item.deletedAt).sort((a2, b2) => Number(b2.createdAt || 0) - Number(a2.createdAt || 0)) });
   }]
 });
 
