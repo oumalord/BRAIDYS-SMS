@@ -79,6 +79,9 @@ function Finance() {
     PayoutsApi.list().then(setPayouts).catch(() => undefined);
     PayrollApi.paystackBatches().then(setPaystackBatches).catch(() => undefined);
     if (refreshPayroll) loadPayroll();
+    PayrollApi.paystackStatus()
+      .then(status => { setPaystackConfigured(status.configured); setCanSendPaystack(status.canSend); })
+      .catch(() => { setPaystackConfigured(false); setCanSendPaystack(false); });
   };
   useEffect(() => {
     load();
@@ -211,7 +214,7 @@ function Finance() {
   const paystackRecipientsMissingCount = paystackRecipients.filter(({ member }) => member.paystackRecipientMode !== 'live'
     || !/^RCP_[A-Za-z0-9]+$/.test(String(member.paystackRecipientCode || ''))).length;
   const paystackDepositTotalKES = paystackRecipients.reduce((sum, recipient) => sum + recipient.amountKES, 0);
-  const weeklyStaffEarnings = payrollStaff.filter(member => totalUnpaidEarnings(member) > 0).map(member => {
+  const weeklyStaffEarnings = payrollStaff.map(member => {
     const commission = Number(member.commissionEarnedWeek || 0);
     const assistantEarnings = Number(member.assistantEarnedWeek || 0);
     return {
@@ -376,7 +379,7 @@ function Finance() {
       )}
 
       <Card className="p-6">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4"><div><h2 className="font-semibold">Unpaid payroll</h2><p className="text-xs text-[#6E6E73]">Current Saturday-to-Friday period: {payrollDateRange}. Earnings are counted only once an appointment is completed.</p></div><div className="flex flex-wrap gap-2"><Button variant="secondary" onClick={downloadPayroll} disabled={payrollLoading || !payrollStaff.length}><Download size={16} aria-hidden="true" />Download payroll CSV</Button><Button variant="secondary" onClick={loadPayroll} disabled={payrollLoading}>{payrollLoading ? 'Refreshing…' : 'Refresh payroll'}</Button><Button variant="secondary" onClick={sendPayroll} disabled={payrollSending || payrollLoading}>{payrollSending ? 'Sending…' : 'Send M-Pesa batch'}</Button>{paystackConfigured && canSendPaystack && <><Button variant="secondary" onClick={syncPaystackRecipients} disabled={recipientsSyncing || payrollSending || payrollLoading}><Users size={16} aria-hidden="true" />{recipientsSyncing ? 'Syncing…' : 'Sync recipients'}</Button><Button onClick={sendPaystackPayroll} disabled={payrollSending || payrollLoading || recipientsSyncing || !paystackRecipients.length || paystackRecipientsMissingCount > 0}>{payrollSending ? 'Submitting…' : 'Pay'}</Button></>}</div></div>
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4"><div><h2 className="font-semibold">Unpaid payroll</h2><p className="text-xs text-[#6E6E73]">Current Saturday-to-Friday period: {payrollDateRange}. Earnings are counted only once an appointment is completed.</p></div><div className="flex flex-wrap gap-2"><Button variant="secondary" onClick={downloadPayroll} disabled={payrollLoading || !payrollStaff.length}><Download size={16} aria-hidden="true" />Download payroll CSV</Button><Button variant="secondary" onClick={loadPayroll} disabled={payrollLoading}>{payrollLoading ? 'Refreshing…' : 'Refresh payroll'}</Button><Button variant="secondary" onClick={sendPayroll} disabled={payrollSending || payrollLoading}>{payrollSending ? 'Sending…' : 'Send M-Pesa batch'}</Button>{canSendPaystack && <><Button variant="secondary" onClick={syncPaystackRecipients} disabled={recipientsSyncing || payrollSending || payrollLoading}><Users size={16} aria-hidden="true" />{recipientsSyncing ? 'Syncing…' : 'Sync recipients'}</Button>{paystackConfigured && <Button onClick={sendPaystackPayroll} disabled={payrollSending || payrollLoading || recipientsSyncing || !paystackRecipients.length || paystackRecipientsMissingCount > 0}>{payrollSending ? 'Submitting…' : 'Pay'}</Button>}</>}</div></div>
         {paystackConfigured ? <p className="mb-3 text-xs text-[#6E6E73]">Live Paystack KES transfers are configured. Sync recipients before sending; each click submits one bulk transfer request to their registered M-PESA numbers.</p> : <p className="mb-3 text-xs text-[#6E6E73]">Paystack payroll requires a live secret key in the backend environment.</p>}
         {paystackConfigured && paystackRecipientsMissingCount > 0 && <p role="status" className="mb-3 text-xs text-amber-700">{paystackRecipientsMissingCount} staff recipient{paystackRecipientsMissingCount === 1 ? '' : 's'} need syncing before Paystack can send.</p>}
         {!payrollLoading && !payrollError && <div className="my-4 flex flex-col gap-1 border-y border-black/10 py-3 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-sm font-semibold">Paystack deposit needed</p><p className="text-xs text-[#6E6E73]">Unpaid KES earnings from this week ({payrollDateRange}) for {paystackRecipients.length} staff member{paystackRecipients.length === 1 ? '' : 's'}, rounded per person.</p></div><p className="text-lg font-semibold">{fmtMoney(paystackDepositTotalKES, 'KES')}</p></div>}
