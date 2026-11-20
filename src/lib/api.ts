@@ -181,7 +181,7 @@ export const PayrollApi = {
   paystackStatus: () => api.get('/api/payroll/paystack/status').then(r => r.data as { configured: boolean; canSend: boolean; currency: 'KES'; amountMultiplier: number | null; webhookPath: string }),
   paystackBatches: () => api.get('/api/payroll/paystack/batches').then(r => r.data.items as PaystackPayrollBatch[]),
   syncPaystackRecipients: () => api.post('/api/payroll/paystack/recipients/sync'),
-  sendPaystack: (staffIds: string[], expectedAmountsKES: Record<string, number>) => api.post('/api/payroll/paystack/send', { staffIds, expectedAmountsKES }),
+  sendPaystack: (staffIds: string[], expectedAmountsKES: Record<string, number>, period: 'current' | 'last-week' = 'current') => api.post('/api/payroll/paystack/send', { staffIds, expectedAmountsKES, period }),
 };
 
 export const DashboardApi = {

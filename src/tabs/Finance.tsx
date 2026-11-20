@@ -36,7 +36,9 @@ function Finance() {
   const [payouts, setPayouts] = useState<PayoutBatch[]>([]);
   const [paystackBatches, setPaystackBatches] = useState<PaystackPayrollBatch[]>([]);
   const [staff, setStaff] = useState<Staff[]>([]);
+  const [lastWeekStaff, setLastWeekStaff] = useState<Staff[]>([]);
   const [payrollPeriod, setPayrollPeriod] = useState<{ from: number; to: number } | null>(null);
+  const [lastWeekPeriod, setLastWeekPeriod] = useState<{ from: number; to: number } | null>(null);
   const [payrollLoading, setPayrollLoading] = useState(true);
   const [payrollError, setPayrollError] = useState('');
   const [paystackConfigured, setPaystackConfigured] = useState(false);
@@ -62,7 +64,9 @@ function Finance() {
       .then(payroll => { setStaff(payroll.items); setPayrollPeriod(payroll.period); })
       .catch((cause: any) => setPayrollError(cause?.message || 'Could not load this week’s payroll data.'))
       .finally(() => setPayrollLoading(false));
-    PayrollApi.paystackStatus().then(status => { setPaystackConfigured(status.configured); setCanSendPaystack(status.canSend); }).catch(() => { setPaystackConfigured(false); setCanSendPaystack(false); });
+    PayrollApi.staff('last-week')
+      .then(payroll => { setLastWeekStaff(payroll.items); setLastWeekPeriod(payroll.period); })
+      .catch(() => { setLastWeekStaff([]); setLastWeekPeriod(null); });
   };
   const load = (refreshPayroll = true) => {
     setLoading(true);
@@ -145,7 +149,7 @@ function Finance() {
     if (!window.confirm(`Submit ${fmtMoney(totalKES, 'KES')} for ${recipients.length} staff member${recipients.length === 1 ? '' : 's'} to Paystack for this week (${payrollDateRange})? Earnings will be marked paid only after Paystack confirms each transfer.`)) return;
     setPayrollSending(true);
     try {
-      const response = await PayrollApi.sendPaystack(recipients.map(({ member }) => member.id), Object.fromEntries(recipients.map(({ member, amountKES }) => [member.id, amountKES])));
+      const response = await PayrollApi.sendPaystack(recipients.map(({ member }) => member.id), Object.fromEntries(recipients.map(({ member, amountKES }) => [member.id, amountKES])), 'current');
       const result = response.data;
       toast(`Paystack accepted ${result.pendingCount + result.successCount}/${result.employeeCount} transfers. Only confirmed transfers are marked paid.`, 'success');
       loadPayroll();
