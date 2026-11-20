@@ -204,7 +204,7 @@ function Finance() {
   const profitKES = data?.estimatedProfitByCurrency.KES || 0;
   const payrollDateFormatter = new Intl.DateTimeFormat(undefined, { timeZone: 'Africa/Nairobi' });
   const payrollDateRange = payrollPeriod
-    ? `${payrollDateFormatter.format(new Date(payrollPeriod.from))} – ${payrollDateFormatter.format(new Date(payrollPeriod.to))}`
+    ? `${payrollDateFormatter.format(new Date(payrollPeriod.from))} – ${payrollDateFormatter.format(new Date(Math.max(payrollPeriod.from, payrollPeriod.to - 1)))}`
     : 'Saturday through Friday';
   const selectedEarningsLabel = payrollDateRange;
   const totalUnpaidEarnings = (member: Staff) => Number(member.commissionEarnedWeek || 0) + Number(member.assistantEarnedWeek || 0);
