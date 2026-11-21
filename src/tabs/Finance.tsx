@@ -292,7 +292,7 @@ function Finance() {
           {financeView === 'overview' && <Select aria-label="Date range" value={range} onChange={e => setRange(e.target.value as Range)} className="w-auto" style={{ width: 'auto' }}>
             <option value="today">Today</option><option value="week">This Week</option><option value="month">This Month</option><option value="all">All Time</option>
           </Select>}
-          <Button variant="secondary" onClick={sendPaystackPayroll} disabled={payrollSending || payrollLoading || !paystackConfigured || !canSendPaystack || !paystackRecipients.length || paystackRecipientsMissingCount > 0} title={paystackConfigured ? 'Submit last week’s unpaid staff earnings through Paystack' : 'Configure Paystack to enable payroll transfers'}><Receipt size={16} aria-hidden="true" />Pay</Button>
+          <Button variant="secondary" onClick={sendPaystackPayroll} disabled={payrollSending || payrollLoading || !paystackConfigured || !canSendPaystack || !paystackRecipients.length || paystackRecipientsMissingCount > 0} title={paystackConfigured ? 'Submit this week’s unpaid staff earnings through Paystack' : 'Configure Paystack to enable payroll transfers'}><Receipt size={16} aria-hidden="true" />Pay</Button>
           <Button onClick={() => setOpen(true)}><Plus size={16} aria-hidden="true" />Add Expense</Button>
           <Button variant="danger" onClick={() => setEarningsDeleteOpen(true)}>Clear paid earnings</Button>
         </div>
