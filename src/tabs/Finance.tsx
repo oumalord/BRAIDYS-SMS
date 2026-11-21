@@ -60,13 +60,15 @@ function Finance() {
   const loadPayroll = () => {
     setPayrollLoading(true);
     setPayrollError('');
-    PayrollApi.staff()
-      .then(payroll => { setStaff(payroll.items); setPayrollPeriod(payroll.period); })
-      .catch((cause: any) => setPayrollError(cause?.message || 'Could not load this week’s payroll data.'))
-      .finally(() => setPayrollLoading(false));
     PayrollApi.staff('last-week')
-      .then(payroll => { setLastWeekStaff(payroll.items); setLastWeekPeriod(payroll.period); })
-      .catch(() => { setLastWeekStaff([]); setLastWeekPeriod(null); });
+      .then(payroll => {
+        setStaff(payroll.items);
+        setLastWeekStaff(payroll.items);
+        setPayrollPeriod(payroll.period);
+        setLastWeekPeriod(payroll.period);
+      })
+      .catch((cause: any) => setPayrollError(cause?.message || 'Could not load last week’s payroll data.'))
+      .finally(() => setPayrollLoading(false));
   };
   const load = (refreshPayroll = true) => {
     setLoading(true);
@@ -149,10 +151,10 @@ function Finance() {
     const recipients = paystackRecipients;
     if (!recipients.length) { toast('No unpaid KES earnings are available to transfer.', 'error'); return; }
     const totalKES = recipients.reduce((sum, item) => sum + item.amountKES, 0);
-    if (!window.confirm(`Submit ${fmtMoney(totalKES, 'KES')} for ${recipients.length} staff member${recipients.length === 1 ? '' : 's'} to Paystack for this week (${payrollDateRange})? Earnings will be marked paid only after Paystack confirms each transfer.`)) return;
+    if (!window.confirm(`Submit ${fmtMoney(totalKES, 'KES')} for ${recipients.length} staff member${recipients.length === 1 ? '' : 's'} to Paystack for last week (${payrollDateRange})? Earnings will be marked paid only after Paystack confirms each transfer.`)) return;
     setPayrollSending(true);
     try {
-      const response = await PayrollApi.sendPaystack(recipients.map(({ member }) => member.id), Object.fromEntries(recipients.map(({ member, amountKES }) => [member.id, amountKES])), 'current');
+      const response = await PayrollApi.sendPaystack(recipients.map(({ member }) => member.id), Object.fromEntries(recipients.map(({ member, amountKES }) => [member.id, amountKES])), 'last-week');
       const result = response.data;
       toast(`Paystack accepted ${result.pendingCount + result.successCount}/${result.employeeCount} transfers. Only confirmed transfers are marked paid.`, 'success');
       loadPayroll();
@@ -232,7 +234,7 @@ function Finance() {
     setBreakdown(null);
     setBreakdownError('');
     setBreakdownLoading(true);
-    try { setBreakdown(await AppointmentsApi.staffWeeklyWork(member.id)); }
+    try { setBreakdown(await AppointmentsApi.staffWeeklyWork(member.id, undefined, 'last-week')); }
     catch (cause: any) { setBreakdownError(cause?.message || 'Could not load this staff member’s appointment earnings.'); }
     finally { setBreakdownLoading(false); }
   };
