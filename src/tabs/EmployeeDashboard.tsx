@@ -11,14 +11,17 @@ function EmployeeDashboard({ account, onAddService }: { account: { name?: string
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [dailyEarnings, setDailyEarnings] = useState(0);
   const [weekToDateEarnings, setWeekToDateEarnings] = useState(0);
+  const [lastWeekEarnings, setLastWeekEarnings] = useState(0);
   const [dailyCommission, setDailyCommission] = useState(0);
   const [dailyAssistant, setDailyAssistant] = useState(0);
   const [completedWork, setCompletedWork] = useState<{ serviceName: string; customerName: string; appointmentDate: string | null; appointmentTime: string | null; appointmentId: string | null; cardNumber: string | null; createdAt: number; role: 'commission' | 'assistant'; amount: number }[]>([]);
+  const [lastWeekWork, setLastWeekWork] = useState<{ serviceName: string; customerName: string; appointmentDate: string | null; appointmentTime: string | null; appointmentId: string | null; cardNumber: string | null; createdAt: number; role: 'commission' | 'assistant'; amount: number }[]>([]);
   const [waitingClients, setWaitingClients] = useState<Appointment[]>([]);
   const [earningsLoading, setEarningsLoading] = useState(true);
   const [earningsError, setEarningsError] = useState('');
   const [appointmentsError, setAppointmentsError] = useState('');
   const [loading, setLoading] = useState(true);
+  const [lastWeekPeriod, setLastWeekPeriod] = useState<{ from: number; to: number } | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -46,9 +49,16 @@ function EmployeeDashboard({ account, onAddService }: { account: { name?: string
       setEarningsError('');
       setDailyEarnings(earnings.today.total || 0);
       setWeekToDateEarnings((earnings.week || earnings.fortnight).total || 0);
+      const nairobiHour = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'Africa/Nairobi', hour: '2-digit', hourCycle: 'h23' }).format(new Date()).replace(/[^0-9]/g, ''));
+      const nairobiSaturday = new Date(`${todayStr()}T12:00:00+03:00`).getUTCDay() === 6;
+      const rolledOver = nairobiSaturday && nairobiHour >= 17;
+      setLastWeekEarnings(rolledOver ? earnings.week?.total || 0 : earnings.lastWeek?.total || 0);
+      setLastWeekWork(nairobiSaturday && nairobiHour >= 17 ? earnings.completedWork || [] : earnings.lastWeekWork || []);
       setDailyCommission(earnings.today.commission || 0);
       setDailyAssistant(earnings.today.assistant || 0);
       setCompletedWork(earnings.completedWork || []);
+      setLastWeekWork(earnings.lastWeekWork || []);
+      setLastWeekPeriod(earnings.lastWeek?.period || null);
     }).catch((cause: any) => {
       if (!active) return;
       setEarningsError(cause?.message || 'Earnings are temporarily unavailable.');
@@ -75,15 +85,9 @@ function EmployeeDashboard({ account, onAddService }: { account: { name?: string
   if (loading) return <LoadingState label="Loading your assigned clients..." />;
   if (!account.staffId) return <EmptyState icon={AlertTriangle} title="Employee profile is not linked" description="Ask the salon owner to link your employee account before using the dashboard." />;
 
-  const currentWeekStart = new Date(`${todayStr()}T00:00:00.000Z`);
-  currentWeekStart.setUTCDate(currentWeekStart.getUTCDate() - ((currentWeekStart.getUTCDay() + 1) % 7));
-  const nextWeekStart = new Date(currentWeekStart);
-  nextWeekStart.setUTCDate(nextWeekStart.getUTCDate() + 7);
-  const weekFrom = currentWeekStart.toISOString().slice(0, 10);
-  const weekTo = nextWeekStart.toISOString().slice(0, 10);
-  const unpaidCompletedWork = completedWork.filter(work => work.amount > 0);
+  const unpaidCompletedWork = lastWeekWork.filter(work => work.amount > 0);
   const earningAppointmentIds = new Set(unpaidCompletedWork.map(work => work.appointmentId).filter((id): id is string => Boolean(id)));
-  const sortedAppointments = appointments.filter(appointment => appointment.date >= weekFrom && appointment.date < weekTo && earningAppointmentIds.has(appointment.id))
+  const sortedAppointments = appointments.filter(appointment => earningAppointmentIds.has(appointment.id))
     .sort((a, b) => `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`));
   const assignedClients = Array.from(new Map(sortedAppointments.filter(item => item.customerId).map(item => [item.customerId, item])).values());
 
@@ -101,15 +105,43 @@ function EmployeeDashboard({ account, onAddService }: { account: { name?: string
       </div>
 
       <Card className="p-5">
-          <p className="text-xs text-[#6E6E73]">My unpaid Saturday-to-Friday KES earnings</p>
-          {earningsLoading ? <p className="mt-1 text-sm text-[#6E6E73]">Loading…</p> : earningsError ? <p role="status" className="mt-1 text-sm text-amber-700">{earningsError}</p> : <p className="text-xl font-semibold mt-1">{fmtExactKES(weekToDateEarnings)}</p>}
+          <p className="text-xs text-[#6E6E73]">My unpaid last-week Saturday-to-Friday KES earnings</p>
+          {earningsLoading ? <p className="mt-1 text-sm text-[#6E6E73]">Loading…</p> : earningsError ? <p role="status" className="mt-1 text-sm text-amber-700">{earningsError}</p> : <p className="text-xl font-semibold mt-1">{fmtExactKES(lastWeekEarnings)}</p>}
       </Card>
 
       <Card className="p-5">
-        <h2 className="font-semibold mb-1">This Week’s Unpaid Earnings</h2>
-        <p className="mb-3 text-xs text-[#6E6E73]">Completed services with unpaid commission or assistant compensation. Paid earnings disappear from this list.</p>
-        {earningsLoading ? <p className="text-sm text-[#6E6E73]">Loading…</p> : earningsError ? <p role="status" className="text-sm text-amber-700">{earningsError}</p> : unpaidCompletedWork.length === 0 ? <p className="text-sm text-[#6E6E73]">No unpaid service earnings this week.</p> : <div className="space-y-2">{unpaidCompletedWork.map((work, index) => <div key={`${work.createdAt}-${work.serviceName}-${index}`} className="flex items-center justify-between gap-3 border-b border-black/5 pb-2 last:border-0"><div><p className="text-sm font-medium">{work.customerName} · {work.serviceName}</p><p className="text-xs text-[#6E6E73]">{work.appointmentDate || new Date(work.createdAt).toLocaleDateString()}{work.appointmentTime ? ` at ${work.appointmentTime}` : ''}{work.cardNumber ? ` · Card ${work.cardNumber}` : ''} · {work.role === 'assistant' ? 'assistant compensation' : 'commission'}</p></div><p className="shrink-0 text-sm font-semibold">{fmtExactKES(work.amount)}</p></div>)}</div>}
+        <h2 className="font-semibold mb-1">Last Week’s Unpaid Earnings</h2>
+        <p className="mb-3 text-xs text-[#6E6E73]">Completed Saturday-to-Friday appointments with unpaid commission or assistant compensation. Earnings disappear only after Paystack confirms success.</p>
+        {earningsLoading ? <p className="text-sm text-[#6E6E73]">Loading…</p> : earningsError ? <p role="status" className="text-sm text-amber-700">{earningsError}</p> : unpaidCompletedWork.length === 0 ? <p className="text-sm text-[#6E6E73]">No unpaid service earnings this week</p> : <div className="space-y-2">{unpaidCompletedWork.map((work, index) => <div key={`${work.createdAt}-${work.serviceName}-${index}`} className="flex items-center justify-between gap-3 border-b border-black/5 pb-2 last:border-0"><div><p className="text-sm font-medium">{work.customerName} · {work.serviceName}</p><p className="text-xs text-[#6E6E73]">{work.appointmentDate || new Date(work.createdAt).toLocaleDateString()}{work.appointmentTime ? ` at ${work.appointmentTime}` : ''}{work.cardNumber ? ` · Card ${work.cardNumber}` : ''} · {work.role === 'assistant' ? 'assistant compensation' : 'commission'}</p></div><p className="shrink-0 text-sm font-semibold">{fmtExactKES(work.amount)}</p></div>)}</div>}
       </Card>
+
+      <Card className="p-5">
+        <h2 className="font-semibold mb-1">Last Week’s Earnings</h2>
+        <p className="mb-3 text-xs text-[#6E6E73]">Your total earnings from the previous week, including commission and assistant compensation.</p>
+        {earningsLoading ? <p className="text-sm text-[#6E6E73]">Loading…</p> : earningsError ? <p role="status" className="text-sm text-amber-700">{earningsError}</p> : <p className="text-xl font-semibold mt-1">{fmtExactKES(lastWeekEarnings)}</p>}
+      </Card>
+
+      {lastWeekWork.length > 0 && (
+        <Card className="p-5">
+          <h2 className="font-semibold mb-1">Last Week’s Work Details</h2>
+          <p className="mb-3 text-xs text-[#6E6E73]">Services you completed last week, with unpaid earnings.</p>
+          <div className="space-y-2">
+            {lastWeekWork.map((work, index) => (
+              <div key={`${work.createdAt}-${work.serviceName}-${index}`} className="flex items-center justify-between gap-3 border-b border-black/5 pb-2 last:border-0">
+                <div>
+                  <p className="text-sm font-medium">{work.customerName} · {work.serviceName}</p>
+                  <p className="text-xs text-[#6E6E73]">
+                    {work.appointmentDate || new Date(work.createdAt).toLocaleDateString()}
+                    {work.appointmentTime ? ` at ${work.appointmentTime}` : ''}
+                    {work.cardNumber ? ` · Card ${work.cardNumber}` : ''} · {work.role === 'assistant' ? 'assistant compensation' : 'commission'}
+                  </p>
+                </div>
+                <p className="shrink-0 text-sm font-semibold">{fmtExactKES(work.amount)}</p>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
 
       {waitingClients.length > 0 && (
         <Card className="p-5 border-l-4 border-l-orange-500 bg-orange-50/50">
@@ -123,9 +155,9 @@ function EmployeeDashboard({ account, onAddService }: { account: { name?: string
         </Card>
       )}
 
-      {appointmentsError ? <Card className="p-5"><p role="status" className="text-sm text-amber-700">{appointmentsError}</p></Card> : earningsError ? <Card className="p-5"><p role="status" className="text-sm text-amber-700">Could not load this week’s earning appointments.</p></Card> : earningsLoading ? <p className="text-sm text-[#6E6E73]">Loading this week’s earning appointments…</p> : sortedAppointments.length === 0 ? <EmptyState icon={UserRound} title="No appointments with unpaid earnings" description="Appointments that generate unpaid earnings this week will appear here." /> : (
+      {appointmentsError ? <Card className="p-5"><p role="status" className="text-sm text-amber-700">{appointmentsError}</p></Card> : earningsError ? <Card className="p-5"><p role="status" className="text-sm text-amber-700">Could not load last week’s earning appointments.</p></Card> : earningsLoading ? <p className="text-sm text-[#6E6E73]">Loading last week’s earning appointments…</p> : sortedAppointments.length === 0 ? <EmptyState icon={UserRound} title="No appointments with unpaid earnings" description="Appointments completed Saturday through Friday that generate unpaid earnings will appear here until Paystack success." /> : (
         <div className="space-y-4">
-          <section className="space-y-3"><h2 className="font-semibold">My appointments this week</h2>{sortedAppointments.map(appointment => (
+          <section className="space-y-3"><h2 className="font-semibold">My last-week earning appointments</h2>{sortedAppointments.map(appointment => (
               <Card key={appointment.id} className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-start gap-3"><div className="rounded-xl bg-[#0071e3]/10 p-2 text-[#0071e3]"><Scissors size={18} aria-hidden="true" /></div><div><p className="font-medium">{appointment.customerName}</p><p className="text-sm text-[#6E6E73]">{appointment.serviceName} · {appointment.date} at {appointment.time}</p><p className="text-sm font-medium mt-1">{fmtKES(appointment.price)}</p></div></div>
                 <div className="flex flex-wrap items-center gap-2"><Badge tone={appointment.status === 'in-service' ? 'warning' : 'info'}>{appointment.status.replace('-', ' ')}</Badge><Badge tone={appointment.paymentCompleted ? 'success' : 'warning'}>{appointment.paymentCompleted ? 'Paid' : 'Payment pending'}</Badge><Button size="sm" onClick={() => onAddService(appointment)}>Add service</Button></div>
