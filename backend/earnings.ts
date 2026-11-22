@@ -130,9 +130,8 @@ export function calculateUnpaidStaffEarnings(
   to: number,
   payrollItems: any[] = [],
 ): StaffEarningLine[] {
-  const activePayouts = payrollItems.length ? paystackConfirmedPayoutItems(payoutItems, payrollItems) : payoutItems;
-  const paidKeys = new Set(activePayouts.filter(item => !item.deletedAt).map(item => String(item.itemKey || '')));
-  for (const key of confirmedPaystackItemKeys(payrollItems)) paidKeys.add(key);
+  const activePayoutKeys = new Set(payoutItems.filter(item => !item.deletedAt).map(item => String(item.itemKey || '')).filter(Boolean));
+  const paidKeys = new Set([...activePayoutKeys, ...confirmedPaystackItemKeys(payrollItems)]);
   const appointmentsById = new Map(appointments.map(appointment => [String(appointment.id), appointment]));
   const lines: StaffEarningLine[] = [];
   const addLine = (order: any, item: any, itemKey: string, staffId: unknown, role: 'commission' | 'assistant', amount: number, revenue: number, commissionBase: number, helperDeduction: number, productCost: number) => {

@@ -29846,9 +29846,8 @@ function currentSaturdayThroughFridayRange(date = /* @__PURE__ */ new Date()) {
   return { from, to: from + 7 * 24 * 60 * 60 * 1e3 };
 }
 function calculateUnpaidStaffEarnings(orders, payoutItems, appointments, from, to, payrollItems = []) {
-  const activePayouts = payrollItems.length ? paystackConfirmedPayoutItems(payoutItems, payrollItems) : payoutItems;
-  const paidKeys = new Set(activePayouts.filter((item) => !item.deletedAt).map((item) => String(item.itemKey || "")));
-  for (const key of confirmedPaystackItemKeys(payrollItems)) paidKeys.add(key);
+  const activePayoutKeys = new Set(payoutItems.filter((item) => !item.deletedAt).map((item) => String(item.itemKey || "")).filter(Boolean));
+  const paidKeys = /* @__PURE__ */ new Set([...activePayoutKeys, ...confirmedPaystackItemKeys(payrollItems)]);
   const appointmentsById = new Map(appointments.map((appointment) => [String(appointment.id), appointment]));
   const lines = [];
   const addLine = (order, item, itemKey, staffId, role, amount, revenue, commissionBase, helperDeduction, productCost) => {
