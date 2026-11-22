@@ -55,10 +55,18 @@ export interface StaffEarningLine {
   branchId: string | null;
 }
 
-export function paystackConfirmedPayoutItems(payoutItems: any[], payrollItems: any[]) {
-  const confirmedKeys = new Set(payrollItems
+export function confirmedPaystackItemKeys(payrollItems: any[]) {
+  return new Set(payrollItems
     .filter(item => item.provider === 'paystack' && item.status === 'success')
-    .flatMap(item => Array.isArray(item.itemKeys) ? item.itemKeys.map(String) : []));
+    .flatMap(item => {
+      const itemKeys = Array.isArray(item.itemKeys) ? item.itemKeys : [];
+      const earningKeys = Array.isArray(item.earningLines) ? item.earningLines.map((line: any) => line?.itemKey) : [];
+      return [...itemKeys, ...earningKeys].map(String).filter(Boolean);
+    }));
+}
+
+export function paystackConfirmedPayoutItems(payoutItems: any[], payrollItems: any[]) {
+  const confirmedKeys = confirmedPaystackItemKeys(payrollItems);
   return payoutItems.filter(item => !item.deletedAt && confirmedKeys.has(String(item.itemKey || '')));
 }
 
@@ -124,6 +132,7 @@ export function calculateUnpaidStaffEarnings(
 ): StaffEarningLine[] {
   const activePayouts = payrollItems.length ? paystackConfirmedPayoutItems(payoutItems, payrollItems) : payoutItems;
   const paidKeys = new Set(activePayouts.filter(item => !item.deletedAt).map(item => String(item.itemKey || '')));
+  for (const key of confirmedPaystackItemKeys(payrollItems)) paidKeys.add(key);
   const appointmentsById = new Map(appointments.map(appointment => [String(appointment.id), appointment]));
   const lines: StaffEarningLine[] = [];
   const addLine = (order: any, item: any, itemKey: string, staffId: unknown, role: 'commission' | 'assistant', amount: number, revenue: number, commissionBase: number, helperDeduction: number, productCost: number) => {
