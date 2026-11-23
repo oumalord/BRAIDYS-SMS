@@ -60,14 +60,14 @@ function Finance() {
   const loadPayroll = () => {
     setPayrollLoading(true);
     setPayrollError('');
-    PayrollApi.staff('last-week')
+    PayrollApi.staff('current')
       .then(payroll => {
         setStaff(payroll.items);
         setLastWeekStaff(payroll.items);
         setPayrollPeriod(payroll.period);
         setLastWeekPeriod(payroll.period);
       })
-      .catch((cause: any) => setPayrollError(cause?.message || 'Could not load last week’s payroll data.'))
+      .catch((cause: any) => setPayrollError(cause?.message || 'Could not load this week’s payroll data.'))
       .finally(() => setPayrollLoading(false));
   };
   const load = (refreshPayroll = true) => {
@@ -151,10 +151,10 @@ function Finance() {
     const recipients = paystackRecipients;
     if (!recipients.length) { toast('No unpaid KES earnings are available to transfer.', 'error'); return; }
     const totalKES = recipients.reduce((sum, item) => sum + item.amountKES, 0);
-    if (!window.confirm(`Submit ${fmtMoney(totalKES, 'KES')} for ${recipients.length} staff member${recipients.length === 1 ? '' : 's'} to Paystack for last week (${payrollDateRange})? Earnings will be marked paid only after Paystack confirms each transfer.`)) return;
+    if (!window.confirm(`Submit ${fmtMoney(totalKES, 'KES')} for ${recipients.length} staff member${recipients.length === 1 ? '' : 's'} to Paystack for this week (${payrollDateRange})? Earnings will be marked paid only after Paystack confirms each transfer.`)) return;
     setPayrollSending(true);
     try {
-      const response = await PayrollApi.sendPaystack(recipients.map(({ member }) => member.id), Object.fromEntries(recipients.map(({ member, amountKES }) => [member.id, amountKES])), 'last-week');
+      const response = await PayrollApi.sendPaystack(recipients.map(({ member }) => member.id), Object.fromEntries(recipients.map(({ member, amountKES }) => [member.id, amountKES])), 'current');
       const result = response.data;
       toast(`Paystack accepted ${result.pendingCount + result.successCount}/${result.employeeCount} transfers. Only confirmed transfers are marked paid.`, 'success');
       loadPayroll();
@@ -234,7 +234,7 @@ function Finance() {
     setBreakdown(null);
     setBreakdownError('');
     setBreakdownLoading(true);
-    try { setBreakdown(await AppointmentsApi.staffWeeklyWork(member.id, undefined, 'last-week')); }
+    try { setBreakdown(await AppointmentsApi.staffWeeklyWork(member.id)); }
     catch (cause: any) { setBreakdownError(cause?.message || 'Could not load this staff member’s appointment earnings.'); }
     finally { setBreakdownLoading(false); }
   };
@@ -359,20 +359,20 @@ function Finance() {
             </div>
           </Card>
           <Card className="p-6">
-            <div className="mb-3"><h2 className="font-semibold mb-1">This Week’s Unpaid Staff Earnings</h2><p className="text-xs text-[#6E6E73]">Unpaid KES commissions and assistant compensation for {selectedEarningsLabel}. Paid earnings are excluded; the period starts again Saturday at midnight.</p></div>
+            <div className="mb-3"><h2 className="font-semibold mb-1">This Week’s Unpaid Staff Earnings</h2><p className="text-xs text-[#6E6E73]">{isOwner ? 'Across all branches. ' : ''}Unpaid KES commissions and assistant compensation for {selectedEarningsLabel}. Paid earnings are excluded; the period starts again Saturday at midnight.</p></div>
             {payrollLoading ? <p className="text-sm text-[#6E6E73]">Loading this week’s unpaid earnings…</p> : payrollError ? <p role="status" className="text-sm text-amber-700">{payrollError}</p> : weeklyStaffEarnings.length === 0 ? <p className="text-sm text-[#6E6E73]">No unpaid staff earnings this week.</p> : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <caption className="sr-only">Commission and assistant earnings by staff for {selectedEarningsLabel}</caption>
-                  <thead><tr className="text-left text-xs text-[#6E6E73] border-b border-black/5"><th className="pb-2 pr-3">Staff</th><th className="pb-2 pr-3">Earning lines</th><th className="pb-2 pr-3">Service revenue</th><th className="pb-2 pr-3">Assistant fees deducted</th><th className="pb-2 pr-3">Commission</th><th className="pb-2 pr-3">Assistant earnings</th><th className="pb-2 pr-3">Total earnings</th><th className="pb-2">Breakdown</th></tr></thead>
+                  <thead><tr className="text-left text-xs text-[#6E6E73] border-b border-black/5"><th className="pb-2 pr-3">Staff</th><th className="pb-2 pr-3">Branch</th><th className="pb-2 pr-3">Earning lines</th><th className="pb-2 pr-3">Service revenue</th><th className="pb-2 pr-3">Assistant fees deducted</th><th className="pb-2 pr-3">Commission</th><th className="pb-2 pr-3">Assistant earnings</th><th className="pb-2 pr-3">Total earnings</th><th className="pb-2">Breakdown</th></tr></thead>
                   <tbody>
                     {weeklyStaffEarnings.map(({ member, count, revenue, helperDeductions, commission, assistantEarnings }) => (
                       <tr key={member.id} className="border-b border-black/5 last:border-0">
-                        <td className="py-2 pr-3">{member.name}</td><td className="py-2 pr-3">{count}</td><td className="py-2 pr-3">{fmtMoney(revenue, 'KES')}</td><td className="py-2 pr-3">{fmtMoney(helperDeductions, 'KES')}</td><td className="py-2 pr-3">{fmtMoney(commission, 'KES')}</td><td className="py-2 pr-3">{fmtMoney(assistantEarnings, 'KES')}</td><td className="py-2 pr-3 font-medium">{fmtMoney(commission + assistantEarnings, 'KES')}</td><td className="py-2"><Button size="sm" variant="secondary" onClick={() => openBreakdown(member)}><Search size={14} aria-hidden="true" />Open</Button></td>
+                        <td className="py-2 pr-3">{member.name}</td><td className="py-2 pr-3">{member.branchName || member.branch || '—'}</td><td className="py-2 pr-3">{count}</td><td className="py-2 pr-3">{fmtMoney(revenue, 'KES')}</td><td className="py-2 pr-3">{fmtMoney(helperDeductions, 'KES')}</td><td className="py-2 pr-3">{fmtMoney(commission, 'KES')}</td><td className="py-2 pr-3">{fmtMoney(assistantEarnings, 'KES')}</td><td className="py-2 pr-3 font-medium">{fmtMoney(commission + assistantEarnings, 'KES')}</td><td className="py-2"><Button size="sm" variant="secondary" onClick={() => openBreakdown(member)}><Search size={14} aria-hidden="true" />Open</Button></td>
                       </tr>
                     ))}
                   </tbody>
-                  <tfoot><tr className="border-t-2 border-black/10 font-semibold"><td className="py-3 pr-3">TOTAL</td><td className="py-3 pr-3">{dailyTotals.count}</td><td className="py-3 pr-3">{fmtMoney(dailyTotals.revenue, 'KES')}</td><td className="py-3 pr-3">{fmtMoney(dailyTotals.helperDeductions, 'KES')}</td><td className="py-3 pr-3">{fmtMoney(dailyTotals.commission, 'KES')}</td><td className="py-3 pr-3">{fmtMoney(dailyTotals.assistantEarnings, 'KES')}</td><td className="py-3 pr-3">{fmtMoney(dailyTotals.totalEarnings, 'KES')}</td><td /></tr></tfoot>
+                  <tfoot><tr className="border-t-2 border-black/10 font-semibold"><td className="py-3 pr-3">TOTAL</td><td /><td className="py-3 pr-3">{dailyTotals.count}</td><td className="py-3 pr-3">{fmtMoney(dailyTotals.revenue, 'KES')}</td><td className="py-3 pr-3">{fmtMoney(dailyTotals.helperDeductions, 'KES')}</td><td className="py-3 pr-3">{fmtMoney(dailyTotals.commission, 'KES')}</td><td className="py-3 pr-3">{fmtMoney(dailyTotals.assistantEarnings, 'KES')}</td><td className="py-3 pr-3">{fmtMoney(dailyTotals.totalEarnings, 'KES')}</td><td /></tr></tfoot>
                 </table>
               </div>
             )}

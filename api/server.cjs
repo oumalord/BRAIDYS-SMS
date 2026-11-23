@@ -31053,7 +31053,8 @@ New temporary password: ${newPassword}`, account.id);
     if (Number.isNaN(anchor.getTime())) return error("Choose a valid date", 400);
     const range = String(query.period || "") === "last-week" ? currentSaturdayThroughFridayRange(new Date(anchor.getTime() - 7 * DAY)) : currentSaturdayThroughFridayRange(anchor);
     const rangeTo = Math.min(range.to, Date.now() + 1);
-    const data = await loadStaffEarningsData(context);
+    const payrollContext = context.role === "owner" ? { ...context, branchId: void 0 } : context;
+    const data = await loadStaffEarningsData(payrollContext);
     const selectedStaff = data.staff.filter((member) => String(member.id) === staffId);
     if (!selectedStaff.length) return error("Staff member not found", 404);
     const staffById = new Map(data.staffById);
@@ -31172,7 +31173,8 @@ New temporary password: ${newPassword}`, account.id);
   "GET /api/payroll/staff": [async ({ query }) => {
     const context = currentContext();
     if (!context) return error("Please log in.", 401);
-    const data = await loadStaffEarningsData(context);
+    const payrollContext = context.role === "owner" ? { ...context, branchId: void 0 } : context;
+    const data = await loadStaffEarningsData(payrollContext);
     const range = String(query.period || "current") === "last-week" ? currentSaturdayThroughFridayRange(new Date(Date.now() - 7 * DAY)) : currentSaturdayThroughFridayRange();
     const lines = calculateUnpaidStaffEarnings(data.orders, data.payoutItems, data.appointments, range.from, range.to, data.payrollItems).filter((line) => line.currency === "KES");
     const items = data.staff.map((member) => {
@@ -31271,7 +31273,7 @@ New temporary password: ${newPassword}`, account.id);
     const context = currentContext();
     if (!context || !["owner", "admin"].includes(context.role)) return error("Only the owner or administrator can view Paystack payroll history", 403);
     const [{ items: batches }, { items: payrollItems }] = await Promise.all([db.list("payroll_batches", { limit: 500 }), db.list("payroll_items", { limit: 5e3 })]);
-    const visibleBatches = batches.filter((batch) => batch.provider === "paystack" && batch.tenantId === context.tenantId && (!context.branchId || batch.branchId === context.branchId));
+    const visibleBatches = batches.filter((batch) => batch.provider === "paystack" && batch.tenantId === context.tenantId && (context.role === "owner" || !context.branchId || batch.branchId === context.branchId));
     visibleBatches.sort((first, second) => Number(second.createdAt || 0) - Number(first.createdAt || 0));
     return json({ items: visibleBatches.slice(0, 20).map((batch) => ({
       id: batch.id,
@@ -31334,24 +31336,28 @@ New temporary password: ${newPassword}`, account.id);
       db.list("appointments", { limit: 5e3 }),
       db.list("payroll_items", { limit: 5e3 })
     ]);
-    const members = staffRows.filter((member) => !member.deletedAt && member.employmentStatus !== "laid-off" && contextIncludesPayrollRecord(member, context) && (!context.branchId || member.branchId === context.branchId) && requestedIds.includes(String(member.id)));
+    const payrollContext = context.role === "owner" ? { ...context, branchId: void 0 } : context;
+    const members = staffRows.filter((member) => !member.deletedAt && member.employmentStatus !== "laid-off" && contextIncludesRecord(member, context) && (!payrollContext.branchId || member.branchId === payrollContext.branchId) && requestedIds.includes(String(member.id)));
     if (!members.length) return error("No active staff records are available for this payroll batch.", 400);
     if (members.length !== requestedIds.length) return error("One or more selected staff members are not available in this salon or branch.", 400);
     const staffById = new Map(members.map((member) => [String(member.id), member]));
     const earningsByStaffId = /* @__PURE__ */ new Map();
     const lockedItemKeys = /* @__PURE__ */ new Set();
-    const tenantAppointments = appointments.filter((item) => contextIncludesPayrollRecord(item, context));
-    const scopedBranchOrders = branchScopedPayrollOrders(orders, tenantAppointments, staffById, context);
-    const branchPayoutItems = branchScopedPayrollPayoutItems(payoutItems, context);
+    const tenantAppointments = appointments.filter((item) => contextIncludesRecord(item, context));
+    const tenantOrders = orders.filter((item) => contextIncludesRecord(item, context));
+    const tenantPayoutItems = payoutItems.filter((item) => contextIncludesRecord(item, context));
+    const tenantPayrollItems = payrollItems.filter((item) => contextIncludesRecord(item, context));
+    const scopedBranchOrders = branchScopedPayrollOrders(tenantOrders, tenantAppointments, staffById, payrollContext);
+    const branchPayoutItems = branchScopedPayrollPayoutItems(tenantPayoutItems, payrollContext);
     const { from, to } = currentSaturdayThroughFridayRange();
-    const earnings = calculateUnpaidStaffEarnings(scopedBranchOrders, branchPayoutItems, tenantAppointments, from, to, payrollItems).filter((line) => staffById.has(line.staffId) && line.currency === "KES");
+    const earnings = calculateUnpaidStaffEarnings(scopedBranchOrders, branchPayoutItems, tenantAppointments, from, to, tenantPayrollItems).filter((line) => staffById.has(line.staffId) && line.currency === "KES");
     for (const earning of earnings) {
       const lines = earningsByStaffId.get(earning.staffId) || [];
       lines.push(earning);
       earningsByStaffId.set(earning.staffId, lines);
     }
     const pendingStatuses = /* @__PURE__ */ new Set(["submitting", "pending", "unknown", "review"]);
-    for (const item of payrollItems) {
+    for (const item of tenantPayrollItems) {
       if (item.provider !== "paystack" || !pendingStatuses.has(item.status)) continue;
       for (const itemKey of Array.isArray(item.itemKeys) ? item.itemKeys : []) lockedItemKeys.add(String(itemKey));
     }
@@ -31401,10 +31407,10 @@ New temporary password: ${newPassword}`, account.id);
       return error(`Insufficient Paystack KES balance for the KES ${totalKES.toLocaleString("en-KE")} payroll principal, before transfer fees. Add funds and refresh payroll; no transfer was submitted.`, 409);
     }
     const now = Date.now();
-    const [batchId] = await db.add("payroll_batches", [{ tenantId: context.tenantId, branchId: context.branchId || null, provider: "paystack", status: "submitting", totalKES, employeeCount: transfers.length, createdAt: now }]);
+    const [batchId] = await db.add("payroll_batches", [{ tenantId: context.tenantId, branchId: payrollContext.branchId || null, provider: "paystack", status: "submitting", totalKES, employeeCount: transfers.length, createdAt: now }]);
     const payrollRecords = transfers.map((transfer) => ({
       tenantId: context.tenantId,
-      branchId: context.branchId || transfer.member.branchId || null,
+      branchId: payrollContext.branchId || transfer.member.branchId || null,
       provider: "paystack",
       batchId,
       staffId: transfer.member.id,
@@ -31435,7 +31441,7 @@ New temporary password: ${newPassword}`, account.id);
         const message = thirdPartyPayoutsDisabled ? "Paystack has not enabled third-party payouts for this account. No payroll was sent. Contact Paystack to enable transfers, then retry." : `Paystack rejected the batch (HTTP ${response.status}): ${providerMessage}${providerErrorDetails.length ? ` ${providerErrorDetails.join("; ")}` : ""}`;
         const providerFailure = { status: response.status, message: providerMessage, errors: providerErrors };
         await db.update("payroll_items", itemIds.map((id, index) => ({ id, record: { ...payrollRecords[index], id, status: "failed", error: message, providerFailure } })));
-        await db.update("payroll_batches", [{ id: batchId, record: { id: batchId, tenantId: context.tenantId, provider: "paystack", status: "failed", totalKES, employeeCount: transfers.length, failedCount: transfers.length, createdAt: now, error: message, providerFailure } }]);
+        await db.update("payroll_batches", [{ id: batchId, record: { id: batchId, tenantId: context.tenantId, branchId: payrollContext.branchId || null, provider: "paystack", status: "failed", totalKES, employeeCount: transfers.length, failedCount: transfers.length, createdAt: now, error: message, providerFailure } }]);
         return error(message, thirdPartyPayoutsDisabled ? 503 : 502);
       }
       const acceptedRows = Array.isArray(resultBody.data) ? resultBody.data : Array.isArray(resultBody.data?.success) ? resultBody.data.success : [];
@@ -31455,13 +31461,13 @@ New temporary password: ${newPassword}`, account.id);
       const failedCount = updatedItems.filter((item) => ["failed", "reversed", "review"].includes(item.record.status)).length;
       const pendingCount = updatedItems.length - successCount - failedCount;
       const batchStatus = successCount === updatedItems.length ? "success" : successCount || failedCount ? "partial" : "pending";
-      await db.update("payroll_batches", [{ id: batchId, record: { id: batchId, tenantId: context.tenantId, branchId: context.branchId || null, provider: "paystack", status: batchStatus, totalKES, employeeCount: transfers.length, sentCount: successCount, pendingCount, failedCount, createdAt: now } }]);
+      await db.update("payroll_batches", [{ id: batchId, record: { id: batchId, tenantId: context.tenantId, branchId: payrollContext.branchId || null, provider: "paystack", status: batchStatus, totalKES, employeeCount: transfers.length, sentCount: successCount, pendingCount, failedCount, createdAt: now } }]);
       await audit("submitted", "paystack_payroll_batch", { id: batchId, totalKES, employeeCount: transfers.length, pendingCount, failedCount, successCount }, context.name);
       return json({ id: batchId, totalKES, employeeCount: transfers.length, pendingCount, failedCount, successCount, status: batchStatus, message: "Transfers are queued. Earnings will be marked paid only after Paystack confirms success." });
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "Paystack transfer status is unknown.";
       await db.update("payroll_items", itemIds.map((id, index) => ({ id, record: { ...payrollRecords[index], id, status: "unknown", error: message } })));
-      await db.update("payroll_batches", [{ id: batchId, record: { id: batchId, tenantId: context.tenantId, provider: "paystack", status: "unknown", totalKES, employeeCount: transfers.length, createdAt: now, error: message } }]);
+      await db.update("payroll_batches", [{ id: batchId, record: { id: batchId, tenantId: context.tenantId, branchId: payrollContext.branchId || null, provider: "paystack", status: "unknown", totalKES, employeeCount: transfers.length, createdAt: now, error: message } }]);
       return error("Paystack response was interrupted. Check the Paystack dashboard before retrying this batch.", 502);
     }
   }],
