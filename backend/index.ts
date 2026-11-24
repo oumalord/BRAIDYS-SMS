@@ -1468,7 +1468,7 @@ export const handler = router({
     const weekRange = currentSaturdayThroughFridayRange();
     const lastWeekRange = currentSaturdayThroughFridayRange(new Date(now - 7 * DAY));
     const fortnightFrom = weekRange.from - 7 * DAY;
-    const allLines = calculateUnpaidStaffEarnings(data.orders, [], data.appointments, 0, now + 1)
+    const allLines = calculateUnpaidStaffEarnings(data.orders, [], data.appointments, 0, Number.MAX_SAFE_INTEGER)
       .filter(line => line.staffId === String(context.staffId) && line.currency === 'KES');
     const paidItems = data.payrollItems.length ? paystackConfirmedPayoutItems(data.payoutItems, data.payrollItems) : data.payoutItems.filter(item => !item.deletedAt);
     const paidKeys = new Set(paidItems.map(item => String(item.itemKey || '')));
@@ -1484,7 +1484,8 @@ export const handler = router({
     const inRange = (lines: any[], from: number, to: number) => lines.filter(line => earningDate(line) >= from && earningDate(line) < to);
     const unpaid = (lines: any[]) => lines.filter(line => !paidKeys.has(line.itemKey));
     const total = (lines: any[], role?: string) => lines.filter(line => !role || line.role === role).reduce((sum, line) => sum + Number(line.amount || 0), 0);
-    const todayLines = inRange(allLines, todayRange?.from || 0, todayRange?.to || now + 1);
+    const todayLines = allLines.filter(line => Number(line.createdAt || 0) >= (todayRange?.from || 0)
+      && Number(line.createdAt || 0) < (todayRange?.to || now + 1));
     const weekLines = unpaid(inRange(allLines, weekRange.from, Math.min(weekRange.to, now + 1)));
     const lastWeekLines = unpaid(inRange(allLines, lastWeekRange.from, lastWeekRange.to));
     const fortnightLines = unpaid(inRange(allLines, fortnightFrom, Math.min(weekRange.to, now + 1)));
