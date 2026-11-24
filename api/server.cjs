@@ -29812,6 +29812,49 @@ function confirmedPaystackItemKeys(payrollItems) {
     return [...itemKeys, ...earningKeys].map(String).filter(Boolean);
   }));
 }
+function completedAppointmentStaffEarnings(appointments, orders, staffId, from, to) {
+  const orderedAppointments = new Set(orders.filter((order) => !order.deletedAt && order.appointmentId).map((order) => String(order.appointmentId)));
+  const lines = [];
+  for (const appointment of appointments) {
+    const appointmentId = String(appointment.id || "");
+    if (!appointmentId || appointment.deletedAt || String(appointment.status || "").toLowerCase() !== "completed" || orderedAppointments.has(appointmentId)) continue;
+    const date = String(appointment.date || "");
+    const time = String(appointment.time || "12:00");
+    const scheduledAt = /^\d{4}-\d{2}-\d{2}$/.test(date) ? Date.parse(`${date}T${time}:00+03:00`) : Number.NaN;
+    const completedAt = Number(appointment.completedAt || appointment.updatedAt) || (Number.isFinite(scheduledAt) ? scheduledAt : Number(appointment.createdAt || 0));
+    if (completedAt < from || completedAt >= to) continue;
+    const serviceItems = Array.isArray(appointment.items) && appointment.items.length ? appointment.items : [{ name: appointment.serviceName, price: appointment.price, currency: appointment.currency, staffId: appointment.staffId }];
+    for (const [index, item] of serviceItems.entries()) {
+      if (item.type && item.type !== "service") continue;
+      const earningItem = { ...item, type: "service", staffId: item.staffId || appointment.staffId };
+      const serviceStaffIds = [earningItem.staffId, item.coStaffId, item.thirdStaffId, item.helperStaffId].map((value) => String(value || ""));
+      if (!serviceStaffIds.includes(staffId)) continue;
+      const revenue = Number(item.lineTotalAfterDiscount ?? Number(item.price ?? appointment.price ?? 0) * Number(item.qty || 1)) || 0;
+      const productCost = Math.max(0, Number(item.productCost || 0));
+      const helperDeduction = Math.max(0, Number(item.assistantPayment ?? item.helperDeduction ?? 0));
+      const commissionBase = Math.max(0, Number(item.commissionBase ?? revenue - productCost - helperDeduction) || 0);
+      const role = String(item.helperStaffId || "") === staffId ? "assistant" : "commission";
+      const amount = role === "assistant" ? helperDeduction : staffCommission(earningItem, staffId);
+      if (amount <= 0) continue;
+      lines.push({
+        itemKey: `appointment:${appointmentId}:${index}:${role}`,
+        orderId: `appointment:${appointmentId}`,
+        staffId,
+        serviceName: String(item.name || item.serviceName || appointment.serviceName || "Service"),
+        role,
+        amount,
+        currency: String(item.currency || appointment.currency || "KES"),
+        revenue,
+        commissionBase,
+        helperDeduction,
+        productCost,
+        createdAt: completedAt,
+        branchId: appointment.branchId || null
+      });
+    }
+  }
+  return lines;
+}
 function paystackConfirmedPayoutItems(payoutItems, payrollItems) {
   const confirmedKeys = confirmedPaystackItemKeys(payrollItems);
   return payoutItems.filter((item) => !item.deletedAt && confirmedKeys.has(String(item.itemKey || "")));
@@ -31110,7 +31153,9 @@ New temporary password: ${newPassword}`, account.id);
     const weekRange = currentSaturdayThroughFridayRange();
     const lastWeekRange = currentSaturdayThroughFridayRange(new Date(now - 7 * DAY));
     const fortnightFrom = weekRange.from - 7 * DAY;
-    const allLines = calculateUnpaidStaffEarnings(data.orders, [], data.appointments, 0, Number.MAX_SAFE_INTEGER).filter((line) => line.staffId === String(context.staffId) && line.currency === "KES");
+    const orderLines = calculateUnpaidStaffEarnings(data.orders, [], data.appointments, 0, Number.MAX_SAFE_INTEGER).filter((line) => line.staffId === String(context.staffId) && line.currency === "KES");
+    const appointmentLines = completedAppointmentStaffEarnings(data.appointments, data.orders, String(context.staffId), 0, Number.MAX_SAFE_INTEGER).filter((line) => line.currency === "KES");
+    const allLines = [...orderLines, ...appointmentLines];
     const paidItems = data.payrollItems.length ? paystackConfirmedPayoutItems(data.payoutItems, data.payrollItems) : data.payoutItems.filter((item) => !item.deletedAt);
     const paidKeys = new Set(paidItems.map((item) => String(item.itemKey || "")));
     const ordersById = new Map(data.orders.map((order) => [String(order.id), order]));
@@ -31126,7 +31171,7 @@ New temporary password: ${newPassword}`, account.id);
     const unpaid = (lines) => lines.filter((line) => !paidKeys.has(line.itemKey));
     const total = (lines, role) => lines.filter((line) => !role || line.role === role).reduce((sum, line) => sum + Number(line.amount || 0), 0);
     const todayLines = allLines.filter((line) => Number(line.createdAt || 0) >= (todayRange?.from || 0) && Number(line.createdAt || 0) < (todayRange?.to || now + 1));
-    const weekLines = unpaid(inRange(allLines, weekRange.from, Math.min(weekRange.to, now + 1)));
+    const weekLines = inRange(allLines, weekRange.from, Math.min(weekRange.to, now + 1));
     const lastWeekLines = unpaid(inRange(allLines, lastWeekRange.from, lastWeekRange.to));
     const fortnightLines = unpaid(inRange(allLines, fortnightFrom, Math.min(weekRange.to, now + 1)));
     const describeWork = (line) => {

@@ -65,6 +65,52 @@ export function confirmedPaystackItemKeys(payrollItems: any[]) {
     }));
 }
 
+export function completedAppointmentStaffEarnings(appointments: any[], orders: any[], staffId: string, from: number, to: number): StaffEarningLine[] {
+  const orderedAppointments = new Set(orders.filter(order => !order.deletedAt && order.appointmentId).map(order => String(order.appointmentId)));
+  const lines: StaffEarningLine[] = [];
+  for (const appointment of appointments) {
+    const appointmentId = String(appointment.id || '');
+    if (!appointmentId || appointment.deletedAt || String(appointment.status || '').toLowerCase() !== 'completed' || orderedAppointments.has(appointmentId)) continue;
+    const date = String(appointment.date || '');
+    const time = String(appointment.time || '12:00');
+    const scheduledAt = /^\d{4}-\d{2}-\d{2}$/.test(date) ? Date.parse(`${date}T${time}:00+03:00`) : Number.NaN;
+    const completedAt = Number(appointment.completedAt || appointment.updatedAt) || (Number.isFinite(scheduledAt) ? scheduledAt : Number(appointment.createdAt || 0));
+    if (completedAt < from || completedAt >= to) continue;
+    const serviceItems = Array.isArray(appointment.items) && appointment.items.length
+      ? appointment.items
+      : [{ name: appointment.serviceName, price: appointment.price, currency: appointment.currency, staffId: appointment.staffId }];
+    for (const [index, item] of serviceItems.entries()) {
+      if (item.type && item.type !== 'service') continue;
+      const earningItem = { ...item, type: 'service', staffId: item.staffId || appointment.staffId };
+      const serviceStaffIds = [earningItem.staffId, item.coStaffId, item.thirdStaffId, item.helperStaffId].map(value => String(value || ''));
+      if (!serviceStaffIds.includes(staffId)) continue;
+      const revenue = Number(item.lineTotalAfterDiscount ?? Number(item.price ?? appointment.price ?? 0) * Number(item.qty || 1)) || 0;
+      const productCost = Math.max(0, Number(item.productCost || 0));
+      const helperDeduction = Math.max(0, Number(item.assistantPayment ?? item.helperDeduction ?? 0));
+      const commissionBase = Math.max(0, Number(item.commissionBase ?? revenue - productCost - helperDeduction) || 0);
+      const role = String(item.helperStaffId || '') === staffId ? 'assistant' : 'commission';
+      const amount = role === 'assistant' ? helperDeduction : staffCommission(earningItem, staffId);
+      if (amount <= 0) continue;
+      lines.push({
+        itemKey: `appointment:${appointmentId}:${index}:${role}`,
+        orderId: `appointment:${appointmentId}`,
+        staffId,
+        serviceName: String(item.name || item.serviceName || appointment.serviceName || 'Service'),
+        role,
+        amount,
+        currency: String(item.currency || appointment.currency || 'KES'),
+        revenue,
+        commissionBase,
+        helperDeduction,
+        productCost,
+        createdAt: completedAt,
+        branchId: appointment.branchId || null,
+      });
+    }
+  }
+  return lines;
+}
+
 export function paystackConfirmedPayoutItems(payoutItems: any[], payrollItems: any[]) {
   const confirmedKeys = confirmedPaystackItemKeys(payrollItems);
   return payoutItems.filter(item => !item.deletedAt && confirmedKeys.has(String(item.itemKey || '')));

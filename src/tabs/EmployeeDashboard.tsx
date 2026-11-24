@@ -86,6 +86,8 @@ function EmployeeDashboard({ account, onAddService }: { account: { name?: string
   if (!account.staffId) return <EmptyState icon={AlertTriangle} title="Employee profile is not linked" description="Ask the salon owner to link your employee account before using the dashboard." />;
 
   const unpaidCompletedWork = lastWeekWork.filter(work => work.amount > 0);
+  const completedAppointments = appointments.filter(appointment => appointment.status === 'completed' || appointment.paymentCompleted === true)
+    .sort((first, second) => `${second.date} ${second.time}`.localeCompare(`${first.date} ${first.time}`));
   const earningAppointmentIds = new Set(unpaidCompletedWork.map(work => work.appointmentId).filter((id): id is string => Boolean(id)));
   const sortedAppointments = appointments.filter(appointment => earningAppointmentIds.has(appointment.id))
     .sort((a, b) => `${b.date} ${b.time}`.localeCompare(`${a.date} ${a.time}`));
@@ -98,11 +100,18 @@ function EmployeeDashboard({ account, onAddService }: { account: { name?: string
         <p className="text-sm text-[#6E6E73]">Welcome, {account.name || 'employee'}. Only clients assigned to you are shown.</p>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Card className="p-5"><Clock size={18} className="text-[#0071e3]" aria-hidden="true" /><p className="mt-3 text-xs text-[#6E6E73]">Waiting Now</p><p className="text-2xl font-semibold">{waitingClients.length}</p></Card>
         <Card className="p-5"><DollarSign size={18} className="text-green-600" aria-hidden="true" /><p className="mt-3 text-xs text-[#6E6E73]">Today's Earnings</p>{earningsLoading ? <p className="mt-1 text-sm text-[#6E6E73]">Loading…</p> : earningsError ? <p role="status" className="mt-1 text-sm text-amber-700">Unavailable</p> : <><p className="text-2xl font-semibold">{fmtExactKES(dailyEarnings)}</p><p className="text-xs text-[#6E6E73] mt-1">Commission {fmtExactKES(dailyCommission)} + assistant compensation {fmtExactKES(dailyAssistant)}</p></>}</Card>
         <Card className="p-5"><UserRound size={18} className="text-[#0071e3]" aria-hidden="true" /><p className="mt-3 text-xs text-[#6E6E73]">Clients with unpaid earnings</p><p className="text-2xl font-semibold">{assignedClients.length}</p></Card>
+        <Card className="p-5"><DollarSign size={18} className="text-green-600" aria-hidden="true" /><p className="mt-3 text-xs text-[#6E6E73]">This Week’s Total Earnings</p>{earningsLoading ? <p className="mt-1 text-sm text-[#6E6E73]">Loading…</p> : earningsError ? <p role="status" className="mt-1 text-sm text-amber-700">Unavailable</p> : <p className="text-2xl font-semibold">{fmtExactKES(weekToDateEarnings)}</p>}</Card>
       </div>
+
+      <Card className="p-5">
+        <h2 className="font-semibold mb-1">Completed Appointments</h2>
+        <p className="mb-3 text-xs text-[#6E6E73]">All completed appointments assigned to you, including appointments already paid.</p>
+        {loading ? <p className="text-sm text-[#6E6E73]">Loading…</p> : appointmentsError ? <p role="status" className="text-sm text-amber-700">{appointmentsError}</p> : completedAppointments.length === 0 ? <p className="text-sm text-[#6E6E73]">No completed appointments yet.</p> : <div className="space-y-2">{completedAppointments.map(appointment => <div key={appointment.id} className="flex items-center justify-between gap-3 border-b border-black/5 pb-2 last:border-0"><div><p className="text-sm font-medium">{appointment.customerName} · {appointment.serviceName}</p><p className="text-xs text-[#6E6E73]">{appointment.date} at {appointment.time}</p></div><div className="text-right"><p className="text-sm font-medium">{fmtKES(appointment.price)}</p><Badge tone={appointment.paymentCompleted ? 'success' : 'info'}>{appointment.paymentCompleted ? 'Paid' : 'Completed'}</Badge></div></div>)}</div>}
+      </Card>
 
       <Card className="p-5">
           <p className="text-xs text-[#6E6E73]">My unpaid last-week Saturday-to-Friday KES earnings</p>

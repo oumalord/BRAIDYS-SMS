@@ -1,6 +1,6 @@
 import { router, json, error, db, ai, storage, currentContext, withRequestContext } from './runtime.ts';
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
-import { calculateUnpaidStaffEarnings, currentSaturdayThroughFridayRange, currentSundayThroughNowRange, paystackConfirmedPayoutItems, staffAppointmentMinutes, staffCommission } from './earnings.ts';
+import { calculateUnpaidStaffEarnings, completedAppointmentStaffEarnings, currentSaturdayThroughFridayRange, currentSundayThroughNowRange, paystackConfirmedPayoutItems, staffAppointmentMinutes, staffCommission } from './earnings.ts';
 import { hasSufficientPaystackPrincipalBalance, toPaystackMinorAmount, verifyPaystackSignature } from './paystack.ts';
 
 const DAY = 24 * 3600 * 1000;
@@ -1468,8 +1468,11 @@ export const handler = router({
     const weekRange = currentSaturdayThroughFridayRange();
     const lastWeekRange = currentSaturdayThroughFridayRange(new Date(now - 7 * DAY));
     const fortnightFrom = weekRange.from - 7 * DAY;
-    const allLines = calculateUnpaidStaffEarnings(data.orders, [], data.appointments, 0, Number.MAX_SAFE_INTEGER)
+    const orderLines = calculateUnpaidStaffEarnings(data.orders, [], data.appointments, 0, Number.MAX_SAFE_INTEGER)
       .filter(line => line.staffId === String(context.staffId) && line.currency === 'KES');
+    const appointmentLines = completedAppointmentStaffEarnings(data.appointments, data.orders, String(context.staffId), 0, Number.MAX_SAFE_INTEGER)
+      .filter(line => line.currency === 'KES');
+    const allLines = [...orderLines, ...appointmentLines];
     const paidItems = data.payrollItems.length ? paystackConfirmedPayoutItems(data.payoutItems, data.payrollItems) : data.payoutItems.filter(item => !item.deletedAt);
     const paidKeys = new Set(paidItems.map(item => String(item.itemKey || '')));
     const ordersById = new Map(data.orders.map(order => [String(order.id), order]));
@@ -1486,7 +1489,7 @@ export const handler = router({
     const total = (lines: any[], role?: string) => lines.filter(line => !role || line.role === role).reduce((sum, line) => sum + Number(line.amount || 0), 0);
     const todayLines = allLines.filter(line => Number(line.createdAt || 0) >= (todayRange?.from || 0)
       && Number(line.createdAt || 0) < (todayRange?.to || now + 1));
-    const weekLines = unpaid(inRange(allLines, weekRange.from, Math.min(weekRange.to, now + 1)));
+    const weekLines = inRange(allLines, weekRange.from, Math.min(weekRange.to, now + 1));
     const lastWeekLines = unpaid(inRange(allLines, lastWeekRange.from, lastWeekRange.to));
     const fortnightLines = unpaid(inRange(allLines, fortnightFrom, Math.min(weekRange.to, now + 1)));
     const describeWork = (line: any) => {

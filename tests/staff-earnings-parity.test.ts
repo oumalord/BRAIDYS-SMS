@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { calculateUnpaidStaffEarnings, currentSaturdayThroughFridayRange, currentSundayThroughNowRange, mostRecentSaturdayThroughFridayRange, paystackConfirmedPayoutItems, previousSaturdayThroughYesterdayRange, staffAppointmentMinutes } from '../backend/earnings.ts';
+import { calculateUnpaidStaffEarnings, completedAppointmentStaffEarnings, currentSaturdayThroughFridayRange, currentSundayThroughNowRange, mostRecentSaturdayThroughFridayRange, paystackConfirmedPayoutItems, previousSaturdayThroughYesterdayRange, staffAppointmentMinutes } from '../backend/earnings.ts';
 
 const now = new Date(2026, 8, 26, 12, 0, 0).getTime();
 const startOfSunday = new Date(2026, 8, 20, 0, 0, 0).getTime();
@@ -100,6 +100,21 @@ test('Sunday completed work appears in current week earnings but not completed-w
   assert.equal(currentWeek[0].staffId, 'ouma');
   assert.equal(currentWeek[0].amount, 1000);
   assert.equal(completedWeek.length, 0);
+});
+
+test('completed appointments without POS orders earn commission without duplicating ordered appointments', () => {
+  const completedAt = new Date('2026-11-24T11:00:00+03:00').getTime();
+  const appointments = [
+    { id: 'appointment-only', status: 'completed', completedAt, date: '2026-11-24', price: 1000, currency: 'KES', staffId: 'stylist', serviceName: 'Braids' },
+    { id: 'appointment-with-order', status: 'completed', completedAt, date: '2026-11-24', price: 1000, currency: 'KES', staffId: 'stylist' },
+  ];
+  const orders = [orderAt(completedAt, { staffId: 'stylist', commission: 500 }, { id: 'existing-order', appointmentId: 'appointment-with-order' })];
+  const lines = completedAppointmentStaffEarnings(appointments, orders, 'stylist', completedAt - 1000, completedAt + 1000);
+
+  assert.equal(lines.length, 1);
+  assert.equal(lines[0].itemKey, 'appointment:appointment-only:0:commission');
+  assert.equal(lines[0].amount, 500);
+  assert.equal(lines[0].createdAt, completedAt);
 });
 
 test('earnings calculation includes the start and excludes the end of its requested range', () => {
