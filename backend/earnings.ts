@@ -143,8 +143,18 @@ export function previousSaturdayThroughYesterdayRange(date = new Date()) {
 }
 
 export function mostRecentSaturdayThroughFridayRange(date = new Date()) {
-  const current = currentSaturdayThroughFridayRange(date);
-  return { from: current.from - 7 * 24 * 60 * 60 * 1000, to: current.from };
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Africa/Nairobi', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(date);
+  const part = (type: string) => Number(parts.find(value => value.type === type)?.value);
+  const today = new Date(Date.UTC(part('year'), part('month') - 1, part('day')));
+  const latestSaturday = new Date(today);
+  const daysSinceSaturday = (today.getUTCDay() + 1) % 7;
+  latestSaturday.setUTCDate(today.getUTCDate() - daysSinceSaturday);
+  const previousSaturday = new Date(latestSaturday);
+  previousSaturday.setUTCDate(latestSaturday.getUTCDate() - 7);
+  const nairobiMidnight = (day: Date) => Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate()) - 3 * 60 * 60 * 1000;
+  return { from: nairobiMidnight(previousSaturday), to: nairobiMidnight(latestSaturday) };
 }
 
 export function currentSaturdayThroughFridayRange(date = new Date()) {

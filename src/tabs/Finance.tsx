@@ -212,7 +212,7 @@ function Finance() {
     : 'Saturday 17:00 through the following Saturday 17:00 EAT';
   const lastWeekDateRange = lastWeekPeriod
     ? `${payrollDateFormatter.format(new Date(lastWeekPeriod.from))} – ${payrollDateFormatter.format(new Date(Math.max(lastWeekPeriod.from, lastWeekPeriod.to - 1)))}`
-    : 'last Saturday at 17:00 through this Saturday at 17:00 EAT';
+    : 'last Saturday through Friday';
   const selectedEarningsLabel = currentPayrollDateRange;
   const totalUnpaidEarnings = (member: Staff) => Number(member.commissionEarnedWeek || 0) + Number(member.assistantEarnedWeek || 0);
   const currentPayrollStaff = staff.filter(member => member.employmentStatus !== 'laid-off')

@@ -25,10 +25,13 @@ test('payroll date range is the previous Saturday through yesterday in Nairobi',
   assert.deepEqual(lines.map(line => line.amount), [100, 200]);
 });
 
-test('previous completed earnings period runs Saturday 17:00 through the following Saturday 17:00 in Nairobi', () => {
+test('last-week payroll period is the previous Saturday through Friday in Nairobi', () => {
   const range = mostRecentSaturdayThroughFridayRange(new Date('2026-11-07T12:00:00+03:00'));
-  assert.equal(new Date(range.from).toISOString(), '2026-10-24T14:00:00.000Z');
-  assert.equal(new Date(range.to).toISOString(), '2026-10-31T14:00:00.000Z');
+  assert.equal(new Date(range.from).toISOString(), '2026-10-30T21:00:00.000Z');
+  assert.equal(new Date(range.to).toISOString(), '2026-11-06T21:00:00.000Z');
+  const requestedPayrollWeek = mostRecentSaturdayThroughFridayRange(new Date('2026-11-28T14:58:00+03:00'));
+  assert.equal(new Date(requestedPayrollWeek.from).toISOString(), '2026-11-20T21:00:00.000Z');
+  assert.equal(new Date(requestedPayrollWeek.to).toISOString(), '2026-11-27T21:00:00.000Z');
   const orders = [
     orderAt(range.from, { staffId: 'stylist', commission: 100 }),
     orderAt(range.to - 1, { staffId: 'stylist', commission: 200 }),
@@ -54,12 +57,15 @@ test('active earnings period rolls from Saturday 17:00 to the following Saturday
 test('earnings week changes at Saturday 17:00 in Nairobi', () => {
   const beforeCutoff = currentSaturdayThroughFridayRange(new Date('2026-11-14T16:59:59.999+03:00'));
   const atCutoff = currentSaturdayThroughFridayRange(new Date('2026-11-14T17:00:00+03:00'));
-  const lastWeek = mostRecentSaturdayThroughFridayRange(new Date('2026-11-14T17:00:00+03:00'));
+  const lastWeekBeforeRollover = mostRecentSaturdayThroughFridayRange(new Date('2026-11-14T16:59:59.999+03:00'));
+  const lastWeekAfterRollover = mostRecentSaturdayThroughFridayRange(new Date('2026-11-14T17:00:00+03:00'));
 
   assert.equal(new Date(beforeCutoff.from).toISOString(), '2026-11-07T14:00:00.000Z');
   assert.equal(new Date(atCutoff.from).toISOString(), '2026-11-14T14:00:00.000Z');
-  assert.equal(lastWeek.from, beforeCutoff.from);
-  assert.equal(lastWeek.to, atCutoff.from);
+  assert.equal(new Date(lastWeekBeforeRollover.from).toISOString(), '2026-11-06T21:00:00.000Z');
+  assert.equal(new Date(lastWeekBeforeRollover.to).toISOString(), '2026-11-13T21:00:00.000Z');
+  assert.equal(lastWeekBeforeRollover.from, lastWeekAfterRollover.from);
+  assert.equal(lastWeekBeforeRollover.to, lastWeekAfterRollover.to);
 });
 
 test('linked earnings follow appointment date when the order is entered after the payroll cutoff', () => {
