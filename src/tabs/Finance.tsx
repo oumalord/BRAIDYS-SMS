@@ -217,26 +217,25 @@ function Finance() {
   const lastWeekDateRange = lastWeekPeriod
     ? `${payrollDateFormatter.format(new Date(lastWeekPeriod.from))} – ${payrollDateFormatter.format(new Date(Math.max(lastWeekPeriod.from, lastWeekPeriod.to - 1)))}`
     : 'last Saturday through Friday';
-  const selectedEarningsLabel = currentPayrollDateRange;
+  const selectedEarningsLabel = range === 'today' ? 'today' : range === 'week' ? 'this week' : range === 'month' ? 'the last 30 days' : 'all time';
   const totalUnpaidEarnings = (member: Staff) => Number(member.commissionEarnedWeek || 0) + Number(member.assistantEarnedWeek || 0);
-  const currentPayrollStaff = staff.filter(member => member.employmentStatus !== 'laid-off')
-    .sort((first, second) => totalUnpaidEarnings(second) - totalUnpaidEarnings(first) || first.name.localeCompare(second.name));
+  const reportEarningsByStaffId = new Map((data?.staffEarnings || []).filter(item => item.currency === 'KES')
+    .map(item => [String(item.staffId), item]));
   const payrollStaff = lastWeekStaff.filter(member => member.employmentStatus !== 'laid-off')
     .sort((first, second) => totalUnpaidEarnings(second) - totalUnpaidEarnings(first) || first.name.localeCompare(second.name));
   const paystackRecipients = payrollStaff.map(member => ({ member, amountKES: Math.round(totalUnpaidEarnings(member)) })).filter(item => item.amountKES > 0);
   const paystackRecipientsMissingCount = paystackRecipients.filter(({ member }) => member.paystackRecipientMode !== 'live'
     || !/^RCP_[A-Za-z0-9]+$/.test(String(member.paystackRecipientCode || ''))).length;
   const paystackDepositTotalKES = paystackRecipients.reduce((sum, recipient) => sum + recipient.amountKES, 0);
-  const weeklyStaffEarnings = currentPayrollStaff.map(member => {
-    const commission = Number(member.commissionEarnedWeek || 0);
-    const assistantEarnings = Number(member.assistantEarnedWeek || 0);
+  const weeklyStaffEarnings = staff.map(member => {
+    const reportEarnings = reportEarningsByStaffId.get(String(member.id));
     return {
       member,
-      count: member.unpaidEarningCount || 0,
-      revenue: member.unpaidServiceRevenueKES || 0,
-      helperDeductions: member.unpaidAssistantFeesKES || 0,
-      commission,
-      assistantEarnings,
+      count: reportEarnings?.count || 0,
+      revenue: reportEarnings?.revenue || 0,
+      helperDeductions: reportEarnings?.helperDeductions || 0,
+      commission: reportEarnings?.commission || 0,
+      assistantEarnings: reportEarnings?.assistantEarnings || 0,
     };
   }).sort((first, second) => second.commission + second.assistantEarnings - first.commission - first.assistantEarnings
     || first.member.name.localeCompare(second.member.name));
@@ -371,20 +370,20 @@ function Finance() {
             </div>
           </Card>
           <Card className="p-6">
-            <div className="mb-3"><h2 className="font-semibold mb-1">This Week’s Unpaid Staff Earnings</h2><p className="text-xs text-[#6E6E73]">{isOwner ? 'Across all branches. ' : ''}Unpaid KES commissions and assistant compensation for {selectedEarningsLabel}. Paid earnings are excluded; a new period starts Saturday at 17:00 EAT.</p></div>
-            {payrollLoading ? <p className="text-sm text-[#6E6E73]">Loading this week’s unpaid earnings…</p> : payrollError ? <p role="status" className="text-sm text-amber-700">{payrollError}</p> : weeklyStaffEarnings.length === 0 ? <p className="text-sm text-[#6E6E73]">No unpaid staff earnings this week.</p> : (
+            <div className="mb-3"><h2 className="font-semibold mb-1">Staff Earnings Statement</h2><p className="text-xs text-[#6E6E73]">{isOwner ? 'Across all branches. ' : ''}Commission and assistant earnings for {selectedEarningsLabel}, using the same calculation as Reports. Last-week payroll is listed separately below.</p></div>
+            {weeklyStaffEarnings.length === 0 ? <p className="text-sm text-[#6E6E73]">No staff earnings were recorded for this range.</p> : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
-                  <caption className="sr-only">Commission and assistant earnings by staff for {selectedEarningsLabel}</caption>
-                  <thead><tr className="text-left text-xs text-[#6E6E73] border-b border-black/5"><th className="pb-2 pr-3">Staff</th><th className="pb-2 pr-3">Branch</th><th className="pb-2 pr-3">Earning lines</th><th className="pb-2 pr-3">Service revenue</th><th className="pb-2 pr-3">Assistant fees deducted</th><th className="pb-2 pr-3">Commission</th><th className="pb-2 pr-3">Assistant earnings</th><th className="pb-2 pr-3">Total earnings</th><th className="pb-2">Breakdown</th></tr></thead>
+                  <caption className="sr-only">Staff earnings statement for {selectedEarningsLabel}</caption>
+                  <thead><tr className="text-left text-xs text-[#6E6E73] border-b border-black/5"><th className="pb-2 pr-3">Staff</th><th className="pb-2 pr-3">Branch</th><th className="pb-2 pr-3">Earning lines</th><th className="pb-2 pr-3">Service revenue</th><th className="pb-2 pr-3">Assistant fees deducted</th><th className="pb-2 pr-3">Commission</th><th className="pb-2 pr-3">Assistant earnings</th><th className="pb-2 pr-3">Expected income</th></tr></thead>
                   <tbody>
                     {weeklyStaffEarnings.map(({ member, count, revenue, helperDeductions, commission, assistantEarnings }) => (
                       <tr key={member.id} className="border-b border-black/5 last:border-0">
-                        <td className="py-2 pr-3">{member.name}</td><td className="py-2 pr-3">{member.branchName || member.branch || '—'}</td><td className="py-2 pr-3">{count}</td><td className="py-2 pr-3">{fmtMoney(revenue, 'KES')}</td><td className="py-2 pr-3">{fmtMoney(helperDeductions, 'KES')}</td><td className="py-2 pr-3">{fmtMoney(commission, 'KES')}</td><td className="py-2 pr-3">{fmtMoney(assistantEarnings, 'KES')}</td><td className="py-2 pr-3 font-medium">{fmtMoney(commission + assistantEarnings, 'KES')}</td><td className="py-2"><Button size="sm" variant="secondary" onClick={() => openBreakdown(member)}><Search size={14} aria-hidden="true" />Open</Button></td>
+                        <td className="py-2 pr-3">{member.name}</td><td className="py-2 pr-3">{member.branchName || member.branch || '—'}</td><td className="py-2 pr-3">{count}</td><td className="py-2 pr-3">{fmtMoney(revenue, 'KES')}</td><td className="py-2 pr-3">{fmtMoney(helperDeductions, 'KES')}</td><td className="py-2 pr-3">{fmtMoney(commission, 'KES')}</td><td className="py-2 pr-3">{fmtMoney(assistantEarnings, 'KES')}</td><td className="py-2 pr-3 font-medium">{fmtMoney(commission + assistantEarnings, 'KES')}</td>
                       </tr>
                     ))}
                   </tbody>
-                  <tfoot><tr className="border-t-2 border-black/10 font-semibold"><td className="py-3 pr-3">TOTAL</td><td /><td className="py-3 pr-3">{dailyTotals.count}</td><td className="py-3 pr-3">{fmtMoney(dailyTotals.revenue, 'KES')}</td><td className="py-3 pr-3">{fmtMoney(dailyTotals.helperDeductions, 'KES')}</td><td className="py-3 pr-3">{fmtMoney(dailyTotals.commission, 'KES')}</td><td className="py-3 pr-3">{fmtMoney(dailyTotals.assistantEarnings, 'KES')}</td><td className="py-3 pr-3">{fmtMoney(dailyTotals.totalEarnings, 'KES')}</td><td /></tr></tfoot>
+                  <tfoot><tr className="border-t-2 border-black/10 font-semibold"><td className="py-3 pr-3">TOTAL</td><td /><td className="py-3 pr-3">{dailyTotals.count}</td><td className="py-3 pr-3">{fmtMoney(dailyTotals.revenue, 'KES')}</td><td className="py-3 pr-3">{fmtMoney(dailyTotals.helperDeductions, 'KES')}</td><td className="py-3 pr-3">{fmtMoney(dailyTotals.commission, 'KES')}</td><td className="py-3 pr-3">{fmtMoney(dailyTotals.assistantEarnings, 'KES')}</td><td className="py-3 pr-3">{fmtMoney(dailyTotals.totalEarnings, 'KES')}</td></tr></tfoot>
                 </table>
               </div>
             )}
