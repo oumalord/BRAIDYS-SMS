@@ -11,6 +11,8 @@ function EmployeeDashboard({ account, onAddService }: { account: { name?: string
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [dailyEarnings, setDailyEarnings] = useState(0);
   const [weekToDateEarnings, setWeekToDateEarnings] = useState(0);
+  const [weekCommission, setWeekCommission] = useState(0);
+  const [weekAssistant, setWeekAssistant] = useState(0);
   const [lastWeekEarnings, setLastWeekEarnings] = useState(0);
   const [dailyCommission, setDailyCommission] = useState(0);
   const [dailyAssistant, setDailyAssistant] = useState(0);
@@ -48,6 +50,8 @@ function EmployeeDashboard({ account, onAddService }: { account: { name?: string
       setEarningsError('');
       setDailyEarnings(earnings.today.total || 0);
       setWeekToDateEarnings((earnings.week || earnings.fortnight).total || 0);
+      setWeekCommission(earnings.week.commission || 0);
+      setWeekAssistant(earnings.week.assistant || 0);
       setLastWeekEarnings(earnings.lastWeek?.total || 0);
       setDailyCommission(earnings.today.commission || 0);
       setDailyAssistant(earnings.today.assistant || 0);
@@ -99,9 +103,9 @@ function EmployeeDashboard({ account, onAddService }: { account: { name?: string
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Card className="p-5"><Clock size={18} className="text-[#0071e3]" aria-hidden="true" /><p className="mt-3 text-xs text-[#6E6E73]">Waiting Now</p><p className="text-2xl font-semibold">{waitingClients.length}</p></Card>
-        <Card className="p-5"><DollarSign size={18} className="text-green-600" aria-hidden="true" /><p className="mt-3 text-xs text-[#6E6E73]">Today's Earnings</p>{earningsLoading ? <p className="mt-1 text-sm text-[#6E6E73]">Loading…</p> : earningsError ? <p role="status" className="mt-1 text-sm text-amber-700">Unavailable</p> : <><p className="text-2xl font-semibold">{fmtExactKES(dailyEarnings)}</p><p className="text-xs text-[#6E6E73] mt-1">Commission {fmtExactKES(dailyCommission)} + assistant compensation {fmtExactKES(dailyAssistant)}</p></>}</Card>
+        <Card className="p-5"><DollarSign size={18} className="text-green-600" aria-hidden="true" /><p className="mt-3 text-xs text-[#6E6E73]">Today’s Report Earnings</p>{earningsLoading ? <p className="mt-1 text-sm text-[#6E6E73]">Loading…</p> : earningsError ? <p role="status" className="mt-1 text-sm text-amber-700">Unavailable</p> : <><p className="text-2xl font-semibold">{fmtExactKES(dailyEarnings)}</p><p className="text-xs text-[#6E6E73] mt-1">Commission {fmtExactKES(dailyCommission)} + assistant compensation {fmtExactKES(dailyAssistant)}</p></>}</Card>
         <Card className="p-5"><UserRound size={18} className="text-[#0071e3]" aria-hidden="true" /><p className="mt-3 text-xs text-[#6E6E73]">Clients with unpaid earnings</p><p className="text-2xl font-semibold">{assignedClients.length}</p></Card>
-        <Card className="p-5"><DollarSign size={18} className="text-green-600" aria-hidden="true" /><p className="mt-3 text-xs text-[#6E6E73]">This Week’s Total Earnings</p>{earningsLoading ? <p className="mt-1 text-sm text-[#6E6E73]">Loading…</p> : earningsError ? <p role="status" className="mt-1 text-sm text-amber-700">Unavailable</p> : <p className="text-2xl font-semibold">{fmtExactKES(weekToDateEarnings)}</p>}</Card>
+        <Card className="p-5"><DollarSign size={18} className="text-green-600" aria-hidden="true" /><p className="mt-3 text-xs text-[#6E6E73]">This Week’s Report Earnings</p>{earningsLoading ? <p className="mt-1 text-sm text-[#6E6E73]">Loading…</p> : earningsError ? <p role="status" className="mt-1 text-sm text-amber-700">Unavailable</p> : <><p className="text-2xl font-semibold">{fmtExactKES(weekToDateEarnings)}</p><p className="text-xs text-[#6E6E73] mt-1">Commission {fmtExactKES(weekCommission)} + assistant compensation {fmtExactKES(weekAssistant)}</p></>}</Card>
       </div>
 
       <Card className="p-5">

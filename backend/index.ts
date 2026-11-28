@@ -1,6 +1,6 @@
 import { router, json, error, db, ai, storage, currentContext, withRequestContext } from './runtime.ts';
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
-import { calculateUnpaidStaffEarnings, completedAppointmentStaffEarnings, currentSaturdayThroughFridayRange, currentSundayThroughNowRange, mostRecentSaturdayThroughFridayRange, paystackConfirmedPayoutItems, staffAppointmentMinutes, staffCommission } from './earnings.ts';
+import { calculateReportStaffEarnings, calculateUnpaidStaffEarnings, completedAppointmentStaffEarnings, currentSaturdayThroughFridayRange, currentSundayThroughNowRange, mostRecentSaturdayThroughFridayRange, paystackConfirmedPayoutItems, staffAppointmentMinutes, staffCommission } from './earnings.ts';
 import { hasSufficientPaystackPrincipalBalance, toPaystackMinorAmount, verifyPaystackSignature } from './paystack.ts';
 
 const DAY = 24 * 3600 * 1000;
@@ -1506,9 +1506,10 @@ export const handler = router({
     const data = await loadStaffEarningsData(context);
     const now = Date.now();
     const todayRange = nairobiDayRange(nairobiDateString());
-    const weekRange = currentSaturdayThroughFridayRange();
+    const reportWeekRange = currentSundayThroughNowRange(new Date(now));
+    const payrollWeekRange = currentSaturdayThroughFridayRange();
     const lastWeekRange = mostRecentSaturdayThroughFridayRange();
-    const fortnightFrom = weekRange.from - 7 * DAY;
+    const fortnightFrom = payrollWeekRange.from - 7 * DAY;
     const orderLines = calculateUnpaidStaffEarnings(data.orders, [], data.appointments, 0, Number.MAX_SAFE_INTEGER)
       .filter(line => line.staffId === String(context.staffId) && line.currency === 'KES');
     const appointmentLines = completedAppointmentStaffEarnings(data.appointments, data.orders, String(context.staffId), 0, Number.MAX_SAFE_INTEGER)
@@ -1529,11 +1530,22 @@ export const handler = router({
     const inRange = (lines: any[], from: number, to: number) => lines.filter(line => earningDate(line) >= from && earningDate(line) < to);
     const unpaid = (lines: any[]) => lines.filter(line => !paidKeys.has(line.itemKey));
     const total = (lines: any[], role?: string) => lines.filter(line => !role || line.role === role).reduce((sum, line) => sum + Number(line.amount || 0), 0);
-    const todayLines = unpaid(allLines.filter(line => Number(line.createdAt || 0) >= (todayRange?.from || 0)
-      && Number(line.createdAt || 0) < (todayRange?.to || now + 1)));
-    const weekLines = unpaid(inRange(allLines, weekRange.from, Math.min(weekRange.to, now + 1)));
+    const reportEarningsForRange = (from: number, to?: number) => {
+      const reportOrders = data.orders.filter(order => {
+        const createdAt = Number(order.createdAt || 0);
+        return !order.deletedAt && createdAt >= from && (to === undefined || createdAt < to);
+      });
+      const staffEarnings = calculateReportStaffEarnings(reportOrders, data.appointments, data.staff)
+        .find(item => item.staffId === String(context.staffId) && item.currency === 'KES');
+      const commission = Number(staffEarnings?.commission || 0);
+      const assistant = Number(staffEarnings?.assistantEarnings || 0);
+      return { commission, assistant, total: commission + assistant };
+    };
+    const reportToday = todayRange ? reportEarningsForRange(todayRange.from, todayRange.to) : { commission: 0, assistant: 0, total: 0 };
+    const reportWeek = reportEarningsForRange(reportWeekRange.from);
+    const weekLines = unpaid(inRange(allLines, payrollWeekRange.from, Math.min(payrollWeekRange.to, now + 1)));
     const lastWeekLines = unpaid(inRange(allLines, lastWeekRange.from, lastWeekRange.to));
-    const fortnightLines = unpaid(inRange(allLines, fortnightFrom, Math.min(weekRange.to, now + 1)));
+    const fortnightLines = unpaid(inRange(allLines, fortnightFrom, Math.min(payrollWeekRange.to, now + 1)));
     const describeWork = (line: any) => {
       const order: any = ordersById.get(line.orderId);
       const appointmentId = String(order?.appointmentId || (line.orderId.startsWith('appointment:') ? line.orderId.slice('appointment:'.length) : ''));
@@ -1554,7 +1566,7 @@ export const handler = router({
     })).sort((first, second) => second.createdAt - first.createdAt);
     const earnings = (lines: any[]) => ({ commission: total(lines, 'commission'), assistant: total(lines, 'assistant'), total: total(lines) });
     return json({
-      today: earnings(todayLines), week: earnings(weekLines),
+      today: reportToday, week: reportWeek,
       lastWeek: { ...earnings(lastWeekLines), period: lastWeekRange },
       lastWeekWork, fortnight: earnings(fortnightLines), completedWork, paidHistory,
     });
@@ -1933,7 +1945,10 @@ export const handler = router({
     let cutoff = 0;
     let rangeEnd: number | null = null;
     if (selectedDay) { cutoff = selectedDay.from; rangeEnd = selectedDay.to; }
-    else if (range === 'today') { const d = new Date(); d.setHours(0, 0, 0, 0); cutoff = d.getTime(); }
+    else if (range === 'today') {
+      const todayRange = nairobiDayRange(nairobiDateString());
+      if (todayRange) { cutoff = todayRange.from; rangeEnd = todayRange.to; }
+    }
     else if (range === 'week') cutoff = currentSundayThroughNowRange().from;
     else if (range === 'month') cutoff = now - 30 * DAY;
     else cutoff = 0;
@@ -1969,6 +1984,8 @@ export const handler = router({
       const appointment: any = appointmentById.get(String(order.appointmentId));
       return Boolean(appointment && !appointment.deletedAt && appointment.status === 'completed' && appointment.date === requestedDate);
     });
+    const reportStaffEarnings = calculateReportStaffEarnings(rangeOrders, appts, staffAll);
+    const staffEarnings = new Map(reportStaffEarnings.map(item => [`${item.staffId}|${item.currency}`, item]));
     const paymentMethodTotals: Record<'Cash' | 'Card' | 'M-Pesa', number> = { Cash: 0, Card: 0, 'M-Pesa': 0 };
     const revenueByCurrency: Record<string, number> = {};
     for (const o of rangeOrders) {
@@ -1981,21 +1998,6 @@ export const handler = router({
     let productCost = 0;
     const commissionsByCurrency: Record<string, number> = {};
     const staffRevenue = new Map<string, { name: string; currency: string; revenue: number; commission: number; helperDeductions: number; count: number }>();
-    const staffEarnings = new Map<string, { staffId: string; name: string; currency: string; revenue: number; commission: number; assistantEarnings: number; helperDeductions: number; count: number }>();
-    const addStaffEarning = (staffId: unknown, currency: string, values: { revenue?: number; commission?: number; assistantEarnings?: number; helperDeductions?: number; count?: number }) => {
-      if (!staffId) return;
-      const id = String(staffId);
-      const member: any = staffById.get(id);
-      const key = `${id}|${currency}`;
-      const entry = staffEarnings.get(key) || { staffId: id, name: member?.name || 'Unknown', currency, revenue: 0, commission: 0, assistantEarnings: 0, helperDeductions: 0, count: 0 };
-      entry.revenue += values.revenue || 0;
-      entry.commission += values.commission || 0;
-      entry.assistantEarnings += values.assistantEarnings || 0;
-      entry.helperDeductions += values.helperDeductions || 0;
-      entry.count += values.count || 0;
-      staffEarnings.set(key, entry);
-    };
-    for (const member of staffAll as any[]) addStaffEarning(member.id, 'KES', {});
     const serviceRevenue = new Map<string, { name: string; currency: string; revenue: number; count: number }>();
     const commissionByClient: any[] = [];
     const topServicesMap = new Map<string, { name: string; currency: string; revenue: number; count: number }>();
@@ -2015,16 +2017,12 @@ export const handler = router({
 
         const primaryStaffId = item.staffId || appointment?.staffId;
         const staffIds = Array.from(new Set([primaryStaffId, item.coStaffId, item.thirdStaffId].filter(Boolean)));
-        const assistantFee = Math.max(0, Number(item.assistantPayment || item.helperDeduction || 0));
         for (const staffId of staffIds) {
           const member = staffById.get(String(staffId));
           if (!member) continue;
           const commissionItem = primaryStaffId === item.staffId ? item : { ...item, staffId: primaryStaffId };
           const commission = staffCommission(commissionItem, staffId);
           commissionsByCurrency[currency] = (commissionsByCurrency[currency] || 0) + commission;
-          addStaffEarning(staffId, currency, {
-            revenue, commission, helperDeductions: String(staffId) === String(primaryStaffId || '') ? assistantFee : 0, count: quantity,
-          });
           commissionByClient.push({
             clientId: order.customerId || null,
             clientName: order.customerName || 'Customer',
@@ -2037,7 +2035,6 @@ export const handler = router({
             createdAt: Number(order.createdAt || 0),
           });
         }
-        if (item.helperStaffId) addStaffEarning(item.helperStaffId, currency, { assistantEarnings: assistantFee, count: quantity });
         productCost += Number(item.productCost || 0) * quantity;
       }
     }
@@ -2077,7 +2074,7 @@ export const handler = router({
       topStaff: Array.from(staffEarnings.values()).sort((a: any, b: any) => (b.revenue || 0) - (a.revenue || 0)).slice(0, 10),
       topServices: Array.from(topServicesMap.values()).sort((a, b) => b.revenue - a.revenue).slice(0, 10),
       commissionByClient: commissionByClient.slice(-50).reverse(),
-      staffEarnings: Array.from(staffEarnings.values()).sort((a: any, b: any) => (b.revenue || 0) - (a.revenue || 0)),
+      staffEarnings: reportStaffEarnings.sort((a, b) => b.revenue - a.revenue),
       trend,
     };
     return json(result);

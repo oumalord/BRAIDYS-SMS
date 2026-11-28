@@ -29,6 +29,64 @@ export function staffCommission(item: any, staffId: unknown): number {
   return 0;
 }
 
+export interface ReportStaffEarnings {
+  staffId: string;
+  name: string;
+  currency: string;
+  revenue: number;
+  commission: number;
+  assistantEarnings: number;
+  helperDeductions: number;
+  count: number;
+}
+
+export function calculateReportStaffEarnings(orders: any[], appointments: any[], staff: any[]): ReportStaffEarnings[] {
+  const staffById = new Map(staff.map(member => [String(member.id), member]));
+  const appointmentsById = new Map(appointments.map(appointment => [String(appointment.id), appointment]));
+  const earnings = new Map<string, ReportStaffEarnings>();
+  const add = (staffId: unknown, currency: string, values: Partial<ReportStaffEarnings>) => {
+    if (!staffId || !staffById.has(String(staffId))) return;
+    const id = String(staffId);
+    const key = `${id}|${currency}`;
+    const member = staffById.get(id);
+    const entry = earnings.get(key) || {
+      staffId: id, name: member?.name || 'Unknown', currency,
+      revenue: 0, commission: 0, assistantEarnings: 0, helperDeductions: 0, count: 0,
+    };
+    entry.revenue += values.revenue || 0;
+    entry.commission += values.commission || 0;
+    entry.assistantEarnings += values.assistantEarnings || 0;
+    entry.helperDeductions += values.helperDeductions || 0;
+    entry.count += values.count || 0;
+    earnings.set(key, entry);
+  };
+
+  for (const member of staff) add(member.id, 'KES', {});
+  for (const order of orders) {
+    const appointment = appointmentsById.get(String(order.appointmentId || ''));
+    for (const item of Array.isArray(order.items) ? order.items : []) {
+      if (item.type !== 'service') continue;
+      const currency = item.currency === 'USD' ? 'USD' : 'KES';
+      const revenue = Number(item.lineTotalAfterDiscount ?? Number(item.price || 0) * Number(item.qty || 1));
+      const quantity = Number(item.qty || 1);
+      const primaryStaffId = item.staffId || appointment?.staffId;
+      const staffIds = Array.from(new Set([primaryStaffId, item.coStaffId, item.thirdStaffId].filter(Boolean)));
+      const assistantFee = Math.max(0, Number(item.assistantPayment || item.helperDeduction || 0));
+      const commissionItem = primaryStaffId === item.staffId ? item : { ...item, staffId: primaryStaffId };
+      for (const staffId of staffIds) {
+        add(staffId, currency, {
+          revenue,
+          commission: staffCommission(commissionItem, staffId),
+          helperDeductions: String(staffId) === String(primaryStaffId || '') ? assistantFee : 0,
+          count: quantity,
+        });
+      }
+      if (item.helperStaffId) add(item.helperStaffId, currency, { assistantEarnings: assistantFee, count: quantity });
+    }
+  }
+  return Array.from(earnings.values());
+}
+
 export function staffAppointmentMinutes(appointment: any, staffId: unknown): number {
   const items = Array.isArray(appointment?.items) ? appointment.items : [];
   const assigned = items.filter((item: any) => String(item.staffId || '') === String(staffId || ''));

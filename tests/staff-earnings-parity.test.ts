@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { calculateUnpaidStaffEarnings, completedAppointmentStaffEarnings, currentSaturdayThroughFridayRange, currentSundayThroughNowRange, mostRecentSaturdayThroughFridayRange, paystackConfirmedPayoutItems, previousSaturdayThroughYesterdayRange, staffAppointmentMinutes } from '../backend/earnings.ts';
+import { calculateReportStaffEarnings, calculateUnpaidStaffEarnings, completedAppointmentStaffEarnings, currentSaturdayThroughFridayRange, currentSundayThroughNowRange, mostRecentSaturdayThroughFridayRange, paystackConfirmedPayoutItems, previousSaturdayThroughYesterdayRange, staffAppointmentMinutes } from '../backend/earnings.ts';
 
 const now = new Date(2026, 8, 26, 12, 0, 0).getTime();
 const startOfSunday = new Date(2026, 8, 20, 0, 0, 0).getTime();
@@ -151,6 +151,20 @@ test('earnings calculation includes the start and excludes the end of its reques
   ];
   const lines = calculateUnpaidStaffEarnings(orders, [], [], startOfSunday, startOfNextSunday);
   assert.deepEqual(lines.map(line => line.amount), [500, 300]);
+});
+
+test('report earnings include commission, assistant compensation, revenue and helper deductions', () => {
+  const order = orderAt(now, {
+    staffId: 'stylist', commission: 500, lineTotalAfterDiscount: 1000, assistantPayment: 60, helperStaffId: 'assistant',
+  });
+  const earnings = calculateReportStaffEarnings([order], [], [
+    { id: 'stylist', name: 'Stylist' }, { id: 'assistant', name: 'Assistant' },
+  ]);
+
+  assert.deepEqual(earnings, [
+    { staffId: 'stylist', name: 'Stylist', currency: 'KES', revenue: 1000, commission: 500, assistantEarnings: 0, helperDeductions: 60, count: 1 },
+    { staffId: 'assistant', name: 'Assistant', currency: 'KES', revenue: 0, commission: 0, assistantEarnings: 60, helperDeductions: 0, count: 1 },
+  ]);
 });
 
 test('shared earnings include every service role, payout exclusions and appointment fallback', () => {
