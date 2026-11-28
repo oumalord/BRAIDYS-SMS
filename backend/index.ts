@@ -1526,8 +1526,12 @@ export const handler = router({
     const range = String(query.period || 'current') === 'last-week'
       ? mostRecentSaturdayThroughFridayRange()
       : currentSaturdayThroughFridayRange();
-    const lines = calculateUnpaidStaffEarnings(data.orders, data.payoutItems, data.appointments, range.from, range.to, data.payrollItems)
+    const orderLines = calculateUnpaidStaffEarnings(data.orders, data.payoutItems, data.appointments, range.from, range.to, data.payrollItems)
       .filter(line => line.currency === 'KES');
+    const appointmentLines = data.staff.flatMap(member => completedAppointmentStaffEarnings(
+      data.appointments, data.orders, String(member.id), range.from, range.to, data.payoutItems, data.payrollItems,
+    )).filter(line => line.currency === 'KES');
+    const lines = [...orderLines, ...appointmentLines];
     const items = data.staff.map(member => {
       const staffLines = lines.filter(line => line.staffId === String(member.id));
       return {
@@ -1691,7 +1695,11 @@ export const handler = router({
     const tenantPayrollItems = (payrollItems as any[]).filter(item => contextIncludesRecord(item, context));
     const scopedBranchOrders = branchScopedPayrollOrders(tenantOrders, tenantAppointments, staffById, payrollContext);
     const branchPayoutItems = branchScopedPayrollPayoutItems(tenantPayoutItems, payrollContext);
-    const earnings = calculateUnpaidStaffEarnings(scopedBranchOrders, branchPayoutItems, tenantAppointments, from, to, tenantPayrollItems)
+    const orderEarnings = calculateUnpaidStaffEarnings(scopedBranchOrders, branchPayoutItems, tenantAppointments, from, to, tenantPayrollItems);
+    const appointmentEarnings = members.flatMap(member => completedAppointmentStaffEarnings(
+      tenantAppointments, scopedBranchOrders, String(member.id), from, to, branchPayoutItems, tenantPayrollItems,
+    ));
+    const earnings = [...orderEarnings, ...appointmentEarnings]
       .filter(line => staffById.has(line.staffId) && line.currency === 'KES');
     for (const earning of earnings) {
       const lines = earningsByStaffId.get(earning.staffId) || [];

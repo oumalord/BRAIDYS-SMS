@@ -122,6 +122,13 @@ test('completed appointments without POS orders earn commission without duplicat
   assert.equal(lines[0].itemKey, 'appointment:appointment-only:0:commission');
   assert.equal(lines[0].amount, 500);
   assert.equal(lines[0].createdAt, completedAt);
+  const earningKey = lines[0].itemKey;
+  const pendingPayment = completedAppointmentStaffEarnings(appointments, orders, 'stylist', appointmentDay,
+    appointmentDay + 24 * 60 * 60 * 1000, [{ itemKey: earningKey }], [{ provider: 'paystack', status: 'pending', itemKeys: [earningKey] }]);
+  const confirmedPayment = completedAppointmentStaffEarnings(appointments, orders, 'stylist', appointmentDay,
+    appointmentDay + 24 * 60 * 60 * 1000, [{ itemKey: earningKey }], [{ provider: 'paystack', status: 'success', itemKeys: [earningKey] }]);
+  assert.equal(pendingPayment.length, 1);
+  assert.equal(confirmedPayment.length, 0);
 });
 
 test('appointment date controls last-week earnings regardless of service time or completion time', () => {

@@ -65,8 +65,23 @@ export function confirmedPaystackItemKeys(payrollItems: any[]) {
     }));
 }
 
-export function completedAppointmentStaffEarnings(appointments: any[], orders: any[], staffId: string, from: number, to: number): StaffEarningLine[] {
+export function completedAppointmentStaffEarnings(
+  appointments: any[],
+  orders: any[],
+  staffId: string,
+  from: number,
+  to: number,
+  payoutItems: any[] = [],
+  payrollItems: any[] = [],
+): StaffEarningLine[] {
   const orderedAppointments = new Set(orders.filter(order => !order.deletedAt && order.appointmentId).map(order => String(order.appointmentId)));
+  const activePayoutItems = payrollItems.length
+    ? paystackConfirmedPayoutItems(payoutItems, payrollItems)
+    : payoutItems.filter(item => !item.deletedAt);
+  const paidKeys = new Set([
+    ...activePayoutItems.map(item => String(item.itemKey || '')).filter(Boolean),
+    ...confirmedPaystackItemKeys(payrollItems),
+  ]);
   const lines: StaffEarningLine[] = [];
   for (const appointment of appointments) {
     const appointmentId = String(appointment.id || '');
@@ -92,9 +107,10 @@ export function completedAppointmentStaffEarnings(appointments: any[], orders: a
       const commissionBase = Math.max(0, Number(item.commissionBase ?? revenue - productCost - helperDeduction) || 0);
       const role = String(item.helperStaffId || '') === staffId ? 'assistant' : 'commission';
       const amount = role === 'assistant' ? helperDeduction : staffCommission(earningItem, staffId);
-      if (amount <= 0) continue;
+      const itemKey = `appointment:${appointmentId}:${index}:${role}`;
+      if (amount <= 0 || paidKeys.has(itemKey)) continue;
       lines.push({
-        itemKey: `appointment:${appointmentId}:${index}:${role}`,
+        itemKey,
         orderId: `appointment:${appointmentId}`,
         staffId,
         serviceName: String(item.name || item.serviceName || appointment.serviceName || 'Service'),
