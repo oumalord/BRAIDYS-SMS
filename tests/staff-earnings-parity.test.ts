@@ -115,12 +115,25 @@ test('completed appointments without POS orders earn commission without duplicat
     { id: 'appointment-with-order', status: 'completed', completedAt, date: '2026-11-24', price: 1000, currency: 'KES', staffId: 'stylist' },
   ];
   const orders = [orderAt(completedAt, { staffId: 'stylist', commission: 500 }, { id: 'existing-order', appointmentId: 'appointment-with-order' })];
-  const lines = completedAppointmentStaffEarnings(appointments, orders, 'stylist', completedAt - 1000, completedAt + 1000);
+  const appointmentDay = Date.parse('2026-11-24T00:00:00+03:00');
+  const lines = completedAppointmentStaffEarnings(appointments, orders, 'stylist', appointmentDay, appointmentDay + 24 * 60 * 60 * 1000);
 
   assert.equal(lines.length, 1);
   assert.equal(lines[0].itemKey, 'appointment:appointment-only:0:commission');
   assert.equal(lines[0].amount, 500);
   assert.equal(lines[0].createdAt, completedAt);
+});
+
+test('appointment date controls last-week earnings regardless of service time or completion time', () => {
+  const period = mostRecentSaturdayThroughFridayRange(new Date('2026-11-28T16:00:00+03:00'));
+  const appointments = [
+    { id: 'before-cutoff', status: 'completed', completedAt: new Date('2026-11-28T00:30:00+03:00').getTime(), date: '2026-11-21', time: '16:59', price: 1000, currency: 'KES', staffId: 'stylist' },
+    { id: 'after-cutoff', status: 'completed', completedAt: new Date('2026-11-28T00:30:00+03:00').getTime(), date: '2026-11-21', time: '17:01', price: 1000, currency: 'KES', staffId: 'stylist' },
+  ];
+  const lines = completedAppointmentStaffEarnings(appointments, [], 'stylist', period.from, period.to);
+
+  assert.deepEqual(lines.map(line => line.orderId), ['appointment:before-cutoff', 'appointment:after-cutoff']);
+  assert.deepEqual(lines.map(line => line.amount), [500, 500]);
 });
 
 test('earnings calculation includes the start and excludes the end of its requested range', () => {

@@ -1479,7 +1479,8 @@ export const handler = router({
     const appointmentsById = new Map(data.appointments.map(item => [String(item.id), item]));
     const earningDate = (line: any) => {
       const order: any = ordersById.get(line.orderId);
-      const appointment: any = appointmentsById.get(String(order?.appointmentId || ''));
+      const appointmentId = String(order?.appointmentId || (line.orderId.startsWith('appointment:') ? line.orderId.slice('appointment:'.length) : ''));
+      const appointment: any = appointmentsById.get(appointmentId);
       const date = String(appointment?.date || '');
       const appointmentDate = /^\d{4}-\d{2}-\d{2}$/.test(date) ? Date.parse(`${date}T00:00:00+03:00`) : Number.NaN;
       return Number.isFinite(appointmentDate) ? appointmentDate : Number(line.createdAt || 0);
@@ -1504,10 +1505,7 @@ export const handler = router({
       };
     };
     const completedWork = weekLines.filter(line => line.amount > 0).map(describeWork);
-    const lastWeekWork = lastWeekLines.filter(line => line.amount > 0).map(line => ({
-      serviceName: line.serviceName, appointmentDate: (appointmentsById.get(String((ordersById.get(line.orderId) as any)?.appointmentId || '')) as any)?.date || null,
-      createdAt: line.createdAt, role: line.role, amount: line.amount,
-    }));
+    const lastWeekWork = lastWeekLines.filter(line => line.amount > 0).map(describeWork);
     const paidHistory = allLines.filter(line => paidKeys.has(line.itemKey) && line.amount > 0).map(line => ({
       serviceName: line.serviceName, createdAt: line.createdAt,
       paidAt: Number(paidItems.find(item => String(item.itemKey || '') === line.itemKey)?.paidAt || 0) || undefined,

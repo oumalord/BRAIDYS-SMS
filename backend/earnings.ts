@@ -72,10 +72,12 @@ export function completedAppointmentStaffEarnings(appointments: any[], orders: a
     const appointmentId = String(appointment.id || '');
     if (!appointmentId || appointment.deletedAt || String(appointment.status || '').toLowerCase() !== 'completed' || orderedAppointments.has(appointmentId)) continue;
     const date = String(appointment.date || '');
-    const time = String(appointment.time || '12:00');
-    const scheduledAt = /^\d{4}-\d{2}-\d{2}$/.test(date) ? Date.parse(`${date}T${time}:00+03:00`) : Number.NaN;
-    const completedAt = Number(appointment.completedAt || appointment.updatedAt) || (Number.isFinite(scheduledAt) ? scheduledAt : Number(appointment.createdAt || 0));
-    if (completedAt < from || completedAt >= to) continue;
+    const appointmentDateStart = /^\d{4}-\d{2}-\d{2}$/.test(date)
+      ? Date.parse(`${date}T00:00:00+03:00`)
+      : Number.NaN;
+    const completedAt = Number(appointment.completedAt || appointment.updatedAt) || Number(appointment.createdAt || 0);
+    const earningDate = Number.isFinite(appointmentDateStart) ? appointmentDateStart : completedAt;
+    if (earningDate < from || earningDate >= to) continue;
     const serviceItems = Array.isArray(appointment.items) && appointment.items.length
       ? appointment.items
       : [{ name: appointment.serviceName, price: appointment.price, currency: appointment.currency, staffId: appointment.staffId }];
