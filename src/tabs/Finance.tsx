@@ -15,12 +15,14 @@ function todayInNairobi() {
   return `${part('year')}-${part('month')}-${part('day')}`;
 }
 
-function nextSaturdayMidnightInNairobi() {
+function nextSaturdayPayrollStartInNairobi() {
   const [year, month, day] = todayInNairobi().split('-').map(Number);
   const target = new Date(Date.UTC(year, month - 1, day));
-  const daysUntilSaturday = (6 - target.getUTCDay() + 7) % 7 || 7;
+  const nairobiHour = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'Africa/Nairobi', hour: '2-digit', hourCycle: 'h23' }).format(new Date()));
+  let daysUntilSaturday = (6 - target.getUTCDay() + 7) % 7;
+  if (daysUntilSaturday === 0 && nairobiHour >= 17) daysUntilSaturday = 7;
   target.setUTCDate(target.getUTCDate() + daysUntilSaturday);
-  return Date.UTC(target.getUTCFullYear(), target.getUTCMonth(), target.getUTCDate()) - 3 * 60 * 60 * 1000;
+  return Date.UTC(target.getUTCFullYear(), target.getUTCMonth(), target.getUTCDate()) - 3 * 60 * 60 * 1000 + 17 * 60 * 60 * 1000;
 }
 
 function Finance() {
@@ -60,12 +62,12 @@ function Finance() {
   const loadPayroll = () => {
     setPayrollLoading(true);
     setPayrollError('');
-    PayrollApi.staff('current')
-      .then(payroll => {
-        setStaff(payroll.items);
-        setLastWeekStaff(payroll.items);
-        setPayrollPeriod(payroll.period);
-        setLastWeekPeriod(payroll.period);
+    Promise.all([PayrollApi.staff('current'), PayrollApi.staff('last-week')])
+      .then(([currentPayroll, lastWeekPayroll]) => {
+        setStaff(currentPayroll.items);
+        setPayrollPeriod(currentPayroll.period);
+        setLastWeekStaff(lastWeekPayroll.items);
+        setLastWeekPeriod(lastWeekPayroll.period);
       })
       .catch((cause: any) => setPayrollError(cause?.message || 'Could not load this week’s payroll data.'))
       .finally(() => setPayrollLoading(false));
@@ -98,7 +100,7 @@ function Finance() {
       refreshAtWeekStart();
       const retry = window.setInterval(refreshAtWeekStart, 60_000);
       rolloverRetry = retry;
-    }, Math.max(0, nextSaturdayMidnightInNairobi() - Date.now()));
+    }, Math.max(0, nextSaturdayPayrollStartInNairobi() - Date.now()));
     return () => {
       window.clearTimeout(timeout);
       if (rolloverRetry !== undefined) window.clearInterval(rolloverRetry);
@@ -132,7 +134,7 @@ function Finance() {
   };
 
   const sendPayroll = async () => {
-    const recipients = staff.map(member => ({ staffId: member.id, amountKES: (member.commissionEarnedWeek || 0) + (member.assistantEarnedWeek || 0), phone: member.phone })).filter(recipient => recipient.amountKES > 0);
+    const recipients = lastWeekStaff.map(member => ({ staffId: member.id, amountKES: (member.commissionEarnedWeek || 0) + (member.assistantEarnedWeek || 0), phone: member.phone })).filter(recipient => recipient.amountKES > 0);
     if (!recipients.length) { toast('Enter a salary amount for at least one employee.', 'error'); return; }
     if (recipients.some(recipient => !/^(?:\+?254|0)[17]\d{8}$/.test(recipient.phone.replace(/\s+/g, '')))) { toast('Every selected employee needs a valid Kenyan phone number.', 'error'); return; }
     if (!window.confirm(`Send ${fmtMoney(recipients.reduce((sum, recipient) => sum + recipient.amountKES, 0), 'KES')} to ${recipients.length} employees now?`)) return;
@@ -151,10 +153,10 @@ function Finance() {
     const recipients = paystackRecipients;
     if (!recipients.length) { toast('No unpaid KES earnings are available to transfer.', 'error'); return; }
     const totalKES = recipients.reduce((sum, item) => sum + item.amountKES, 0);
-    if (!window.confirm(`Submit ${fmtMoney(totalKES, 'KES')} for ${recipients.length} staff member${recipients.length === 1 ? '' : 's'} to Paystack for this week (${payrollDateRange})? Earnings will be marked paid only after Paystack confirms each transfer.`)) return;
+    if (!window.confirm(`Submit ${fmtMoney(totalKES, 'KES')} for ${recipients.length} staff member${recipients.length === 1 ? '' : 's'} to Paystack for last week (${lastWeekDateRange})? Earnings will be marked paid only after Paystack confirms each transfer.`)) return;
     setPayrollSending(true);
     try {
-      const response = await PayrollApi.sendPaystack(recipients.map(({ member }) => member.id), Object.fromEntries(recipients.map(({ member, amountKES }) => [member.id, amountKES])), 'current');
+      const response = await PayrollApi.sendPaystack(recipients.map(({ member }) => member.id), Object.fromEntries(recipients.map(({ member, amountKES }) => [member.id, amountKES])), 'last-week');
       const result = response.data;
       toast(`Paystack accepted ${result.pendingCount + result.successCount}/${result.employeeCount} transfers. Only confirmed transfers are marked paid.`, 'success');
       loadPayroll();
@@ -205,18 +207,23 @@ function Finance() {
   const staffEarningsKES = data?.commissionsByCurrency.KES || 0;
   const profitKES = data?.estimatedProfitByCurrency.KES || 0;
   const payrollDateFormatter = new Intl.DateTimeFormat(undefined, { timeZone: 'Africa/Nairobi' });
-  const payrollDateRange = payrollPeriod
+  const currentPayrollDateRange = payrollPeriod
     ? `${payrollDateFormatter.format(new Date(payrollPeriod.from))} – ${payrollDateFormatter.format(new Date(Math.max(payrollPeriod.from, payrollPeriod.to - 1)))}`
-    : 'Saturday through Friday';
-  const selectedEarningsLabel = payrollDateRange;
+    : 'Saturday 17:00 through the following Saturday 17:00 EAT';
+  const lastWeekDateRange = lastWeekPeriod
+    ? `${payrollDateFormatter.format(new Date(lastWeekPeriod.from))} – ${payrollDateFormatter.format(new Date(Math.max(lastWeekPeriod.from, lastWeekPeriod.to - 1)))}`
+    : 'last Saturday at 17:00 through this Saturday at 17:00 EAT';
+  const selectedEarningsLabel = currentPayrollDateRange;
   const totalUnpaidEarnings = (member: Staff) => Number(member.commissionEarnedWeek || 0) + Number(member.assistantEarnedWeek || 0);
-  const payrollStaff = staff.filter(member => member.employmentStatus !== 'laid-off')
+  const currentPayrollStaff = staff.filter(member => member.employmentStatus !== 'laid-off')
+    .sort((first, second) => totalUnpaidEarnings(second) - totalUnpaidEarnings(first) || first.name.localeCompare(second.name));
+  const payrollStaff = lastWeekStaff.filter(member => member.employmentStatus !== 'laid-off')
     .sort((first, second) => totalUnpaidEarnings(second) - totalUnpaidEarnings(first) || first.name.localeCompare(second.name));
   const paystackRecipients = payrollStaff.map(member => ({ member, amountKES: Math.round(totalUnpaidEarnings(member)) })).filter(item => item.amountKES > 0);
   const paystackRecipientsMissingCount = paystackRecipients.filter(({ member }) => member.paystackRecipientMode !== 'live'
     || !/^RCP_[A-Za-z0-9]+$/.test(String(member.paystackRecipientCode || ''))).length;
   const paystackDepositTotalKES = paystackRecipients.reduce((sum, recipient) => sum + recipient.amountKES, 0);
-  const weeklyStaffEarnings = payrollStaff.map(member => {
+  const weeklyStaffEarnings = currentPayrollStaff.map(member => {
     const commission = Number(member.commissionEarnedWeek || 0);
     const assistantEarnings = Number(member.assistantEarnedWeek || 0);
     return {
@@ -261,15 +268,15 @@ function Finance() {
     timeZone: 'Africa/Nairobi', day: 'numeric', month: 'long', year: 'numeric',
   }).format(new Date(`${dailyDate}T12:00:00+03:00`));
   const downloadPayroll = () => {
-    const startDate = payrollPeriod ? new Date(payrollPeriod.from) : new Date();
-    const endDate = payrollPeriod ? new Date(payrollPeriod.to) : new Date();
+    const startDate = lastWeekPeriod ? new Date(lastWeekPeriod.from) : new Date();
+    const endDate = lastWeekPeriod ? new Date(lastWeekPeriod.to) : new Date();
     const dateKey = (date: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Nairobi', year: 'numeric', month: '2-digit', day: '2-digit' }).format(date);
     const totalCommission = payrollStaff.reduce((sum, member) => sum + (member.commissionEarnedWeek || 0), 0);
     const totalAssistant = payrollStaff.reduce((sum, member) => sum + (member.assistantEarnedWeek || 0), 0);
     const totalPayable = payrollStaff.reduce((sum, member) => sum + Math.round((member.commissionEarnedWeek || 0) + (member.assistantEarnedWeek || 0)), 0);
     const rows: (string | number)[][] = [
       ['BRAIDY SALON weekly payroll'],
-      ['Earnings period', payrollDateRange],
+      ['Earnings period', lastWeekDateRange],
       ['Generated', new Date().toLocaleString()],
       [],
       ['Staff ID', 'Staff name', 'Role', 'Phone', 'Branch', 'Commission (KES)', 'Assistant earnings (KES)', 'Total earnings (KES)'],
@@ -292,7 +299,7 @@ function Finance() {
           {financeView === 'overview' && <Select aria-label="Date range" value={range} onChange={e => setRange(e.target.value as Range)} className="w-auto" style={{ width: 'auto' }}>
             <option value="today">Today</option><option value="week">This Week</option><option value="month">This Month</option><option value="all">All Time</option>
           </Select>}
-          <Button variant="secondary" onClick={sendPaystackPayroll} disabled={payrollSending || payrollLoading || !paystackConfigured || !canSendPaystack || !paystackRecipients.length || paystackRecipientsMissingCount > 0} title={paystackConfigured ? 'Submit this week’s unpaid staff earnings through Paystack' : 'Configure Paystack to enable payroll transfers'}><Receipt size={16} aria-hidden="true" />Pay</Button>
+          <Button variant="secondary" onClick={sendPaystackPayroll} disabled={payrollSending || payrollLoading || !paystackConfigured || !canSendPaystack || !paystackRecipients.length || paystackRecipientsMissingCount > 0} title={paystackConfigured ? 'Submit last week’s unpaid staff earnings through Paystack' : 'Configure Paystack to enable payroll transfers'}><Receipt size={16} aria-hidden="true" />Pay</Button>
           <Button onClick={() => setOpen(true)}><Plus size={16} aria-hidden="true" />Add Expense</Button>
           <Button variant="danger" onClick={() => setEarningsDeleteOpen(true)}>Clear paid earnings</Button>
         </div>
@@ -359,7 +366,7 @@ function Finance() {
             </div>
           </Card>
           <Card className="p-6">
-            <div className="mb-3"><h2 className="font-semibold mb-1">This Week’s Unpaid Staff Earnings</h2><p className="text-xs text-[#6E6E73]">{isOwner ? 'Across all branches. ' : ''}Unpaid KES commissions and assistant compensation for {selectedEarningsLabel}. Paid earnings are excluded; the period starts again Saturday at midnight.</p></div>
+            <div className="mb-3"><h2 className="font-semibold mb-1">This Week’s Unpaid Staff Earnings</h2><p className="text-xs text-[#6E6E73]">{isOwner ? 'Across all branches. ' : ''}Unpaid KES commissions and assistant compensation for {selectedEarningsLabel}. Paid earnings are excluded; a new period starts Saturday at 17:00 EAT.</p></div>
             {payrollLoading ? <p className="text-sm text-[#6E6E73]">Loading this week’s unpaid earnings…</p> : payrollError ? <p role="status" className="text-sm text-amber-700">{payrollError}</p> : weeklyStaffEarnings.length === 0 ? <p className="text-sm text-[#6E6E73]">No unpaid staff earnings this week.</p> : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
@@ -381,10 +388,10 @@ function Finance() {
       )}
 
       <Card className="p-6">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4"><div><h2 className="font-semibold">Unpaid payroll</h2><p className="text-xs text-[#6E6E73]">Current Saturday-to-Friday period: {payrollDateRange}. Earnings are counted only once an appointment is completed.</p></div><div className="flex flex-wrap gap-2"><Button variant="secondary" onClick={downloadPayroll} disabled={payrollLoading || !payrollStaff.length}><Download size={16} aria-hidden="true" />Download payroll CSV</Button><Button variant="secondary" onClick={loadPayroll} disabled={payrollLoading}>{payrollLoading ? 'Refreshing…' : 'Refresh payroll'}</Button><Button variant="secondary" onClick={sendPayroll} disabled={payrollSending || payrollLoading}>{payrollSending ? 'Sending…' : 'Send M-Pesa batch'}</Button>{canSendPaystack && <><Button variant="secondary" onClick={syncPaystackRecipients} disabled={recipientsSyncing || payrollSending || payrollLoading}><Users size={16} aria-hidden="true" />{recipientsSyncing ? 'Syncing…' : 'Sync recipients'}</Button>{paystackConfigured && <Button onClick={sendPaystackPayroll} disabled={payrollSending || payrollLoading || recipientsSyncing || !paystackRecipients.length || paystackRecipientsMissingCount > 0}>{payrollSending ? 'Submitting…' : 'Pay'}</Button>}</>}</div></div>
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4"><div><h2 className="font-semibold">Last week’s unpaid payroll</h2><p className="text-xs text-[#6E6E73]">Completed period: {lastWeekDateRange}. Earnings are counted only once an appointment is completed.</p></div><div className="flex flex-wrap gap-2"><Button variant="secondary" onClick={downloadPayroll} disabled={payrollLoading || !payrollStaff.length}><Download size={16} aria-hidden="true" />Download payroll CSV</Button><Button variant="secondary" onClick={loadPayroll} disabled={payrollLoading}>{payrollLoading ? 'Refreshing…' : 'Refresh payroll'}</Button><Button variant="secondary" onClick={sendPayroll} disabled={payrollSending || payrollLoading}>{payrollSending ? 'Sending…' : 'Send M-Pesa batch'}</Button>{canSendPaystack && <><Button variant="secondary" onClick={syncPaystackRecipients} disabled={recipientsSyncing || payrollSending || payrollLoading}><Users size={16} aria-hidden="true" />{recipientsSyncing ? 'Syncing…' : 'Sync recipients'}</Button>{paystackConfigured && <Button onClick={sendPaystackPayroll} disabled={payrollSending || payrollLoading || recipientsSyncing || !paystackRecipients.length || paystackRecipientsMissingCount > 0}>{payrollSending ? 'Submitting…' : 'Pay'}</Button>}</>}</div></div>
         {paystackConfigured ? <p className="mb-3 text-xs text-[#6E6E73]">Live Paystack KES transfers are configured. Sync recipients before sending; each click submits one bulk transfer request to their registered M-PESA numbers.</p> : <p className="mb-3 text-xs text-[#6E6E73]">Paystack payroll requires a live secret key in the backend environment.</p>}
         {paystackConfigured && paystackRecipientsMissingCount > 0 && <p role="status" className="mb-3 text-xs text-amber-700">{paystackRecipientsMissingCount} staff recipient{paystackRecipientsMissingCount === 1 ? '' : 's'} need syncing before Paystack can send.</p>}
-        {!payrollLoading && !payrollError && <div className="my-4 flex flex-col gap-1 border-y border-black/10 py-3 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-sm font-semibold">Paystack deposit needed</p><p className="text-xs text-[#6E6E73]">Unpaid KES earnings from this week ({payrollDateRange}) for {paystackRecipients.length} staff member{paystackRecipients.length === 1 ? '' : 's'}, rounded per person.</p></div><p className="text-lg font-semibold">{fmtMoney(paystackDepositTotalKES, 'KES')}</p></div>}
+        {!payrollLoading && !payrollError && <div className="my-4 flex flex-col gap-1 border-y border-black/10 py-3 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-sm font-semibold">Paystack deposit needed</p><p className="text-xs text-[#6E6E73]">Unpaid KES earnings from last week ({lastWeekDateRange}) for {paystackRecipients.length} staff member{paystackRecipients.length === 1 ? '' : 's'}, rounded per person.</p></div><p className="text-lg font-semibold">{fmtMoney(paystackDepositTotalKES, 'KES')}</p></div>}
         {payrollLoading ? <p className="text-sm text-[#6E6E73]">Loading staff payroll…</p> : payrollError ? <p role="alert" className="text-sm text-amber-700">{payrollError} Use “Refresh payroll” to try again.</p> : payrollStaff.length === 0 ? <p className="text-sm text-[#6E6E73]">No active staff records were returned for payroll.</p> : <div className="space-y-2">{payrollStaff.map(member => { const commission = member.commissionEarnedWeek || 0; const assistant = member.assistantEarnedWeek || 0; const calculated = Math.round(commission + assistant); return <div key={member.id} className="flex items-center justify-between gap-3 border-b border-black/5 pb-2"><div><p className="text-sm font-medium">{member.name}</p><p className="text-xs text-[#6E6E73]">{member.phone || 'No phone number'} · {member.branchName || member.branch}</p><p className="text-xs text-[#6E6E73]">Commission {fmtMoney(commission, 'KES')} + assistant compensation {fmtMoney(assistant, 'KES')}</p></div><p className="font-semibold text-sm">{fmtMoney(calculated, 'KES')}</p></div>; })}</div>}
       </Card>
 

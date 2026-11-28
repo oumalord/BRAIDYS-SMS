@@ -143,28 +143,21 @@ export function previousSaturdayThroughYesterdayRange(date = new Date()) {
 }
 
 export function mostRecentSaturdayThroughFridayRange(date = new Date()) {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Africa/Nairobi', year: 'numeric', month: '2-digit', day: '2-digit',
-  }).formatToParts(date);
-  const part = (type: string) => Number(parts.find(value => value.type === type)?.value);
-  const today = new Date(Date.UTC(part('year'), part('month') - 1, part('day')));
-  const latestSaturday = new Date(today);
-  const daysSinceSaturday = (today.getUTCDay() + 1) % 7;
-  latestSaturday.setUTCDate(today.getUTCDate() - daysSinceSaturday);
-  const to = Date.UTC(latestSaturday.getUTCFullYear(), latestSaturday.getUTCMonth(), latestSaturday.getUTCDate()) - 3 * 60 * 60 * 1000;
-  return { from: to - 7 * 24 * 60 * 60 * 1000, to };
+  const current = currentSaturdayThroughFridayRange(date);
+  return { from: current.from - 7 * 24 * 60 * 60 * 1000, to: current.from };
 }
 
 export function currentSaturdayThroughFridayRange(date = new Date()) {
   const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Africa/Nairobi', year: 'numeric', month: '2-digit', day: '2-digit',
+    timeZone: 'Africa/Nairobi', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hourCycle: 'h23',
   }).formatToParts(date);
   const part = (type: string) => Number(parts.find(value => value.type === type)?.value);
   const today = new Date(Date.UTC(part('year'), part('month') - 1, part('day')));
   const currentSaturday = new Date(today);
   const daysSinceSaturday = (today.getUTCDay() + 1) % 7;
   currentSaturday.setUTCDate(today.getUTCDate() - daysSinceSaturday);
-  const from = Date.UTC(currentSaturday.getUTCFullYear(), currentSaturday.getUTCMonth(), currentSaturday.getUTCDate()) - 3 * 60 * 60 * 1000;
+  if (today.getUTCDay() === 6 && part('hour') < 17) currentSaturday.setUTCDate(currentSaturday.getUTCDate() - 7);
+  const from = Date.UTC(currentSaturday.getUTCFullYear(), currentSaturday.getUTCMonth(), currentSaturday.getUTCDate()) - 3 * 60 * 60 * 1000 + 17 * 60 * 60 * 1000;
   return { from, to: from + 7 * 24 * 60 * 60 * 1000 };
 }
 
@@ -176,7 +169,10 @@ export function calculateUnpaidStaffEarnings(
   to: number,
   payrollItems: any[] = [],
 ): StaffEarningLine[] {
-  const activePayoutKeys = new Set(payoutItems.filter(item => !item.deletedAt).map(item => String(item.itemKey || '')).filter(Boolean));
+  const activePayoutItems = payrollItems.length
+    ? paystackConfirmedPayoutItems(payoutItems, payrollItems)
+    : payoutItems.filter(item => !item.deletedAt);
+  const activePayoutKeys = new Set(activePayoutItems.map(item => String(item.itemKey || '')).filter(Boolean));
   const paidKeys = new Set([...activePayoutKeys, ...confirmedPaystackItemKeys(payrollItems)]);
   const appointmentsById = new Map(appointments.map(appointment => [String(appointment.id), appointment]));
   const lines: StaffEarningLine[] = [];

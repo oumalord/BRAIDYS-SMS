@@ -14,7 +14,6 @@ function EmployeeDashboard({ account, onAddService }: { account: { name?: string
   const [lastWeekEarnings, setLastWeekEarnings] = useState(0);
   const [dailyCommission, setDailyCommission] = useState(0);
   const [dailyAssistant, setDailyAssistant] = useState(0);
-  const [completedWork, setCompletedWork] = useState<{ serviceName: string; customerName: string; appointmentDate: string | null; appointmentTime: string | null; appointmentId: string | null; cardNumber: string | null; createdAt: number; role: 'commission' | 'assistant'; amount: number }[]>([]);
   const [lastWeekWork, setLastWeekWork] = useState<{ serviceName: string; customerName: string; appointmentDate: string | null; appointmentTime: string | null; appointmentId: string | null; cardNumber: string | null; createdAt: number; role: 'commission' | 'assistant'; amount: number }[]>([]);
   const [waitingClients, setWaitingClients] = useState<Appointment[]>([]);
   const [earningsLoading, setEarningsLoading] = useState(true);
@@ -49,14 +48,9 @@ function EmployeeDashboard({ account, onAddService }: { account: { name?: string
       setEarningsError('');
       setDailyEarnings(earnings.today.total || 0);
       setWeekToDateEarnings((earnings.week || earnings.fortnight).total || 0);
-      const nairobiHour = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'Africa/Nairobi', hour: '2-digit', hourCycle: 'h23' }).format(new Date()).replace(/[^0-9]/g, ''));
-      const nairobiSaturday = new Date(`${todayStr()}T12:00:00+03:00`).getUTCDay() === 6;
-      const rolledOver = nairobiSaturday && nairobiHour >= 17;
-      setLastWeekEarnings(rolledOver ? earnings.week?.total || 0 : earnings.lastWeek?.total || 0);
-      setLastWeekWork(nairobiSaturday && nairobiHour >= 17 ? earnings.completedWork || [] : earnings.lastWeekWork || []);
+      setLastWeekEarnings(earnings.lastWeek?.total || 0);
       setDailyCommission(earnings.today.commission || 0);
       setDailyAssistant(earnings.today.assistant || 0);
-      setCompletedWork(earnings.completedWork || []);
       setLastWeekWork(earnings.lastWeekWork || []);
       setLastWeekPeriod(earnings.lastWeek?.period || null);
     }).catch((cause: any) => {

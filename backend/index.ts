@@ -1,6 +1,6 @@
 import { router, json, error, db, ai, storage, currentContext, withRequestContext } from './runtime.ts';
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
-import { calculateUnpaidStaffEarnings, completedAppointmentStaffEarnings, currentSaturdayThroughFridayRange, currentSundayThroughNowRange, paystackConfirmedPayoutItems, staffAppointmentMinutes, staffCommission } from './earnings.ts';
+import { calculateUnpaidStaffEarnings, completedAppointmentStaffEarnings, currentSaturdayThroughFridayRange, currentSundayThroughNowRange, mostRecentSaturdayThroughFridayRange, paystackConfirmedPayoutItems, staffAppointmentMinutes, staffCommission } from './earnings.ts';
 import { hasSufficientPaystackPrincipalBalance, toPaystackMinorAmount, verifyPaystackSignature } from './paystack.ts';
 
 const DAY = 24 * 3600 * 1000;
@@ -1418,7 +1418,7 @@ export const handler = router({
     const anchor = date ? new Date(`${date}T12:00:00+03:00`) : new Date();
     if (Number.isNaN(anchor.getTime())) return error('Choose a valid date', 400);
     const range = String(query.period || '') === 'last-week'
-      ? currentSaturdayThroughFridayRange(new Date(anchor.getTime() - 7 * DAY))
+      ? mostRecentSaturdayThroughFridayRange(anchor)
       : currentSaturdayThroughFridayRange(anchor);
     const rangeTo = Math.min(range.to, Date.now() + 1);
     const payrollContext = context.role === 'owner' ? { ...context, branchId: undefined } : context;
@@ -1466,7 +1466,7 @@ export const handler = router({
     const now = Date.now();
     const todayRange = nairobiDayRange(nairobiDateString());
     const weekRange = currentSaturdayThroughFridayRange();
-    const lastWeekRange = currentSaturdayThroughFridayRange(new Date(now - 7 * DAY));
+    const lastWeekRange = mostRecentSaturdayThroughFridayRange();
     const fortnightFrom = weekRange.from - 7 * DAY;
     const orderLines = calculateUnpaidStaffEarnings(data.orders, [], data.appointments, 0, Number.MAX_SAFE_INTEGER)
       .filter(line => line.staffId === String(context.staffId) && line.currency === 'KES');
@@ -1487,14 +1487,15 @@ export const handler = router({
     const inRange = (lines: any[], from: number, to: number) => lines.filter(line => earningDate(line) >= from && earningDate(line) < to);
     const unpaid = (lines: any[]) => lines.filter(line => !paidKeys.has(line.itemKey));
     const total = (lines: any[], role?: string) => lines.filter(line => !role || line.role === role).reduce((sum, line) => sum + Number(line.amount || 0), 0);
-    const todayLines = allLines.filter(line => Number(line.createdAt || 0) >= (todayRange?.from || 0)
-      && Number(line.createdAt || 0) < (todayRange?.to || now + 1));
-    const weekLines = inRange(allLines, weekRange.from, Math.min(weekRange.to, now + 1));
+    const todayLines = unpaid(allLines.filter(line => Number(line.createdAt || 0) >= (todayRange?.from || 0)
+      && Number(line.createdAt || 0) < (todayRange?.to || now + 1)));
+    const weekLines = unpaid(inRange(allLines, weekRange.from, Math.min(weekRange.to, now + 1)));
     const lastWeekLines = unpaid(inRange(allLines, lastWeekRange.from, lastWeekRange.to));
     const fortnightLines = unpaid(inRange(allLines, fortnightFrom, Math.min(weekRange.to, now + 1)));
     const describeWork = (line: any) => {
       const order: any = ordersById.get(line.orderId);
-      const appointment: any = appointmentsById.get(String(order?.appointmentId || ''));
+      const appointmentId = String(order?.appointmentId || (line.orderId.startsWith('appointment:') ? line.orderId.slice('appointment:'.length) : ''));
+      const appointment: any = appointmentsById.get(appointmentId);
       return {
         serviceName: line.serviceName, customerName: order?.customerName || appointment?.customerName || 'Customer',
         appointmentDate: appointment?.date || null, appointmentTime: appointment?.time || null,
@@ -1525,7 +1526,7 @@ export const handler = router({
     const payrollContext = context.role === 'owner' ? { ...context, branchId: undefined } : context;
     const data = await loadStaffEarningsData(payrollContext);
     const range = String(query.period || 'current') === 'last-week'
-      ? currentSaturdayThroughFridayRange(new Date(Date.now() - 7 * DAY))
+      ? mostRecentSaturdayThroughFridayRange()
       : currentSaturdayThroughFridayRange();
     const lines = calculateUnpaidStaffEarnings(data.orders, data.payoutItems, data.appointments, range.from, range.to, data.payrollItems)
       .filter(line => line.currency === 'KES');
@@ -1670,7 +1671,9 @@ export const handler = router({
     const requestedIds = Array.isArray(body?.staffIds) ? Array.from(new Set(body.staffIds.map((id: unknown) => String(id || '').trim()).filter(Boolean))) : [];
     if (!requestedIds.length) return error('Select at least one staff member for payroll.', 400);
     if (requestedIds.length > 100) return error('Paystack bulk transfers support up to 100 recipients per batch.', 400);
-
+    const period = String(body?.period || 'current');
+    if (period !== 'current' && period !== 'last-week') return error('Choose a valid payroll period.', 400);
+    const { from, to } = period === 'last-week' ? mostRecentSaturdayThroughFridayRange() : currentSaturdayThroughFridayRange();
     const [{ items: staffRows }, { items: orders }, { items: payoutItems }, { items: appointments }, { items: payrollItems }] = await Promise.all([
       db.list('staff', { limit: 2000 }), db.list('orders', { limit: 5000 }), db.list('payout_items', { limit: 10000 }),
       db.list('appointments', { limit: 5000 }), db.list('payroll_items', { limit: 5000 }),
@@ -1690,7 +1693,6 @@ export const handler = router({
     const tenantPayrollItems = (payrollItems as any[]).filter(item => contextIncludesRecord(item, context));
     const scopedBranchOrders = branchScopedPayrollOrders(tenantOrders, tenantAppointments, staffById, payrollContext);
     const branchPayoutItems = branchScopedPayrollPayoutItems(tenantPayoutItems, payrollContext);
-    const { from, to } = currentSaturdayThroughFridayRange();
     const earnings = calculateUnpaidStaffEarnings(scopedBranchOrders, branchPayoutItems, tenantAppointments, from, to, tenantPayrollItems)
       .filter(line => staffById.has(line.staffId) && line.currency === 'KES');
     for (const earning of earnings) {
@@ -2067,7 +2069,7 @@ export const handler = router({
     const { items: payouts } = await db.list('payout_items', { limit: 10000 });
     const now = Date.now();
     const weekRange = currentSaturdayThroughFridayRange();
-    const lastWeekRange = currentSaturdayThroughFridayRange(new Date(now - 7 * DAY));
+    const lastWeekRange = mostRecentSaturdayThroughFridayRange();
     const monthRange = currentSundayThroughNowRange();
     const lastMonthRange = currentSundayThroughNowRange(new Date(now - 30 * DAY));
 

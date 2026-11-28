@@ -25,10 +25,10 @@ test('payroll date range is the previous Saturday through yesterday in Nairobi',
   assert.deepEqual(lines.map(line => line.amount), [100, 200]);
 });
 
-test('previous completed earnings period is Saturday through Friday in Nairobi', () => {
+test('previous completed earnings period runs Saturday 17:00 through the following Saturday 17:00 in Nairobi', () => {
   const range = mostRecentSaturdayThroughFridayRange(new Date('2026-11-07T12:00:00+03:00'));
-  assert.equal(new Date(range.from).toISOString(), '2026-10-30T21:00:00.000Z');
-  assert.equal(new Date(range.to).toISOString(), '2026-11-06T21:00:00.000Z');
+  assert.equal(new Date(range.from).toISOString(), '2026-10-24T14:00:00.000Z');
+  assert.equal(new Date(range.to).toISOString(), '2026-10-31T14:00:00.000Z');
   const orders = [
     orderAt(range.from, { staffId: 'stylist', commission: 100 }),
     orderAt(range.to - 1, { staffId: 'stylist', commission: 200 }),
@@ -38,10 +38,10 @@ test('previous completed earnings period is Saturday through Friday in Nairobi',
   assert.deepEqual(lines.map(line => line.amount), [100, 200]);
 });
 
-test('active earnings period rolls from Saturday through the following Friday in Nairobi', () => {
+test('active earnings period rolls from Saturday 17:00 to the following Saturday 17:00 in Nairobi', () => {
   const range = currentSaturdayThroughFridayRange(new Date('2026-11-09T12:00:00+03:00'));
-  assert.equal(new Date(range.from).toISOString(), '2026-11-06T21:00:00.000Z');
-  assert.equal(new Date(range.to).toISOString(), '2026-11-13T21:00:00.000Z');
+  assert.equal(new Date(range.from).toISOString(), '2026-11-07T14:00:00.000Z');
+  assert.equal(new Date(range.to).toISOString(), '2026-11-14T14:00:00.000Z');
   const orders = [
     orderAt(range.from, { staffId: 'stylist', commission: 100 }),
     orderAt(range.to - 1, { staffId: 'stylist', commission: 200 }),
@@ -51,23 +51,23 @@ test('active earnings period rolls from Saturday through the following Friday in
   assert.deepEqual(lines.map(line => line.amount), [100, 200]);
 });
 
-test('earnings week changes at Saturday midnight in Nairobi', () => {
-  const justBeforeMidnight = currentSaturdayThroughFridayRange(new Date('2026-11-13T23:59:59.999+03:00'));
-  const atMidnight = currentSaturdayThroughFridayRange(new Date('2026-11-14T00:00:00+03:00'));
-  const lastWeek = mostRecentSaturdayThroughFridayRange(new Date('2026-11-14T00:00:00+03:00'));
+test('earnings week changes at Saturday 17:00 in Nairobi', () => {
+  const beforeCutoff = currentSaturdayThroughFridayRange(new Date('2026-11-14T16:59:59.999+03:00'));
+  const atCutoff = currentSaturdayThroughFridayRange(new Date('2026-11-14T17:00:00+03:00'));
+  const lastWeek = mostRecentSaturdayThroughFridayRange(new Date('2026-11-14T17:00:00+03:00'));
 
-  assert.equal(new Date(justBeforeMidnight.from).toISOString(), '2026-11-06T21:00:00.000Z');
-  assert.equal(new Date(atMidnight.from).toISOString(), '2026-11-13T21:00:00.000Z');
-  assert.equal(lastWeek.from, justBeforeMidnight.from);
-  assert.equal(lastWeek.to, atMidnight.from);
+  assert.equal(new Date(beforeCutoff.from).toISOString(), '2026-11-07T14:00:00.000Z');
+  assert.equal(new Date(atCutoff.from).toISOString(), '2026-11-14T14:00:00.000Z');
+  assert.equal(lastWeek.from, beforeCutoff.from);
+  assert.equal(lastWeek.to, atCutoff.from);
 });
 
 test('linked earnings follow appointment date when the order is entered after the payroll cutoff', () => {
-  const range = mostRecentSaturdayThroughFridayRange(new Date('2026-11-07T12:00:00+03:00'));
-  const orderCreatedOnSaturday = orderAt(new Date('2026-11-07T09:24:49+03:00').getTime(), {
+  const range = currentSaturdayThroughFridayRange(new Date('2026-11-07T12:00:00+03:00'));
+  const orderCreatedOnSaturday = orderAt(new Date('2026-11-07T18:24:49+03:00').getTime(), {
     staffId: 'alice', commission: 900,
   }, { id: 'alice-order', appointmentId: 'alice-appointment' });
-  const walkInCreatedOnSaturday = orderAt(new Date('2026-11-07T09:25:00+03:00').getTime(), {
+  const walkInCreatedOnSaturday = orderAt(new Date('2026-11-07T18:25:00+03:00').getTime(), {
     staffId: 'walk-in', commission: 600,
   }, { id: 'walk-in-order' });
   const appointments = [{ id: 'alice-appointment', date: '2026-11-06', status: 'completed', staffId: 'alice' }];
