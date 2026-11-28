@@ -55,6 +55,7 @@ function Finance() {
   const [earningsDeleteRange, setEarningsDeleteRange] = useState({ from: '', to: '' });
   const [form, setForm] = useState({ category: 'Supplies', amount: 0, note: '', date: new Date().toISOString().slice(0, 10) });
   const [breakdownStaff, setBreakdownStaff] = useState<Staff | null>(null);
+  const [breakdownPeriod, setBreakdownPeriod] = useState<'current' | 'last-week'>('current');
   const [breakdown, setBreakdown] = useState<WeeklyStaffWorkReport | null>(null);
   const [breakdownLoading, setBreakdownLoading] = useState(false);
   const [breakdownError, setBreakdownError] = useState('');
@@ -207,8 +208,11 @@ function Finance() {
   const staffEarningsKES = data?.commissionsByCurrency.KES || 0;
   const profitKES = data?.estimatedProfitByCurrency.KES || 0;
   const payrollDateFormatter = new Intl.DateTimeFormat(undefined, { timeZone: 'Africa/Nairobi' });
+  const payrollDateTimeFormatter = new Intl.DateTimeFormat(undefined, {
+    timeZone: 'Africa/Nairobi', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  });
   const currentPayrollDateRange = payrollPeriod
-    ? `${payrollDateFormatter.format(new Date(payrollPeriod.from))} – ${payrollDateFormatter.format(new Date(Math.max(payrollPeriod.from, payrollPeriod.to - 1)))}`
+    ? `${payrollDateTimeFormatter.format(new Date(payrollPeriod.from))} – ${payrollDateTimeFormatter.format(new Date(Math.max(payrollPeriod.from, payrollPeriod.to - 1)))} EAT`
     : 'Saturday 17:00 through the following Saturday 17:00 EAT';
   const lastWeekDateRange = lastWeekPeriod
     ? `${payrollDateFormatter.format(new Date(lastWeekPeriod.from))} – ${payrollDateFormatter.format(new Date(Math.max(lastWeekPeriod.from, lastWeekPeriod.to - 1)))}`
@@ -236,18 +240,19 @@ function Finance() {
     };
   }).sort((first, second) => second.commission + second.assistantEarnings - first.commission - first.assistantEarnings
     || first.member.name.localeCompare(second.member.name));
-  const openBreakdown = async (member: Staff) => {
+  const openBreakdown = async (member: Staff, period: 'current' | 'last-week' = 'current') => {
     setBreakdownStaff(member);
+    setBreakdownPeriod(period);
     setBreakdown(null);
     setBreakdownError('');
     setBreakdownLoading(true);
-    try { setBreakdown(await AppointmentsApi.staffWeeklyWork(member.id)); }
+    try { setBreakdown(await AppointmentsApi.staffWeeklyWork(member.id, undefined, period === 'last-week' ? 'last-week' : undefined)); }
     catch (cause: any) { setBreakdownError(cause?.message || 'Could not load this staff member’s appointment earnings.'); }
     finally { setBreakdownLoading(false); }
   };
   const closeBreakdown = () => { setBreakdownStaff(null); setBreakdown(null); setBreakdownError(''); };
   const breakdownLines = breakdown?.services.flatMap(service => service.distribution
-    .filter(line => line.staffId === breakdownStaff?.id)
+    .filter(line => line.staffId === breakdownStaff?.id && !line.paid)
     .map(line => ({ service, line }))) || [];
   const breakdownCommission = breakdownLines.filter(({ line }) => line.role !== 'assistant').reduce((sum, item) => sum + item.line.amount, 0);
   const breakdownAssistant = breakdownLines.filter(({ line }) => line.role === 'assistant').reduce((sum, item) => sum + item.line.amount, 0);
@@ -392,12 +397,12 @@ function Finance() {
         {paystackConfigured ? <p className="mb-3 text-xs text-[#6E6E73]">Live Paystack KES transfers are configured. Sync recipients before sending; each click submits one bulk transfer request to their registered M-PESA numbers.</p> : <p className="mb-3 text-xs text-[#6E6E73]">Paystack payroll requires a live secret key in the backend environment.</p>}
         {paystackConfigured && paystackRecipientsMissingCount > 0 && <p role="status" className="mb-3 text-xs text-amber-700">{paystackRecipientsMissingCount} staff recipient{paystackRecipientsMissingCount === 1 ? '' : 's'} need syncing before Paystack can send.</p>}
         {!payrollLoading && !payrollError && <div className="my-4 flex flex-col gap-1 border-y border-black/10 py-3 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-sm font-semibold">Paystack deposit needed</p><p className="text-xs text-[#6E6E73]">Unpaid KES earnings from last week ({lastWeekDateRange}) for {paystackRecipients.length} staff member{paystackRecipients.length === 1 ? '' : 's'}, rounded per person.</p></div><p className="text-lg font-semibold">{fmtMoney(paystackDepositTotalKES, 'KES')}</p></div>}
-        {payrollLoading ? <p className="text-sm text-[#6E6E73]">Loading staff payroll…</p> : payrollError ? <p role="alert" className="text-sm text-amber-700">{payrollError} Use “Refresh payroll” to try again.</p> : payrollStaff.length === 0 ? <p className="text-sm text-[#6E6E73]">No active staff records were returned for payroll.</p> : <div className="space-y-2">{payrollStaff.map(member => { const commission = member.commissionEarnedWeek || 0; const assistant = member.assistantEarnedWeek || 0; const calculated = Math.round(commission + assistant); return <div key={member.id} className="flex items-center justify-between gap-3 border-b border-black/5 pb-2"><div><p className="text-sm font-medium">{member.name}</p><p className="text-xs text-[#6E6E73]">{member.phone || 'No phone number'} · {member.branchName || member.branch}</p><p className="text-xs text-[#6E6E73]">Commission {fmtMoney(commission, 'KES')} + assistant compensation {fmtMoney(assistant, 'KES')}</p></div><p className="font-semibold text-sm">{fmtMoney(calculated, 'KES')}</p></div>; })}</div>}
+        {payrollLoading ? <p className="text-sm text-[#6E6E73]">Loading staff payroll…</p> : payrollError ? <p role="alert" className="text-sm text-amber-700">{payrollError} Use “Refresh payroll” to try again.</p> : payrollStaff.length === 0 ? <p className="text-sm text-[#6E6E73]">No active staff records were returned for payroll.</p> : <><div className="space-y-2">{payrollStaff.map(member => { const commission = member.commissionEarnedWeek || 0; const assistant = member.assistantEarnedWeek || 0; const calculated = Math.round(commission + assistant); return <div key={member.id} className="flex items-center justify-between gap-3 border-b border-black/5 pb-2"><div><p className="text-sm font-medium">{member.name}</p><p className="text-xs text-[#6E6E73]">{member.phone || 'No phone number'} · {member.branchName || member.branch}</p><p className="text-xs text-[#6E6E73]">Commission {fmtMoney(commission, 'KES')} + assistant compensation {fmtMoney(assistant, 'KES')}</p></div><div className="flex items-center gap-3"><p className="font-semibold text-sm">{fmtMoney(calculated, 'KES')}</p><Button size="sm" variant="secondary" onClick={() => openBreakdown(member, 'last-week')}><Search size={14} aria-hidden="true" />Open</Button></div></div>; })}</div><div className="flex justify-between border-t border-black/10 pt-3 text-sm font-semibold"><span>Payroll sheet total (rounded per person)</span><span>{fmtMoney(payrollStaff.reduce((sum, member) => sum + Math.round(totalUnpaidEarnings(member)), 0), 'KES')}</span></div></>}
       </Card>
 
-      {breakdownStaff && <Modal title={`${breakdownStaff.name} unpaid earnings`} onClose={closeBreakdown} footer={<Button variant="secondary" onClick={closeBreakdown}>Close</Button>}>
+      {breakdownStaff && <Modal title={`${breakdownStaff.name} ${breakdownPeriod === 'last-week' ? 'last-week' : 'current-week'} unpaid earnings`} onClose={closeBreakdown} footer={<Button variant="secondary" onClick={closeBreakdown}>Close</Button>}>
         <div className="space-y-4">
-          <p className="text-sm text-[#6E6E73]">Unpaid KES earnings from completed appointments for {selectedEarningsLabel}. Already-paid earnings are excluded.</p>
+          <p className="text-sm text-[#6E6E73]">Unpaid KES earnings from completed appointments for {breakdownPeriod === 'last-week' ? lastWeekDateRange : currentPayrollDateRange}. Already-paid earnings are excluded.</p>
           {breakdownLoading ? <LoadingState label="Loading unpaid earnings…" /> : breakdownError ? <p role="alert" className="text-sm text-amber-700">{breakdownError}</p> : !breakdownLines.length ? <p className="text-sm text-[#6E6E73]">No unpaid earnings were found in this period.</p> : <>
             <div className="grid grid-cols-3 gap-3"><div className="rounded-xl bg-black/[0.03] p-3"><p className="text-xs text-[#6E6E73]">Appointments</p><p className="text-lg font-semibold">{breakdownLines.length}</p></div><div className="rounded-xl bg-black/[0.03] p-3"><p className="text-xs text-[#6E6E73]">Commission</p><p className="text-lg font-semibold">{fmtMoney(breakdownCommission, 'KES')}</p></div><div className="rounded-xl bg-black/[0.03] p-3"><p className="text-xs text-[#6E6E73]">Assistant</p><p className="text-lg font-semibold">{fmtMoney(breakdownAssistant, 'KES')}</p></div></div>
             <div className="max-h-[55vh] overflow-y-auto divide-y divide-black/5">{breakdownLines.map(({ service, line }, index) => <div key={`${service.orderId}-${line.itemKey}-${index}`} className="py-3"><div className="flex items-start justify-between gap-3"><div><p className="text-sm font-medium">{service.serviceName} · {service.customerName}</p><p className="text-xs text-[#6E6E73]">{service.appointmentDate || 'No appointment date'}{service.appointmentTime ? ` at ${service.appointmentTime}` : ''}{service.cardNumber ? ` · Card ${service.cardNumber}` : ''} · {line.role.replace('-', ' ')} · {service.appointmentStatus || 'completed'}</p></div><p className="shrink-0 text-sm font-semibold">{fmtMoney(line.amount, 'KES')}</p></div><p className="mt-1 text-xs text-[#6E6E73]">Revenue {fmtMoney(service.serviceRevenue, 'KES')} · commission base {fmtMoney(service.commissionBase, 'KES')} · order {service.orderId.slice(0, 8)}</p></div>)}</div>

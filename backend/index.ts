@@ -1426,7 +1426,11 @@ export const handler = router({
     const selectedStaff = data.staff.filter(member => String(member.id) === staffId);
     if (!selectedStaff.length) return error('Staff member not found', 404);
     const staffById = new Map((data.staffById as Map<string, any>));
-    const allLines = calculateUnpaidStaffEarnings(data.orders, [], data.appointments, range.from, rangeTo);
+    const orderLines = calculateUnpaidStaffEarnings(data.orders, [], data.appointments, range.from, rangeTo);
+    const appointmentLines = data.staff.flatMap(member => completedAppointmentStaffEarnings(
+      data.appointments, data.orders, String(member.id), range.from, rangeTo, data.payoutItems, data.payrollItems,
+    ));
+    const allLines = [...orderLines, ...appointmentLines];
     const paidItems = data.payrollItems.length ? paystackConfirmedPayoutItems(data.payoutItems, data.payrollItems) : data.payoutItems.filter(item => !item.deletedAt);
     const paidKeys = new Set(paidItems.map(item => String(item.itemKey || '')));
     const appointmentsById = new Map(data.appointments.map(item => [String(item.id), item]));
@@ -1451,6 +1455,43 @@ export const handler = router({
           customerName: order.customerName || appointment?.customerName || 'Customer', appointmentStatus: appointment?.status || null,
           serviceName: String(item.name || 'Service'), qty: Number(item.qty || 1), serviceRevenue,
           productCost: Math.max(0, Number(item.productCost || 0)), assistantFee,
+          commissionBase: Math.max(0, Number(item.commissionBase ?? serviceRevenue - Number(item.productCost || 0) - assistantFee) || 0),
+          distribution,
+        });
+      }
+    }
+    const orderedAppointmentIds = new Set(data.orders.filter(order => !order.deletedAt && order.appointmentId)
+      .map(order => String(order.appointmentId)));
+    for (const appointment of data.appointments) {
+      const appointmentId = String(appointment.id || '');
+      if (!appointmentId || appointment.deletedAt || String(appointment.status || '').toLowerCase() !== 'completed'
+        || orderedAppointmentIds.has(appointmentId)) continue;
+      const appointmentOrderId = `appointment:${appointmentId}`;
+      const serviceItems = Array.isArray(appointment.items) && appointment.items.length
+        ? appointment.items
+        : [{ name: appointment.serviceName, price: appointment.price, currency: appointment.currency, staffId: appointment.staffId }];
+      for (const [index, item] of serviceItems.entries()) {
+        if (item.type && item.type !== 'service') continue;
+        const baseKey = `${appointmentOrderId}:${index}:`;
+        const earningLines = appointmentLines.filter(line => line.orderId === appointmentOrderId && line.itemKey.startsWith(baseKey));
+        const distribution = earningLines.map(line => ({
+          itemKey: line.itemKey,
+          staffId: line.staffId,
+          staffName: staffById.get(line.staffId)?.name || 'Unknown staff',
+          role: line.role === 'assistant' ? 'assistant' : String(item.coStaffId || '') === line.staffId ? 'co-staff'
+            : String(item.thirdStaffId || '') === line.staffId ? 'third-staff' : 'primary',
+          amount: line.amount,
+          paid: paidKeys.has(line.itemKey),
+        }));
+        if (!distribution.some(line => line.staffId === staffId)) continue;
+        const serviceRevenue = Number(item.lineTotalAfterDiscount ?? Number(item.price ?? appointment.price ?? 0) * Number(item.qty || 1)) || 0;
+        const assistantFee = Math.max(0, Number(item.assistantPayment ?? item.helperDeduction ?? 0));
+        services.push({
+          orderId: appointmentOrderId, createdAt: Number(appointment.completedAt || appointment.updatedAt || appointment.createdAt || 0),
+          appointmentId, appointmentDate: appointment.date || null, appointmentTime: appointment.time || null,
+          cardNumber: appointment.cardNumber || null, customerName: appointment.customerName || 'Customer',
+          appointmentStatus: appointment.status || null, serviceName: String(item.name || item.serviceName || appointment.serviceName || 'Service'),
+          qty: Number(item.qty || 1), serviceRevenue, productCost: Math.max(0, Number(item.productCost || 0)), assistantFee,
           commissionBase: Math.max(0, Number(item.commissionBase ?? serviceRevenue - Number(item.productCost || 0) - assistantFee) || 0),
           distribution,
         });
