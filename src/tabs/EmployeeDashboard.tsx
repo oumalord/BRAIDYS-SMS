@@ -80,6 +80,9 @@ function EmployeeDashboard({ account, onAddService }: { account: { name?: string
   if (!account.staffId) return <EmptyState icon={AlertTriangle} title="Employee profile is not linked" description="Ask the salon owner to link your employee account before using the dashboard." />;
 
   const unpaidCompletedWork = lastWeekWork.filter(work => work.amount > 0);
+  const lastWeekDateRange = lastWeekPeriod
+    ? `${new Intl.DateTimeFormat('en-GB', { timeZone: 'Africa/Nairobi', day: '2-digit', month: '2-digit', year: 'numeric' }).format(new Date(lastWeekPeriod.from))}–${new Intl.DateTimeFormat('en-GB', { timeZone: 'Africa/Nairobi', day: '2-digit', month: '2-digit', year: 'numeric' }).format(new Date(lastWeekPeriod.to - 1))} EAT`
+    : 'Saturday through Friday EAT';
   const completedAppointments = appointments.filter(appointment => appointment.status === 'completed' || appointment.paymentCompleted === true)
     .sort((first, second) => `${second.date} ${second.time}`.localeCompare(`${first.date} ${first.time}`));
   const earningAppointmentIds = new Set(unpaidCompletedWork.map(work => work.appointmentId).filter((id): id is string => Boolean(id)));
@@ -114,13 +117,13 @@ function EmployeeDashboard({ account, onAddService }: { account: { name?: string
 
       <Card className="p-5">
         <h2 className="font-semibold mb-1">Last Week’s Unpaid Earnings</h2>
-        <p className="mb-3 text-xs text-[#6E6E73]">Completed Saturday-to-Friday appointments with unpaid commission or assistant compensation. Earnings disappear only after Paystack confirms success.</p>
+        <p className="mb-3 text-xs text-[#6E6E73]">{lastWeekDateRange}. Completed appointments with unpaid commission or assistant compensation. Earnings disappear only after Paystack confirms success.</p>
         {earningsLoading ? <p className="text-sm text-[#6E6E73]">Loading…</p> : earningsError ? <p role="status" className="text-sm text-amber-700">{earningsError}</p> : unpaidCompletedWork.length === 0 ? <p className="text-sm text-[#6E6E73]">No unpaid service earnings this week</p> : <div className="space-y-2">{unpaidCompletedWork.map((work, index) => <div key={`${work.createdAt}-${work.serviceName}-${index}`} className="flex items-center justify-between gap-3 border-b border-black/5 pb-2 last:border-0"><div><p className="text-sm font-medium">{work.customerName} · {work.serviceName}</p><p className="text-xs text-[#6E6E73]">{work.appointmentDate || new Date(work.createdAt).toLocaleDateString()}{work.appointmentTime ? ` at ${work.appointmentTime}` : ''}{work.cardNumber ? ` · Card ${work.cardNumber}` : ''} · {work.role === 'assistant' ? 'assistant compensation' : 'commission'}</p></div><p className="shrink-0 text-sm font-semibold">{fmtExactKES(work.amount)}</p></div>)}</div>}
       </Card>
 
       <Card className="p-5">
         <h2 className="font-semibold mb-1">Last Week’s Earnings</h2>
-        <p className="mb-3 text-xs text-[#6E6E73]">Your total earnings from the previous week, including commission and assistant compensation.</p>
+        <p className="mb-3 text-xs text-[#6E6E73]">{lastWeekDateRange}. Your unpaid commission and assistant compensation from the previous week.</p>
         {earningsLoading ? <p className="text-sm text-[#6E6E73]">Loading…</p> : earningsError ? <p role="status" className="text-sm text-amber-700">{earningsError}</p> : <p className="text-xl font-semibold mt-1">{fmtExactKES(lastWeekEarnings)}</p>}
       </Card>
 
